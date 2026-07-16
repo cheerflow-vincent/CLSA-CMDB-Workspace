@@ -18,7 +18,8 @@ export interface AppItem {
   id: string;
   name: string;
   app: string;
-  family: string; // matches AppFamily.id
+  /** matches AppFamily.id; optional so portal and older code stays compatible */
+  family?: string;
   dept: string;
   env: string;
   status: string;

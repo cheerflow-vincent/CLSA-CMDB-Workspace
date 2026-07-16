@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build:css": "tailwindcss -i ./src/client/index.css -o ./src/client/tailwind.css --minify && tailwindcss -i ./src/client-portal/index.css -o ./src/client-portal/tailwind.css --minify",
+    "build:css": "tailwindcss -i ./src/client/index.css -o ./src/client/tailwind.css --minify",
     "build": "npm run build:css && npx now-sdk build",
     "deploy": "npm run build && npx now-sdk install",
     "auth": "npx now-sdk auth --add https://dev204322.service-now.com --type basic"

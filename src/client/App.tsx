@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Server, Database, CircuitBoard, Network, Layout,
   Search, ChevronRight, ChevronLeft, Menu, Loader2,
+  FileSearch, Home, ArrowLeft,
 } from 'lucide-react';
 import CISearchView from './app/components/CISearchView';
 import ApplicationHome from './app/components/ApplicationHome';
@@ -11,7 +12,7 @@ import GlobalSearchBar from './app/components/GlobalSearchBar';
 import { type AppItem } from './app/data/appData';
 import { queryTable } from './api/servicenow';
 
-type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' | 'dashboard' | 'network-links';
+type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' | 'dashboard' | 'network-links' | 'not-found';
 
 interface Props { username: string }
 
@@ -82,6 +83,7 @@ export function App({ username }: Props) {
   const [selectedApp, setSelectedApp] = useState<AppItem | null>(null);
   const [selectedCI,  setSelectedCI]  = useState<CIItem  | null>(null);
   const [ciSource, setCISource]       = useState<'ci-search' | 'app-details'>('ci-search');
+  const [notFoundCtx, setNotFoundCtx] = useState<{ table: string; sysId: string } | null>(null);
 
   const initials = username.split('.').map(p => p.charAt(0).toUpperCase()).join('').slice(0, 2);
 
@@ -101,7 +103,11 @@ export function App({ username }: Props) {
     })
       .then(({ result }) => {
         const r = result?.[0];
-        if (!r) { setCurrentView('ci-search'); return; }
+        if (!r) {
+          setNotFoundCtx({ table, sysId });
+          setCurrentView('not-found');
+          return;
+        }
 
         if (isServiceClass(table)) {
           setSelectedApp({
@@ -127,7 +133,10 @@ export function App({ username }: Props) {
           setCurrentView('ci-detail');
         }
       })
-      .catch(() => setCurrentView('ci-search'));
+      .catch(() => {
+        setNotFoundCtx({ table, sysId });
+        setCurrentView('not-found');
+      });
   }
 
   // ── Initial deep-link / page-param fetch ─────────────────────────────────
@@ -182,7 +191,7 @@ export function App({ username }: Props) {
   const handleSelectApp = (app: AppItem) => {
     setSelectedApp(app);
     setCurrentView('app-details');
-    pushUrl(app.table ?? 'cmdb_ci_service_auto', app.sysId ?? app.id);
+    pushUrl(app.table ?? 'cmdb_ci_service', app.sysId ?? app.id);
   };
 
   const handleViewCI = (ci: CIItem, source: 'ci-search' | 'app-details') => {
@@ -312,7 +321,65 @@ export function App({ username }: Props) {
             {currentView === 'network-links' && (
               <div className="p-6 text-gray-500 text-sm">Network Links — coming soon.</div>
             )}
+            {currentView === 'not-found' && (
+              <NotFoundView
+                table={notFoundCtx?.table ?? ''}
+                sysId={notFoundCtx?.sysId ?? ''}
+                onGoHome={() => { navTo('app-home'); }}
+                onGoSearch={() => { navTo('ci-search'); }}
+              />
+            )}
           </main>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Record not found ─────────────────────────────────────────────────────────
+function NotFoundView({ table, sysId, onGoHome, onGoSearch }: {
+  table: string; sysId: string;
+  onGoHome: () => void; onGoSearch: () => void;
+}) {
+  return (
+    <div className="flex-1 h-full flex items-center justify-center p-12">
+      <div className="max-w-md w-full text-center">
+        <div className="flex justify-center mb-6">
+          <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center">
+            <FileSearch className="w-10 h-10 text-gray-400" />
+          </div>
+        </div>
+        <h2 className="text-2xl font-semibold text-gray-900 mb-2">Record Not Found</h2>
+        <p className="text-gray-500 mb-2">
+          The requested configuration item could not be found in the CMDB.
+        </p>
+        {sysId && (
+          <div className="mt-4 mb-6 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-left space-y-1">
+            <div className="flex gap-3 text-sm">
+              <span className="text-gray-400 w-16 shrink-0">Table</span>
+              <span className="font-mono text-gray-700 break-all">{table || '—'}</span>
+            </div>
+            <div className="flex gap-3 text-sm">
+              <span className="text-gray-400 w-16 shrink-0">Sys ID</span>
+              <span className="font-mono text-gray-700 break-all">{sysId}</span>
+            </div>
+          </div>
+        )}
+        <div className="flex gap-3 justify-center">
+          <button
+            onClick={onGoHome}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Home className="w-4 h-4" />
+            App Home
+          </button>
+          <button
+            onClick={onGoSearch}
+            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            CI Search
+          </button>
         </div>
       </div>
     </div>

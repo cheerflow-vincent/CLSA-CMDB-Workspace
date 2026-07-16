@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Search, Server, Database, DollarSign,
-  AlertCircle, Calendar, ChevronLeft, ChevronRight, ChevronDown,
+  AlertCircle, Calendar, ChevronLeft, ChevronRight, ChevronDown, Loader2,
 } from 'lucide-react';
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE } from './RelationshipDiagram';
 import type { DiagramFilters } from './RelationshipDiagram';
@@ -10,6 +10,11 @@ import EditRelationshipModal from './EditRelationshipModal';
 import AppSearchHeader from './AppSearchHeader';
 import { type AppItem } from '../data/appData';
 import type { CIItem } from './CIDetailView';
+import { type ViewField, str, loadViewFields } from '../utils/viewFields';
+import { queryTable } from '../../api/servicenow';
+
+const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
+const OVERVIEW_DEFAULT_LIMIT = 10;
 
 // ── Panel mock data ───────────────────────────────────────────────────────────
 const APP_SERVERS = [
@@ -125,6 +130,40 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [expanded, setExpanded] = useState<Record<ExpandKey, boolean>>({
     servers: false, databases: false, incidents: false, changes: false,
   });
+
+  // ── Overview panel: dynamic view fields ──────────────────────────────────
+  const [overviewFields, setOverviewFields] = useState<ViewField[]>([]);
+  const [overviewValues, setOverviewValues] = useState<Record<string, string>>({});
+  const [overviewLoading, setOverviewLoading] = useState(false);
+
+  useEffect(() => {
+    const sysId = selectedApp?.sysId;
+    const table  = selectedApp?.table ?? 'cmdb_ci_service';
+    if (!sysId) return;
+
+    setOverviewLoading(true);
+    setOverviewFields([]);
+    setOverviewValues({});
+
+    loadViewFields(table, OVERVIEW_VIEW, OVERVIEW_DEFAULT_LIMIT)
+      .then(async fields => {
+        setOverviewFields(fields);
+        // fetch the actual field values for this record
+        const { result } = await queryTable<Record<string, unknown>>({
+          table,
+          query:  `sys_id=${sysId}`,
+          fields: fields.map(f => f.element),
+          displayValue: true,
+          limit: 1,
+        });
+        const rec = result?.[0] ?? {};
+        const vals: Record<string, string> = {};
+        fields.forEach(f => { vals[f.element] = str(rec[f.element]); });
+        setOverviewValues(vals);
+      })
+      .catch(() => {})
+      .finally(() => setOverviewLoading(false));
+  }, [selectedApp?.sysId, selectedApp?.table]);
 
   const toggleFilter = (key: keyof DiagramFilters) =>
     setFilters(f => ({ ...f, [key]: !f[key] }));
@@ -260,7 +299,9 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 {/* Sticky header */}
                 <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-2.5">
                   <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-                  <span className="flex-1 text-sm font-semibold text-gray-900 truncate">ES - Cobra HK (HUB)</span>
+                  <span className="flex-1 text-sm font-semibold text-gray-900 truncate">
+                    {selectedApp?.name ?? '—'}
+                  </span>
                   <button onClick={() => setDetailsPanelOpen(false)}
                     className="p-1 hover:bg-gray-100 rounded flex-shrink-0">
                     <ChevronRight className="w-4 h-4 text-gray-500" />
@@ -272,20 +313,24 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   {/* ── Overview ── */}
                   <section>
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Overview</p>
-                    <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
-                      {[
-                        { label: 'Support Group', value: 'ES - Tech Ops'                },
-                        { label: 'Coordinator',   value: 'ES - Coordinator Group'        },
-                        { label: 'TechOps Owner', value: 'Bhaskar Baruah'              },
-                        { label: 'IT Department', value: 'Execution Services'            },
-                        { label: 'Description',   value: 'Single Order Management System'},
-                      ].map(({ label, value }) => (
-                        <div key={label} className="flex gap-3 px-3 py-2">
-                          <dt className="text-xs text-gray-400 flex-shrink-0 w-28 pt-px">{label}</dt>
-                          <dd className="text-xs text-gray-800 leading-snug">{value}</dd>
-                        </div>
-                      ))}
-                    </div>
+                    {overviewLoading ? (
+                      <div className="flex items-center justify-center py-6 text-gray-400 gap-2 text-xs">
+                        <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+                      </div>
+                    ) : overviewFields.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic px-1">No overview fields configured.</p>
+                    ) : (
+                      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+                        {overviewFields.map(({ element, label }) => (
+                          <div key={element} className="flex gap-3 px-3 py-2">
+                            <dt className="text-xs text-gray-400 flex-shrink-0 w-28 pt-px">{label}</dt>
+                            <dd className="text-xs text-gray-800 leading-snug break-words min-w-0">
+                              {overviewValues[element] || '—'}
+                            </dd>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </section>
 
                   {/* ── Infrastructure ── */}

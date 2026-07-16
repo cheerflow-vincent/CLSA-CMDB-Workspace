@@ -109,10 +109,10 @@ function mapRecord(r: Record<string,string>, cfg: Pick<V2TabCfg,'label'|'subtitl
   };
 }
 
-type PillCounts = { servers: number; switches: number; databases: number; circuits: number; businessServices: number };
-const DEFAULT_COUNTS: PillCounts = { servers: 1240, switches: 385, databases: 452, circuits: 98, businessServices: 206 };
+type PillCounts = { servers: number | null; switches: number | null; databases: number | null; circuits: number | null; businessServices: number | null };
+const EMPTY_COUNTS: PillCounts = { servers: null, switches: null, databases: null, circuits: null, businessServices: null };
 
-type PillDef = { tab: Tab; label: string; count: number; icon: JSX.Element; accent: string; iconBg: string };
+type PillDef = { tab: Tab; label: string; count: number | null; icon: JSX.Element; accent: string; iconBg: string };
 const buildPills = (c: PillCounts): PillDef[] => [
   { tab: 'servers',           label: 'Servers',           count: c.servers,          icon: <Server       className="w-5 h-5 text-blue-600"   />, accent: 'border-blue-500   bg-blue-50',   iconBg: 'bg-blue-100'   },
   { tab: 'switches',          label: 'Switches',          count: c.switches,          icon: <Network      className="w-5 h-5 text-green-600"  />, accent: 'border-green-500  bg-green-50',  iconBg: 'bg-green-100'  },
@@ -334,19 +334,17 @@ const emptyPending = (): PendingFilters => ({ keyword: '', ciType: '', environme
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function CISearchView({ onViewDetails }: CISearchViewProps) {
-  const isV2 = window.location.pathname.includes('_v2');
   const [activeTab, setActiveTab] = useState<Tab>('all');
   const [pending, setPending]     = useState<PendingFilters>(emptyPending());
   const [applied, setApplied]     = useState<PendingFilters>(emptyPending());
   const [colFilters, setColFilters] = useState({ name: '', type: '', environment: '', location: '', owner: '', supportGroup: '', lastModified: '' });
   const [panel, setPanel] = useState<PanelInfo | null>(null);
-  const [pillCounts, setPillCounts] = useState<PillCounts>(DEFAULT_COUNTS);
+  const [pillCounts, setPillCounts] = useState<PillCounts>(EMPTY_COUNTS);
   const [liveData, setLiveData]     = useState<DisplayRecord[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
 
-  // v2: fetch all pill counts in parallel on mount
+  // fetch all pill counts in parallel on mount
   useEffect(() => {
-    if (!isV2) return;
     const entries: [string, keyof PillCounts][] = [
       ['cmdb_ci_server',           'servers'],
       ['cmdb_ci_ip_switch',        'switches'],
@@ -358,13 +356,12 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
         .then(({ totalCount }) => setPillCounts(p => ({ ...p, [key]: totalCount })))
         .catch(() => {})
     );
-  }, [isV2]);
+  }, []);
 
-  // v2: fetch records whenever the active tab changes
+  // fetch records whenever the active tab changes
   useEffect(() => {
-    if (!isV2) return;
     loadTab(activeTab, '');
-  }, [activeTab, isV2]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadTab(tab: Tab, keyword: string) {
     const snQuery = keyword ? `nameLIKE${keyword}` : '';
@@ -415,19 +412,10 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
 
   const handleSearch = () => {
     setApplied({ ...pending });
-    if (isV2) loadTab(activeTab, pending.keyword);
+    loadTab(activeTab, pending.keyword);
   };
 
-  const filteredData = isV2 ? liveData : mockData.filter(item => {
-    const typeMatch = tabTypeMap[activeTab] === null || item.type === tabTypeMap[activeTab];
-    const kw = applied.keyword.toLowerCase();
-    const kwMatch = !kw || item.name.toLowerCase().includes(kw) || item.class.toLowerCase().includes(kw) || item.owner.toLowerCase().includes(kw);
-    const ciTypeMatch = !applied.ciType || item.type === applied.ciType;
-    const envMatch = applied.environment.length === 0 || applied.environment.includes(item.environment);
-    const locMatch = applied.location.length === 0 || applied.location.includes(item.location);
-    const sgMatch  = applied.supportGroup.length === 0 || applied.supportGroup.includes(item.supportGroup);
-    return typeMatch && kwMatch && ciTypeMatch && envMatch && locMatch && sgMatch;
-  });
+  const filteredData = liveData;
 
   const displayData = filteredData.filter(item => {
     const cf = colFilters;
@@ -468,7 +456,10 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded shrink-0 ${iconBg}`}>{icon}</div>
                 <div>
-                  <p className="text-2xl font-semibold text-gray-900">{count.toLocaleString()}</p>
+                  {count === null
+                    ? <div className="h-7 w-16 bg-gray-200 animate-pulse rounded mb-1" />
+                    : <p className="text-2xl font-semibold text-gray-900">{count.toLocaleString()}</p>
+                  }
                   <p className="text-sm text-gray-600">{label}</p>
                 </div>
               </div>
@@ -534,9 +525,9 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
                 className={`py-3 whitespace-nowrap border-b-2 transition-colors text-sm ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                 {tabLabels[tab]}
                 <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {isV2
-                    ? (tab === activeTab ? displayData.length : ({ servers: pillCounts.servers, switches: pillCounts.switches, databases: pillCounts.databases, circuits: pillCounts.circuits, 'business-services': pillCounts.businessServices } as Record<string, number>)[tab] ?? '')
-                    : (tab === 'all' ? mockData.length : mockData.filter(d => d.type === tabTypeMap[tab]).length)}
+                  {tab === activeTab
+                    ? displayData.length
+                    : (({ servers: pillCounts.servers, switches: pillCounts.switches, databases: pillCounts.databases, circuits: pillCounts.circuits, 'business-services': pillCounts.businessServices } as Record<string, number | null>)[tab] ?? '—')}
                 </span>
               </button>
             ))}

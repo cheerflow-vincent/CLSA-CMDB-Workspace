@@ -55,6 +55,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: '84d40fa54e25459c839f6c58c714ab32'
+                        deleted: true
                         key: {
                             application_file: '5f9b13b8c99747878f8217b837ffb95b'
                             source_artifact: 'c434b02860ec483897a32e470d737de0'
@@ -63,6 +64,7 @@ declare global {
                     {
                         table: 'sys_ui_page'
                         id: '9dca87668740407c9f31d9848f061194'
+                        deleted: true
                         key: {
                             endpoint: 'x_citi4_clsa_cmd_0_cmdb_portal_v2.do'
                         }
@@ -86,6 +88,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'baff0e23b1274fa2a3e2fc351004d2e6'
+                        deleted: true
                         key: {
                             application_file: '9dca87668740407c9f31d9848f061194'
                             source_artifact: 'c434b02860ec483897a32e470d737de0'
@@ -94,6 +97,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'c37c1d26dd214b4ba18f4891bf3c10b3'
+                        deleted: true
                         key: {
                             application_file: '49da06806cc340e3a16d4cf3c6050608'
                             source_artifact: 'c434b02860ec483897a32e470d737de0'
@@ -102,6 +106,7 @@ declare global {
                     {
                         table: 'sn_glider_source_artifact'
                         id: 'c434b02860ec483897a32e470d737de0'
+                        deleted: true
                         key: {
                             name: 'x_citi4_clsa_cmd_0_cmdb_portal_v2.do - BYOUI Files'
                         }
