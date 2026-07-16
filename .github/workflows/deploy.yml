@@ -1,0 +1,33 @@
+name: Build & Deploy to ServiceNow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Tailwind CSS
+        run: npm run build:css
+
+      - name: Build with ServiceNow SDK
+        run: npx now-sdk build
+
+      - name: Install to ServiceNow
+        env:
+          SN_SDK_INSTANCE_URL: ${{ secrets.SN_INSTANCE_URL }}
+          SN_SDK_USER: ${{ secrets.SN_USER }}
+          SN_SDK_USER_PWD: ${{ secrets.SN_PASSWORD }}
+        run: npx now-sdk install

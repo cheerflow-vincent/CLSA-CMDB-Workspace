@@ -1,0 +1,7 @@
+{
+  "scope": "x_citi4_clsa_cmd_0",
+  "scopeId": "ebc616a093ed0fd04130f3e97bba106d",
+  "name": "CLSA CMDB Workspace",
+  "tsconfigPath": "./src/fluent/tsconfig.json",
+  "staticContentDir": "dist/static"
+}

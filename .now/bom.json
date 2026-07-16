@@ -1,0 +1,34 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "serialNumber": "urn:uuid:0ee80b71-c42b-483c-82e1-501e95ef947e",
+  "metadata": {
+    "timestamp": "2026-07-16T03:10:38.177Z",
+    "tools": {
+      "components": [
+        {
+          "type": "library",
+          "name": "sdk-build-plugins",
+          "group": "@servicenow",
+          "version": "4.6.0",
+          "author": "ServiceNow"
+        }
+      ]
+    },
+    "component": {
+      "type": "application",
+      "name": "clsa-cmd-portal",
+      "version": "1.0.0",
+      "bom-ref": "pkg:servicenow/clsa-cmd-portal@1.0.0?sys_scope_id=ebc616a093ed0fd04130f3e97bba106d",
+      "purl": "pkg:servicenow/clsa-cmd-portal@1.0.0?sys_scope_id=ebc616a093ed0fd04130f3e97bba106d"
+    }
+  },
+  "components": [],
+  "dependencies": [
+    {
+      "ref": "pkg:servicenow/clsa-cmd-portal@1.0.0?sys_scope_id=ebc616a093ed0fd04130f3e97bba106d"
+    }
+  ]
+}
