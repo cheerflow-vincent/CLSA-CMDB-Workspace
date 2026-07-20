@@ -25,6 +25,32 @@ declare global {
                 composite: [
                     {
                         table: 'sn_glider_source_artifact_m2m'
+                        id: '12fb838c1b3d46889f6ff29197bc2fac'
+                        deleted: true
+                        key: {
+                            application_file: 'a6ff275af19d4071ae4d4c1d328f08cc'
+                            source_artifact: '6405c54011db45a9b600cb1694d8bdc9'
+                        }
+                    },
+                    {
+                        table: 'sys_ux_lib_asset'
+                        id: '16996cdc9e73446d8e59595680479b3f'
+                        deleted: true
+                        key: {
+                            name: 'x_citi4_clsa_cmd_0/vendor-@xyflow-react--55457671'
+                        }
+                    },
+                    {
+                        table: 'sn_glider_source_artifact_m2m'
+                        id: '1e9248e1b3af404394d1a7c70444d90e'
+                        deleted: true
+                        key: {
+                            application_file: 'dfea020d367a405c90280b9265f38651'
+                            source_artifact: '6405c54011db45a9b600cb1694d8bdc9'
+                        }
+                    },
+                    {
+                        table: 'sn_glider_source_artifact_m2m'
                         id: '3d58a4e54f7045bab6afc836df834205'
                         key: {
                             application_file: 'f4005b3431ff412cb959ec272c5f5f7b'
@@ -36,6 +62,15 @@ declare global {
                         id: '49da06806cc340e3a16d4cf3c6050608'
                         key: {
                             name: 'x_citi4_clsa_cmd_0/main'
+                        }
+                    },
+                    {
+                        table: 'sn_glider_source_artifact_m2m'
+                        id: '5b33a344c25b47eeba275303739ef775'
+                        deleted: true
+                        key: {
+                            application_file: 'f30de00a0a1b4789936f4272f0f780dd'
+                            source_artifact: '6405c54011db45a9b600cb1694d8bdc9'
                         }
                     },
                     {
@@ -70,6 +105,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_ux_lib_asset'
+                        id: 'a6ff275af19d4071ae4d4c1d328f08cc'
+                        deleted: true
+                        key: {
+                            name: 'x_citi4_clsa_cmd_0/vendor-@xyflow-react--55457671.js.map'
+                        }
+                    },
+                    {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'ab277b1c4db0485bb2ed46ea3b142674'
                         key: {
@@ -96,6 +139,15 @@ declare global {
                     },
                     {
                         table: 'sn_glider_source_artifact_m2m'
+                        id: 'c07b8c55021d45a4aa4bc4ffcce26a85'
+                        deleted: true
+                        key: {
+                            application_file: '16996cdc9e73446d8e59595680479b3f'
+                            source_artifact: '6405c54011db45a9b600cb1694d8bdc9'
+                        }
+                    },
+                    {
+                        table: 'sn_glider_source_artifact_m2m'
                         id: 'c37c1d26dd214b4ba18f4891bf3c10b3'
                         deleted: true
                         key: {
@@ -109,6 +161,22 @@ declare global {
                         deleted: true
                         key: {
                             name: 'x_citi4_clsa_cmd_0_cmdb_portal_v2.do - BYOUI Files'
+                        }
+                    },
+                    {
+                        table: 'sys_ux_lib_asset'
+                        id: 'dfea020d367a405c90280b9265f38651'
+                        deleted: true
+                        key: {
+                            name: 'x_citi4_clsa_cmd_0/vendor-lucide-react--3e815e09'
+                        }
+                    },
+                    {
+                        table: 'sys_ux_lib_asset'
+                        id: 'f30de00a0a1b4789936f4272f0f780dd'
+                        deleted: true
+                        key: {
+                            name: 'x_citi4_clsa_cmd_0/vendor-lucide-react--3e815e09.js.map'
                         }
                     },
                     {

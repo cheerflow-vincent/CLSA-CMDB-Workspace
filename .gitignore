@@ -4,3 +4,5 @@ target/
 *.jsdbx
 *.jsdbx.map
 .DS_Store
+.env
+.now/credentials.json

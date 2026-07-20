@@ -7,7 +7,7 @@
     "build:css": "tailwindcss -i ./src/client/index.css -o ./src/client/tailwind.css --minify",
     "build": "npm run build:css && npx now-sdk build",
     "deploy": "npm run build && npx now-sdk install",
-    "auth": "npx now-sdk auth --add https://dev204322.service-now.com --type basic"
+    "auth": "npx now-sdk auth --add https://cheerflowtechnologydemo1.service-now.com --type basic"
   },
   "dependencies": {
     "@xyflow/react": "^12.4.4",
@@ -19,9 +19,10 @@
     "rollup": "^4.60.3"
   },
   "devDependencies": {
-    "@servicenow/sdk": "latest",
+    "@servicenow/sdk": "^4.6.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "^18.3.5",
+    "@xmldom/xmldom": "^0.9.10",
     "autoprefixer": "^10.4.20",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2"

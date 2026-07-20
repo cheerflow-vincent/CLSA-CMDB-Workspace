@@ -89,8 +89,8 @@ interface LiveCoreApp {
 }
 
 /**
- * 2-level hierarchy: an "app family" service (cmdb_ci_service with u_service_type=service)
- * contains "instance" services (cmdb_ci_service with u_service_type=instance).
+ * 2-level hierarchy: an "app family" service (cmdb_ci_service, u_service_type=service)
+ * connects via u_application_environments CIs to "instance" services (cmdb_ci_service, u_service_type=instance).
  */
 interface LiveAppSvc {
   sys_id: string;
@@ -339,7 +339,7 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
   const CORE         = ['sys_id', 'name', 'sys_class_name', 'operational_status', 'environment'];
   const FILTER_EXTRA = ['department', 'u_tier'];
 
-  // 1. Application-type services (Level 1)
+  // 1. Service-type services (Level 1 - app family)
   const { result: appSvcs = [] } = await queryTable<{ sys_id: string; name: string; short_description: string }>({
     table:   SVC_TABLE,
     query:   'u_service_type=service',
@@ -349,11 +349,11 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
   });
   if (!appSvcs.length) return [];
 
-  // 2. Hop 1: app family → intermediate CI  (Connects to::Connected by)
+  // 2. Hop 1: app family → u_application_environments CI  (Connects to::Connected by)
   const appIds = appSvcs.map(s => s.sys_id).join(',');
   const { result: hop1Rels = [] } = await queryTable<{ parent: unknown; child: unknown }>({
     table: 'cmdb_rel_ci',
-    query: `parent.sys_idIN${appIds}^type.name=Connects to::Connected by`,
+    query: `parent.sys_idIN${appIds}^type.name=Connects to::Connected by^child.sys_class_name=u_application_environments`,
     fields: ['parent', 'child'],
     limit: 5000,
   });
