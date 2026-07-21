@@ -344,18 +344,18 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
     table:   SVC_TABLE,
     query:   'u_service_type=service',
     fields:  ['sys_id', 'name', 'short_description'],
-    limit:   200,
+    limit:   10000,
     orderBy: 'name',
   });
   if (!appSvcs.length) return [];
 
-  // 2. Hop 1: app family → u_application_environments CI  (Connects to::Connected by)
+  // 2. Hop 1: app family → intermediate CI  (Connects to::Connected by)
   const appIds = appSvcs.map(s => s.sys_id).join(',');
   const { result: hop1Rels = [] } = await queryTable<{ parent: unknown; child: unknown }>({
     table: 'cmdb_rel_ci',
     query: `parent.sys_idIN${appIds}^type.name=Connects to::Connected by`,
     fields: ['parent', 'child'],
-    limit: 5000,
+    limit: 50000,
   });
   const intermediateIds = [...new Set(hop1Rels.map(r => refId(r.child)).filter(Boolean))];
   if (!intermediateIds.length) return [];
@@ -365,7 +365,7 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
     table: 'cmdb_rel_ci',
     query: `parent.sys_idIN${intermediateIds.join(',')}^type.name=Connects to::Connected by`,
     fields: ['parent', 'child'],
-    limit: 5000,
+    limit: 50000,
   });
   const potentialInstanceIds = [...new Set(hop2Rels.map(r => refId(r.child)).filter(Boolean))];
   if (!potentialInstanceIds.length) return [];
