@@ -353,7 +353,7 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
   const appIds = appSvcs.map(s => s.sys_id).join(',');
   const { result: hop1Rels = [] } = await queryTable<{ parent: unknown; child: unknown }>({
     table: 'cmdb_rel_ci',
-    query: `parent.sys_idIN${appIds}^type.name=Connects to::Connected by^child.sys_class_name=u_application_environments`,
+    query: `parent.sys_idIN${appIds}^type.name=Connects to::Connected by`,
     fields: ['parent', 'child'],
     limit: 5000,
   });
