@@ -339,122 +339,129 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
   const CORE         = ['sys_id', 'name', 'sys_class_name', 'operational_status', 'environment'];
   const FILTER_EXTRA = ['department', 'u_tier'];
 
-  // 1. Service-type services (Level 1 - app family)
-  const { result: appSvcs = [] } = await queryTable<{ sys_id: string; name: string; short_description: string }>({
-    table:   SVC_TABLE,
-    query:   'u_service_type=service',
-    fields:  ['sys_id', 'name', 'short_description'],
-    limit:   10000,
-    orderBy: 'name',
-  });
-  if (!appSvcs.length) return [];
+  // Helper: run the same query in safe-sized ID chunks to avoid HTTP 414 URI Too Long.
+  // Each sys_id is 32 chars; 150 IDs ≈ 5 KB, well within any server limit.
+  const CHUNK = 150;
+  async function chunkedIN<T>(
+    table: string,
+    inField: string,
+    ids: string[],
+    extraQuery: string,
+    fields: string[],
+    limitPerChunk: number,
+    options?: { displayValue?: boolean },
+  ): Promise<T[]> {
+    const all: T[] = [];
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK).join(',');
+      const q = extraQuery ? `${inField}IN${slice}^${extraQuery}` : `${inField}IN${slice}`;
+      const { result = [] } = await queryTable<T>({
+        table, query: q, fields, limit: limitPerChunk,
+        ...(options?.displayValue ? { displayValue: true } : {}),
+      });
+      all.push(...result);
+    }
+    return all;
+  }
 
-  // 2. Hop 1: app family → intermediate CI  (Connects to::Connected by)
-  const appIds = appSvcs.map(s => s.sys_id).join(',');
-  const { result: hop1Rels = [] } = await queryTable<{ parent: unknown; child: unknown }>({
-    table: 'cmdb_rel_ci',
-    query: `parent.sys_idIN${appIds}^type.name=Connects to::Connected by`,
-    fields: ['parent', 'child'],
-    limit: 50000,
+  // 1. Hop 1: dot-walk avoids passing a large app-family ID list.
+  //    parent.u_service_type=service selects only service-type CIs as parents.
+  //    Also fetch parent.name / parent.short_description so we have app-family
+  //    metadata without a separate query.
+  const { result: hop1Rels = [] } = await queryTable<{
+    parent: unknown; 'parent.name': unknown; 'parent.short_description': unknown; child: unknown;
+  }>({
+    table:  'cmdb_rel_ci',
+    query:  'parent.u_service_type=service^type.name=Connects to::Connected by',
+    fields: ['parent', 'parent.name', 'parent.short_description', 'child'],
+    limit:  50000,
   });
-  const intermediateIds = [...new Set(hop1Rels.map(r => refId(r.child)).filter(Boolean))];
-  if (!intermediateIds.length) return [];
+  if (!hop1Rels.length) return [];
 
-  // 3. Hop 2: intermediate CI → instance service  (Connects to::Connected by)
+  // 2. Hop 2: dot-walk on child side avoids passing a large intermediate-CI ID list.
+  //    child.u_service_type=instance also acts as the confirmation step (replaces
+  //    the previous separate "confirm instances" query).
   const { result: hop2Rels = [] } = await queryTable<{ parent: unknown; child: unknown }>({
-    table: 'cmdb_rel_ci',
-    query: `parent.sys_idIN${intermediateIds.join(',')}^type.name=Connects to::Connected by`,
+    table:  'cmdb_rel_ci',
+    query:  'child.u_service_type=instance^type.name=Connects to::Connected by',
     fields: ['parent', 'child'],
-    limit: 50000,
+    limit:  50000,
   });
-  const potentialInstanceIds = [...new Set(hop2Rels.map(r => refId(r.child)).filter(Boolean))];
-  if (!potentialInstanceIds.length) return [];
+  if (!hop2Rels.length) return [];
 
-  // Confirm that each reachable CI is actually a service with u_service_type=instance
-  const { result: confirmedSvcs = [] } = await queryTable<{ sys_id: string }>({
-    table: SVC_TABLE,
-    query: `sys_idIN${potentialInstanceIds.join(',')}^u_service_type=instance`,
-    fields: ['sys_id'],
-    limit: potentialInstanceIds.length + 10,
-  });
-  const confirmedSet = new Set(confirmedSvcs.map(s => s.sys_id));
-
-  // Build app-family → instance-id map (two-hop join, confirmed instances only)
-  const hop1Map = new Map<string, string[]>(); // appFamilyId → [intermediateId]
+  // Build lookup maps and collect app-family metadata from hop 1
+  const hop1Map      = new Map<string, string[]>(); // appFamilyId → [intermediateId]
+  const appFamilyMeta = new Map<string, { name: string; short_description: string }>();
   for (const r of hop1Rels) {
     const p = refId(r.parent), c = refId(r.child);
+    if (!p || !c) continue;
     if (!hop1Map.has(p)) hop1Map.set(p, []);
     hop1Map.get(p)!.push(c);
+    if (!appFamilyMeta.has(p)) {
+      appFamilyMeta.set(p, {
+        name:              str(r['parent.name']),
+        short_description: str(r['parent.short_description']),
+      });
+    }
   }
+
   const hop2Map = new Map<string, string[]>(); // intermediateId → [instanceId]
   for (const r of hop2Rels) {
     const p = refId(r.parent), c = refId(r.child);
-    if (!confirmedSet.has(c)) continue; // skip non-instance children
+    if (!p || !c) continue;
     if (!hop2Map.has(p)) hop2Map.set(p, []);
     hop2Map.get(p)!.push(c);
   }
+
+  // Two-hop join: appFamily → intermediate → instance
   const appToInstances = new Map<string, Set<string>>(); // appFamilyId → Set<instanceId>
-  for (const appSvc of appSvcs) {
+  for (const [appId] of hop1Map) {
     const instSet = new Set<string>();
-    for (const intId of hop1Map.get(appSvc.sys_id) ?? []) {
+    for (const intId of hop1Map.get(appId) ?? []) {
       for (const instId of hop2Map.get(intId) ?? []) instSet.add(instId);
     }
-    appToInstances.set(appSvc.sys_id, instSet);
+    if (instSet.size > 0) appToInstances.set(appId, instSet);
   }
+  if (!appToInstances.size) return [];
 
-  const instanceSvcIds = [...confirmedSet].filter(id =>
-    [...appToInstances.values()].some(s => s.has(id))
+  const instanceSvcIds = [...new Set([...appToInstances.values()].flatMap(s => [...s]))];
+
+  // 3a. Core fields → discover table names (chunked)
+  const coreInsts = await chunkedIN<Record<string, unknown>>(
+    SVC_TABLE, 'sys_id', instanceSvcIds, '', CORE, 500, { displayValue: true },
   );
-
-  // 3a. Core fields only → discover table names (always cmdb_ci_service here, but keep consistent)
-  const { result: coreInsts = [] } = await queryTable<Record<string, unknown>>({
-    table: SVC_TABLE,
-    query: `sys_idIN${instanceSvcIds.join(',')}`,
-    fields: CORE,
-    limit: 5000,
-    displayValue: true,
-  });
   const tableNames = [...new Set(coreInsts.map(i => str(i.sys_class_name)).filter(Boolean))];
 
-  // 3b. Parallel: view fields per table + incidents + changes
-  const [viewFieldsByTable, incResult, chgResult] = await Promise.all([
-    // In 2-level mode both levels are cmdb_ci_service; parent fallback = same table (skips step 2)
+  // 3b. Parallel: view fields per table + incidents + changes (all chunked)
+  const [viewFieldsByTable, incRows, chgRows] = await Promise.all([
     Promise.all(tableNames.map(t => loadViewFields(t).then(vf => ({ table: t, vf })))),
-    queryTable<{
+    chunkedIN<{
       'cmdb_ci.sys_id': string; number: string; short_description: string;
       priority: string; state: string; opened_at: string; assigned_to: string;
-    }>({
-      table: 'incident',
-      query: `active=true^cmdb_ciIN${instanceSvcIds.join(',')}`,
-      fields: ['cmdb_ci.sys_id', 'number', 'short_description', 'priority', 'state', 'opened_at', 'assigned_to'],
-      limit: 2000,
-      displayValue: true,
-    }),
-    queryTable<{
+    }>(
+      'incident', 'cmdb_ci', instanceSvcIds, 'active=true',
+      ['cmdb_ci.sys_id', 'number', 'short_description', 'priority', 'state', 'opened_at', 'assigned_to'],
+      500, { displayValue: true },
+    ),
+    chunkedIN<{
       'cmdb_ci.sys_id': string; number: string; short_description: string;
       type: string; state: string; start_date: string; assigned_to: string;
-    }>({
-      table: 'change_request',
-      query: `active=true^state=-2^cmdb_ciIN${instanceSvcIds.join(',')}`,
-      fields: ['cmdb_ci.sys_id', 'number', 'short_description', 'type', 'state', 'start_date', 'assigned_to'],
-      limit: 2000,
-      displayValue: true,
-    }),
+    }>(
+      'change_request', 'cmdb_ci', instanceSvcIds, 'active=true^state=-2',
+      ['cmdb_ci.sys_id', 'number', 'short_description', 'type', 'state', 'start_date', 'assigned_to'],
+      500, { displayValue: true },
+    ),
   ]);
 
   const viewFieldMap = new Map(viewFieldsByTable.map(({ table, vf }) => [table, vf]));
 
-  // 3c. Re-fetch instance services with full fields
+  // 3c. Re-fetch instance services with full fields (chunked)
   const allViewElems = [...new Set(viewFieldsByTable.flatMap(({ vf }) => vf.map(f => f.element)))];
   const fetchFields  = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
 
-  const { result: fullInsts = [] } = await queryTable<Record<string, unknown>>({
-    table: SVC_TABLE,
-    query: `sys_idIN${instanceSvcIds.join(',')}`,
-    fields: fetchFields,
-    limit: 5000,
-    displayValue: true,
-  });
+  const fullInsts = await chunkedIN<Record<string, unknown>>(
+    SVC_TABLE, 'sys_id', instanceSvcIds, '', fetchFields, 500, { displayValue: true },
+  );
 
   // Build instance map
   const instMap = new Map<string, LiveInstance>();
@@ -476,23 +483,23 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
   }
 
   // Attach incidents
-  for (const r of incResult.result ?? []) {
+  for (const r of incRows) {
     const inst = instMap.get(str(r['cmdb_ci.sys_id']));
     if (!inst) continue;
     inst.incidentRecords.push({
-      number:   str(r.number),   short:    str(r.short_description),
-      priority: str(r.priority), state:    str(r.state),
+      number:   str(r.number),    short:    str(r.short_description),
+      priority: str(r.priority),  state:    str(r.state),
       opened:   str(r.opened_at), assignee: str(r.assigned_to),
     });
   }
 
   // Attach changes
-  for (const r of chgResult.result ?? []) {
+  for (const r of chgRows) {
     const inst = instMap.get(str(r['cmdb_ci.sys_id']));
     if (!inst) continue;
     inst.changeRecords.push({
-      number:      str(r.number),    short:       str(r.short_description),
-      type:        str(r.type),      state:       str(r.state),
+      number:      str(r.number),     short:       str(r.short_description),
+      type:        str(r.type),       state:       str(r.state),
       scheduled:   str(r.start_date), implementer: str(r.assigned_to),
     });
   }
@@ -502,21 +509,24 @@ async function loadTwoLevelHierarchy(): Promise<LiveAppSvc[]> {
     inst.changes   = inst.changeRecords.length;
   }
 
-  // Assemble hierarchy — only include app families with at least one linked instance
-  return appSvcs
-    .map(s => {
-      const childIds  = [...(appToInstances.get(s.sys_id) ?? [])];
+  // Assemble hierarchy — only app families that have at least one linked instance,
+  // sorted alphabetically by name
+  return [...appToInstances.keys()]
+    .map(appId => {
+      const meta      = appFamilyMeta.get(appId) ?? { name: appId, short_description: '' };
+      const childIds  = [...(appToInstances.get(appId) ?? [])];
       const instances = childIds.map(id => instMap.get(id)).filter((x): x is LiveInstance => !!x);
       return {
-        sys_id:            s.sys_id,
-        name:              s.name,
-        short_description: s.short_description ?? '',
+        sys_id:            appId,
+        name:              meta.name,
+        short_description: meta.short_description,
         instances,
         totalIncidents:    instances.reduce((a, i) => a + i.incidents, 0),
         totalChanges:      instances.reduce((a, i) => a + i.changes, 0),
       };
     })
-    .filter(s => s.instances.length > 0);
+    .filter(s => s.instances.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ─── Operational status → badge ───────────────────────────────────────────────
