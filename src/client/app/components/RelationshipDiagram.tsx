@@ -22,7 +22,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  MoreHorizontal, Eye, Edit2, Plus, Trash2,
+  MoreHorizontal, MoreVertical, Eye, Edit2, Plus, Trash2,
   ArrowUp, ArrowDown, ArrowLeftRight, Loader2, Network,
 } from 'lucide-react';
 import { queryTable, getSysProperties } from '../../api/servicenow';
@@ -61,7 +61,13 @@ const       CH = 52;
 const CENTER_X  = 500;
 const CENTER_Y  = 260;
 const DEPTH_PROP = 'x_citi4_clsa_cmd_0.app.relationship.depth';
-const DEFAULT_DEPTH = 2;
+const DEFAULT_DEPTH  = 2;
+const MAX_PER_COL    = 10;   // max L1 nodes per vertical column before adding a second column
+const COL_X_GAP      = 190;  // horizontal px between sub-columns (wider than NW=148)
+const MIN_ROW_SPACING = 70;  // minimum px between node centres (keeps a visible gap at NH=54)
+const MAX_BI_PER_ROW  = 6;   // bidirectional nodes per horizontal row
+const BI_ROW_Y_GAP    = 85;  // vertical gap between bidir rows
+
 const IMP_TYPE  = 'impacts::impacted by';
 const RDF_TYPE  = 'Receives data from::Sends data to';
 
@@ -219,26 +225,38 @@ interface NodeData {
 // ─── Recursive child placer ───────────────────────────────────────────────────
 type ChainDir = 'left' | 'right';
 
+/**
+ * Places children of `parentId` and recurses.
+ *
+ * `remainingDepth` tracks how many more levels to show:
+ *   - Starts at the parent node's curLevel (how deep the user expanded).
+ *   - Decrements by 1 each level.
+ *   - If a child node itself has its own `expandedLevels` entry, we use
+ *     Math.max(remainingDepth - 1, child.curLevel) so the child's own
+ *     expansion overrides the decrement — making every visible node
+ *     independently expandable.
+ */
 function placeChildrenRecursive(
   parentId:       string,
   parentPos:      { x: number; y: number },
   chainDir:       ChainDir,
-  currentDepth:   number,  // 1 = first level of children (L2 from center)
-  maxExpandDepth: number,  // how deep to show from the L1 node
+  remainingDepth: number,               // levels left to show; stop when 0
   childrenByNode: Map<string, RelCI[]>,
+  expandedLevels: Record<string, number>,
+  maxDepth:       number,               // cap for getSubtreeDepth badge calc
   openMenu:       NodeData['onOpenMenu'],
   nodes:          Node[],
   edges:          Edge[],
   placedIds:      Set<string>,
 ): void {
-  if (currentDepth > maxExpandDepth) return;
+  if (remainingDepth <= 0) return;
 
   const children = childrenByNode.get(parentId) ?? [];
   if (!children.length) return;
 
   const X_STEP  = chainDir === 'left' ? -200 : 200;
   const x       = parentPos.x + X_STEP;
-  const spacing = Math.max(55, Math.min(85, 400 / Math.max(1, children.length)));
+  const spacing = Math.max(MIN_ROW_SPACING, Math.min(130, 600 / Math.max(1, children.length)));
   const startY  = parentPos.y - ((children.length - 1) * spacing) / 2;
 
   children.forEach((child, i) => {
@@ -247,12 +265,14 @@ function placeChildrenRecursive(
 
     const pos     = { x, y: startY + i * spacing };
     const svcType = classToServiceType(child.sysClass);
+    const maxLvls = getSubtreeDepth(child.sysId, childrenByNode, maxDepth);
+    const curLvl  = expandedLevels[child.sysId] ?? 0;
 
     nodes.push({
       id: child.sysId, type: 'appNode', position: pos, hidden: false,
       data: {
         label: child.name || child.sysId, serviceType: svcType,
-        isCenter: false, maxLevels: 0, curLevel: 0, onOpenMenu: openMenu,
+        isCenter: false, maxLevels: maxLvls, curLevel: curLvl, onOpenMenu: openMenu,
       } satisfies NodeData,
     });
 
@@ -260,7 +280,37 @@ function placeChildrenRecursive(
     const tgt = child.direction === 'upstream' ? parentId    : child.sysId;
     edges.push(buildEdge({ id: `e-lv-${parentId}-${child.sysId}`, source: src, target: tgt, direction: child.direction, serviceType: svcType }, false));
 
-    placeChildrenRecursive(child.sysId, pos, chainDir, currentDepth + 1, maxExpandDepth, childrenByNode, openMenu, nodes, edges, placedIds);
+    // Child's own expansion overrides the decrement so it can show more levels
+    placeChildrenRecursive(child.sysId, pos, chainDir, Math.max(remainingDepth - 1, curLvl), childrenByNode, expandedLevels, maxDepth, openMenu, nodes, edges, placedIds);
+  });
+}
+
+// ─── Multi-column L1 layout helper ───────────────────────────────────────────
+/**
+ * Distributes `nodes` across as many vertical sub-columns as needed so that
+ * no column exceeds MAX_PER_COL entries. Each extra column steps COL_X_GAP px
+ * further away from the center (left side goes further left, right side right).
+ */
+function layoutSide(
+  cis:      RelCI[],
+  baseX:    number,
+  centerY:  number,
+  side:     'left' | 'right',
+): Array<{ ci: RelCI; x: number; y: number }> {
+  const count = cis.length;
+  if (!count) return [];
+
+  const numCols = Math.ceil(count / MAX_PER_COL);
+  const perCol  = Math.ceil(count / numCols);
+
+  return cis.map((ci, i) => {
+    const col          = Math.floor(i / perCol);
+    const row          = i % perCol;
+    const thisColCount = Math.min(perCol, count - col * perCol);
+    const spacing      = Math.max(MIN_ROW_SPACING, Math.min(130, 640 / thisColCount));
+    const startY       = centerY - ((thisColCount - 1) * spacing) / 2;
+    const x            = side === 'left' ? baseX - col * COL_X_GAP : baseX + col * COL_X_GAP;
+    return { ci, x, y: startY + row * spacing };
   });
 }
 
@@ -297,18 +347,11 @@ function buildDiagram(
     data: { label: selectedApp?.name ?? 'Selected Application', serviceType: 'center', isCenter: true, maxLevels: 0, curLevel: 0, onOpenMenu: openMenu } satisfies NodeData,
   });
 
-  const maxCol  = Math.max(upstream.length, downstream.length, 1);
-  const spacing = Math.max(55, Math.min(85, 420 / maxCol));
-  const colYs   = (count: number) => {
-    const start = CY - ((count - 1) * spacing) / 2;
-    return Array.from({ length: count }, (_, i) => start + i * spacing);
-  };
-
   const placeL1 = (ci: RelCI, pos: { x: number; y: number }, chainDir: ChainDir, edgeSrc: string, edgeTgt: string) => {
-    const svcType    = classToServiceType(ci.sysClass);
-    const maxLvls    = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
-    const curLvl     = expandedLevels[ci.sysId] ?? 0;
-    const l1Info     = { direction: ci.direction, svcType };
+    const svcType = classToServiceType(ci.sysClass);
+    const maxLvls = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
+    const curLvl  = expandedLevels[ci.sysId] ?? 0;
+    const l1Info  = { direction: ci.direction, svcType };
 
     placedIds.add(ci.sysId);
     nodeL1Map.set(ci.sysId, l1Info);
@@ -319,30 +362,29 @@ function buildDiagram(
     });
     edges.push(buildEdge({ id: `e-${edgeSrc === 'center' ? 'dn' : 'up'}-${ci.sysId}`, source: edgeSrc, target: edgeTgt, direction: ci.direction, serviceType: svcType }, false));
 
-    // Expand descendants if requested
     if (curLvl > 0) {
-      placeChildrenRecursive(ci.sysId, pos, chainDir, 1, curLvl, childrenByNode, openMenu, nodes, edges, placedIds);
-      // Also map all newly placed expanded nodes to this L1 info
+      placeChildrenRecursive(ci.sysId, pos, chainDir, curLvl, childrenByNode, expandedLevels, maxDepth, openMenu, nodes, edges, placedIds);
       nodes.forEach(n => { if (!nodeL1Map.has(n.id) && n.id !== 'center') nodeL1Map.set(n.id, l1Info); });
     }
   };
 
-  const upYs = colYs(upstream.length);
-  upstream.forEach((ci, i) =>
-    placeL1(ci, { x: 200, y: upYs[i] }, 'left', ci.sysId, 'center'));
+  layoutSide(upstream, 200, CY, 'left').forEach(({ ci, x, y }) =>
+    placeL1(ci, { x, y }, 'left', ci.sysId, 'center'));
 
-  const dnYs = colYs(downstream.length);
-  downstream.forEach((ci, i) =>
-    placeL1(ci, { x: 800, y: dnYs[i] }, 'right', 'center', ci.sysId));
+  layoutSide(downstream, 800, CY, 'right').forEach(({ ci, x, y }) =>
+    placeL1(ci, { x, y }, 'right', 'center', ci.sysId));
 
-  const biSpacing = bidir.length > 1 ? Math.min(190, 560 / (bidir.length - 1)) : 0;
-  const biStartX  = CX - ((bidir.length - 1) * biSpacing) / 2;
   bidir.forEach((ci, i) => {
-    const svcType = classToServiceType(ci.sysClass);
-    const maxLvls = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
-    const curLvl  = expandedLevels[ci.sysId] ?? 0;
-    const pos     = { x: biStartX + i * biSpacing, y: CY + 210 };
-    const l1Info  = { direction: ci.direction as Direction, svcType };
+    const row         = Math.floor(i / MAX_BI_PER_ROW);
+    const col         = i % MAX_BI_PER_ROW;
+    const rowCount    = Math.min(MAX_BI_PER_ROW, bidir.length - row * MAX_BI_PER_ROW);
+    const biSpacing   = rowCount > 1 ? Math.min(190, 560 / (rowCount - 1)) : 0;
+    const biStartX    = CX - ((rowCount - 1) * biSpacing) / 2;
+    const svcType     = classToServiceType(ci.sysClass);
+    const maxLvls     = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
+    const curLvl      = expandedLevels[ci.sysId] ?? 0;
+    const pos         = { x: biStartX + col * biSpacing, y: CY + 220 + row * BI_ROW_Y_GAP };
+    const l1Info      = { direction: ci.direction as Direction, svcType };
 
     placedIds.add(ci.sysId);
     nodeL1Map.set(ci.sysId, l1Info);
@@ -354,7 +396,7 @@ function buildDiagram(
     edges.push(buildEdge({ id: `e-bi-${ci.sysId}`, source: 'center', target: ci.sysId, direction: 'bidirectional', serviceType: svcType }, false));
 
     if (curLvl > 0) {
-      placeChildrenRecursive(ci.sysId, pos, 'right', 1, curLvl, childrenByNode, openMenu, nodes, edges, placedIds);
+      placeChildrenRecursive(ci.sysId, pos, 'right', curLvl, childrenByNode, expandedLevels, maxDepth, openMenu, nodes, edges, placedIds);
       nodes.forEach(n => { if (!nodeL1Map.has(n.id) && n.id !== 'center') nodeL1Map.set(n.id, l1Info); });
     }
   });
@@ -363,52 +405,65 @@ function buildDiagram(
 }
 
 // ─── AppNode ──────────────────────────────────────────────────────────────────
+// Layout mirrors the React Flow "Action Bar Node" pattern:
+//   [label — flex:1]  [+N badge]  [⋮ menu]
+// The badge takes the position of a "specific action icon" (like trash), and
+// the vertical ⋮ takes the position of the generic dropdown trigger.
 const AppNode = memo(({ id, data }: NodeProps) => {
-  const d   = data as NodeData;
-  const svc = d.serviceType === 'center' ? null : SVC_STYLE[d.serviceType as ServiceType];
+  const d         = data as NodeData;
+  const svc       = d.serviceType === 'center' ? null : SVC_STYLE[d.serviceType as ServiceType];
+  const hasExpand = d.maxLevels > 0;
+  const borderClr = svc?.border ?? '#9CA3AF';
+
   return (
     <div style={{
       width: NW, minHeight: NH,
-      background: svc?.bg ?? '#F3F4F6', border: `1.5px solid ${svc?.border ?? '#9CA3AF'}`,
-      borderRadius: 8, position: 'relative',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '6px 22px 6px 8px',
-      cursor: 'grab', userSelect: 'none',
+      background: svc?.bg ?? '#F3F4F6', border: `1.5px solid ${borderClr}`,
+      borderRadius: 8,
+      display: 'flex', alignItems: 'center', gap: 2,
+      padding: '5px 4px 5px 8px',
+      cursor: 'grab', userSelect: 'none', overflow: 'hidden',
     }}>
       <Handle type="target" position={Position.Left}  style={HANDLE_STYLE} />
       <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
+
+      {/* Label — grows to fill remaining width, centered */}
       <span style={{
+        flex: 1,
         fontSize: 11, color: svc?.text ?? '#374151',
         fontFamily: 'system-ui,-apple-system,sans-serif',
         whiteSpace: 'normal', wordBreak: 'break-word',
-        textAlign: 'center', lineHeight: '1.35',
+        lineHeight: '1.35', textAlign: 'center',
         pointerEvents: 'none',
       }}>{d.label}</span>
-      <button
-        className="absolute top-0.5 right-0.5 p-0.5 rounded opacity-30 hover:opacity-100 hover:bg-black/10 text-gray-500 transition-opacity"
-        style={{ fontSize: 0 }}
-        onPointerDown={e => e.stopPropagation()}
-        onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, false, e); }}
-        title="Actions"
-      ><MoreHorizontal size={13} /></button>
 
-      {/* +N expansion badge */}
-      {d.maxLevels > 0 && (
+      {/* +N / Lx badge — sits where the "trash" icon would be in the action bar */}
+      {hasExpand && (
         <button
-          className="absolute bottom-0.5 left-1 leading-none"
+          className="nodrag flex-shrink-0"
+          style={{ background: 'none', border: 'none', padding: '1px 0', cursor: 'pointer', lineHeight: 0 }}
           onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, false, e); }}
           title={d.curLevel > 0 ? `${d.curLevel} level(s) expanded` : `${d.maxLevels} level(s) available`}
         >
           <span
-            className={`inline-flex items-center gap-px rounded-full px-1.5
-              ${d.curLevel > 0 ? 'bg-blue-600 text-white ring-1 ring-blue-400' : 'bg-white/90 text-gray-500 border border-gray-300'}`}
+            className={`inline-flex items-center rounded-full px-1.5
+              ${d.curLevel > 0 ? 'bg-blue-600 text-white ring-1 ring-blue-400' : 'bg-white/80 text-gray-400 border border-gray-300'}`}
             style={{ fontSize: 8.5, fontWeight: 700, lineHeight: '15px' }}
           >
             {d.curLevel > 0 ? `L${d.curLevel}` : `+${d.maxLevels}`}
           </span>
         </button>
       )}
+
+      {/* ⋮ vertical dropdown trigger */}
+      <button
+        className="nodrag flex-shrink-0 p-0.5 rounded opacity-40 hover:opacity-100 hover:bg-black/10 text-gray-500 transition-opacity"
+        style={{ lineHeight: 0 }}
+        onPointerDown={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, false, e); }}
+        title="Actions"
+      ><MoreVertical size={13} /></button>
     </div>
   );
 });
@@ -516,7 +571,8 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
       .then(async l1Nodes => {
         setRelCIs(l1Nodes);
 
-        // Fetch deeper levels up to maxDepth
+        // Fetch deeper levels up to maxDepth + 1.
+        // The extra level ensures every visible node has children data available for +N badges.
         if (maxDepth <= 1 || !l1Nodes.length) return;
 
         const visited  = new Set<string>([sysId, ...l1Nodes.map(n => n.sysId)]);
@@ -524,7 +580,7 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
 
         let currentLevel = l1Nodes.map(n => n.sysId);
 
-        for (let depth = 2; depth <= maxDepth; depth++) {
+        for (let depth = 2; depth <= maxDepth + 1; depth++) {
           if (!currentLevel.length) break;
           const levelMap = await fetchChildrenForNodes(currentLevel, visited);
           const nextLevel: string[] = [];
@@ -691,8 +747,8 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
             )}
           </div>
 
-          {/* ── Level expansion picker (L1 nodes with descendants only) ─── */}
-          {isL1Node && menuNodeMaxLvl > 0 && (
+          {/* ── Level expansion picker (any node with descendants) ─── */}
+          {menuNodeMaxLvl > 0 && (
             <>
               <div className="border-t border-gray-100" />
               <div className="px-3 py-3">
