@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { Search, X, ArrowRight, ChevronRight, Loader2 } from 'lucide-react';
-import { queryTable } from '../../api/servicenow';
+import { queryTable, getSysProperties, APP_SCOPE } from '../../api/servicenow';
 import { mockApplications, type AppItem } from '../data/appData';
+
+const HIERARCHY_PROP = `${APP_SCOPE}.enable.new.app.hierarchy`;
 
 interface AppSearchHeaderProps {
   onSelectApp: (app: AppItem) => void;
@@ -95,6 +97,9 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackToHome }: AppSearchHeaderProps) {
+  // true = 3-level hierarchy; false = 2-level hierarchy
+  const [hierarchyMode, setHierarchyMode] = useState<boolean>(true);
+
   const [depts, setDepts]               = useState<Option[]>([]);
   const [deptsLoading, setDeptsLoading] = useState(false);
 
@@ -105,6 +110,16 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
 
   const [selectedServiceId, setSelectedServiceId] = useState('');
 
+  // Read hierarchy mode once on mount
+  useEffect(() => {
+    getSysProperties([HIERARCHY_PROP])
+      .then(props => {
+        const val = props[HIERARCHY_PROP];
+        setHierarchyMode(val === undefined || val.toLowerCase() === 'true');
+      })
+      .catch(() => setHierarchyMode(true));
+  }, []);
+
   // Fetch IT departments on mount
   useEffect(() => {
     setDeptsLoading(true);
@@ -112,7 +127,7 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
       table:   'cmn_department',
       query:   'u_it_department=true',
       fields:  ['sys_id', 'name'],
-      limit:   100,
+      limit:   500,
       orderBy: 'name',
     })
       .then(({ result }) =>
@@ -126,16 +141,22 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
       .finally(() => setDeptsLoading(false));
   }, [mode]);
 
-  // Fetch business services when a department is selected
+  // Fetch business service instances when a department is selected.
+  // In 2-level mode: query cmdb_ci_service where u_service_type=instance.
+  // In 3-level mode: query cmdb_ci_service_auto (existing behaviour).
   useEffect(() => {
     if (!selectedDeptId) { setServices([]); setSelectedServiceId(''); return; }
     setServicesLoading(true);
     setSelectedServiceId('');
+    const table = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
+    const query = hierarchyMode
+      ? `department=${selectedDeptId}`
+      : `department=${selectedDeptId}^u_service_type=instance`;
     queryTable<{ sys_id: string; name: string }>({
-      table:   'cmdb_ci_service_auto',
-      query:   `department=${selectedDeptId}`,
+      table,
+      query,
       fields:  ['sys_id', 'name'],
-      limit:   100,
+      limit:   500,
       orderBy: 'name',
     })
       .then(({ result }) =>
@@ -147,7 +168,7 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
       )
       .catch(() => setServices([]))
       .finally(() => setServicesLoading(false));
-  }, [selectedDeptId]);
+  }, [selectedDeptId, hierarchyMode]);
 
   const handleDeptChange = (id: string) => {
     setSelectedDeptId(id);
@@ -159,6 +180,7 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
     if (!selectedServiceId) return;
     const svc  = services.find(s => s.id === selectedServiceId);
     const dept = depts.find(d => d.id === selectedDeptId);
+    const table = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
     // Try to match against mock application data; fall back to a minimal record.
     // Always carry the real sysId and table so App.tsx can write the URL.
     const base = mockApplications.find(a =>
@@ -178,7 +200,7 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
       servers:     0,
       lastUpdated: new Date().toISOString().split('T')[0],
     };
-    onSelectApp({ ...base, sysId: selectedServiceId, table: 'cmdb_ci_service_auto' });
+    onSelectApp({ ...base, sysId: selectedServiceId, table });
   };
 
   return (
