@@ -287,7 +287,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 </div>
 
                 {viewMode === 'map'
-                  ? <RelationshipDiagram filters={filters} onEditRelationship={() => setShowEditModal(true)} />
+                  ? <RelationshipDiagram filters={filters} onEditRelationship={() => setShowEditModal(true)} selectedApp={selectedApp} onSelectApp={onSelectApp} />
                   : <RelationshipTable />}
               </div>
             </div>

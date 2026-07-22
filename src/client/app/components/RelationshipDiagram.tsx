@@ -1,17 +1,15 @@
 /**
  * RelationshipDiagram — powered by React Flow (@xyflow/react)
  *
- * Why React Flow for ServiceNow Now Experience (Yokohama+)?
- *  ✅ ServiceNow Yokohama supports React via Now Experience UI Framework
- *  ✅ Nodes are pure JSX → 3-dots menu is natural React, zero workarounds
- *  ✅ Drag-and-drop built-in (useNodesState handles everything)
- *  ✅ Beautiful smooth bezier curves by default
- *  ✅ MIT licence, actively maintained
- *  ✅ Level expansion = just toggling `hidden` on node/edge state (pure React)
+ * Relationship classification (from center app's perspective):
+ *   center = parent → other CI is Downstream
+ *   center = child  → other CI is Upstream
+ *   Bidirectional   → same CI appears in both sets
  *
- * ServiceNow deployment path:
- *  - Build with `now-cli` or Vite, deploy as a custom Now Component
- *  - All state logic below works identically inside a Now Component wrapper
+ * Multi-level expansion:
+ *   System property x_citi4_clsa_cmd_0.app.relationship.depth controls max depth.
+ *   L1 nodes (direct relations of center) show a +N badge indicating available
+ *   expansion depth. The context menu level picker lets users show 0…N hops.
  */
 
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
@@ -25,12 +23,12 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   MoreHorizontal, Eye, Edit2, Plus, Trash2,
-  ArrowUp, ArrowDown, ArrowLeftRight, Network,
+  ArrowUp, ArrowDown, ArrowLeftRight, Loader2, Network,
 } from 'lucide-react';
+import { queryTable, getSysProperties } from '../../api/servicenow';
+import type { AppItem } from '../data/appData';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public types  (ApplicationDetails imports these)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Public types ─────────────────────────────────────────────────────────────
 type Direction   = 'upstream' | 'downstream' | 'bidirectional';
 type ServiceType = 'platform' | 'infrastructure' | 'business';
 
@@ -39,11 +37,14 @@ export interface DiagramFilters {
   platform: boolean; infrastructure: boolean; business: boolean;
 }
 
-interface Props { filters: DiagramFilters; onEditRelationship: () => void; }
+interface Props {
+  filters:             DiagramFilters;
+  onEditRelationship:  () => void;
+  selectedApp?:        AppItem | null;
+  onSelectApp?:        (app: AppItem) => void;
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Design tokens  (re-exported so ApplicationDetails filter pills stay in sync)
-// ──────────────────────────────────────────────────────────────���──────────────
+// ─── Design tokens ────────────────────────────────────────────────────────────
 export const DIR_COLOR: Record<Direction, string> = {
   upstream: '#F97316', downstream: '#3B82F6', bidirectional: '#8B5CF6',
 };
@@ -52,246 +53,346 @@ export const SVC_STYLE: Record<ServiceType, { bg: string; border: string; text: 
   infrastructure: { bg: '#F8FAFC', border: '#64748B', text: '#334155' },
   business:       { bg: '#F0FDF4', border: '#16A34A', text: '#166534' },
 };
-export const NW = 148;   // standard node width
-export const NH = 42;    // standard node height
-const CW = 172;          // center-node width
-const CH = 52;           // center-node height
+export const NW = 148;
+export const NH = 42;
+const       CW = 172;
+const       CH = 52;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Base graph data
-// ─────────────────────────────────────────────────────────────────────────────
-interface NodeDef { id: string; label: string; x: number; y: number; serviceType: ServiceType | 'center'; }
-interface LinkDef { id: string; source: string; target: string; direction: Direction; serviceType: ServiceType; }
+const CENTER_X  = 500;
+const CENTER_Y  = 260;
+const DEPTH_PROP = 'x_citi4_clsa_cmd_0.app.relationship.depth';
+const DEFAULT_DEPTH = 2;
+const IMP_TYPE  = 'impacts::impacted by';
+const RDF_TYPE  = 'Receives data from::Sends data to';
 
-const NODE_DATA: NodeDef[] = [
-  { id: 'center', label: 'ES - Cobra HK (HUB)',    x: 510, y: 290, serviceType: 'center'         },
-  { id: 'up1',    label: 'ES - Aperture - HK',     x: 145, y: 75,  serviceType: 'platform'       },
-  { id: 'up2',    label: 'ES - Cobra - AU',         x: 295, y: 52,  serviceType: 'platform'       },
-  { id: 'up3',    label: 'ES - Cobra - IN',         x: 130, y: 200, serviceType: 'infrastructure' },
-  { id: 'up4',    label: 'ES - Cobra - MY',         x: 238, y: 322, serviceType: 'business'       },
-  { id: 'up5',    label: 'ES - Cobra - JP',         x: 135, y: 430, serviceType: 'platform'       },
-  { id: 'up6',    label: 'ES - Cobra - KE',         x: 292, y: 462, serviceType: 'infrastructure' },
-  { id: 'dn1',    label: 'CORP - Resilient Report', x: 755, y: 58,  serviceType: 'business'       },
-  { id: 'dn2',    label: 'DS - XBrain - Global',    x: 865, y: 158, serviceType: 'platform'       },
-  { id: 'dn3',    label: 'EOD - Halo - Global',     x: 882, y: 285, serviceType: 'platform'       },
-  { id: 'dn4',    label: 'DS - CRD - Global',       x: 852, y: 400, serviceType: 'infrastructure' },
-  { id: 'dn5',    label: 'ES - Cobra - GB',          x: 758, y: 475, serviceType: 'platform'       },
-  { id: 'bi1',    label: 'ES - Cobra - PH',         x: 330, y: 512, serviceType: 'platform'       },
-  { id: 'bi2',    label: 'ES - Cobra - SG',         x: 510, y: 532, serviceType: 'business'       },
-  { id: 'bi3',    label: 'ES - Cobra - TH',         x: 665, y: 512, serviceType: 'platform'       },
-];
-
-const LINK_DATA: LinkDef[] = [
-  { id: 'lu1', source: 'up1',    target: 'center', direction: 'upstream',      serviceType: 'platform'       },
-  { id: 'lu2', source: 'up2',    target: 'center', direction: 'upstream',      serviceType: 'platform'       },
-  { id: 'lu3', source: 'up3',    target: 'center', direction: 'upstream',      serviceType: 'infrastructure' },
-  { id: 'lu4', source: 'up4',    target: 'center', direction: 'upstream',      serviceType: 'business'       },
-  { id: 'lu5', source: 'up5',    target: 'center', direction: 'upstream',      serviceType: 'platform'       },
-  { id: 'lu6', source: 'up6',    target: 'center', direction: 'upstream',      serviceType: 'infrastructure' },
-  { id: 'ld1', source: 'center', target: 'dn1',    direction: 'downstream',    serviceType: 'business'       },
-  { id: 'ld2', source: 'center', target: 'dn2',    direction: 'downstream',    serviceType: 'platform'       },
-  { id: 'ld3', source: 'center', target: 'dn3',    direction: 'downstream',    serviceType: 'platform'       },
-  { id: 'ld4', source: 'center', target: 'dn4',    direction: 'downstream',    serviceType: 'infrastructure' },
-  { id: 'ld5', source: 'center', target: 'dn5',    direction: 'downstream',    serviceType: 'platform'       },
-  { id: 'lb1', source: 'center', target: 'bi1',    direction: 'bidirectional', serviceType: 'platform'       },
-  { id: 'lb2', source: 'center', target: 'bi2',    direction: 'bidirectional', serviceType: 'business'       },
-  { id: 'lb3', source: 'center', target: 'bi3',    direction: 'bidirectional', serviceType: 'platform'       },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Multi-level downstream extension data
-//   Example chain: Cobra HK → XBrain → Salesforce → ServiceNow ITSM
-// ─────────────────────────────────────────────────────────────────────────────
-interface LevelNode extends NodeDef { parentId: string; level: number; }
-interface LevelLink extends LinkDef {}
-
-const LEVEL_NODES: LevelNode[] = [
-  // dn2 (XBrain Global) — max 2 levels
-  { id: 'dn2_l1_1', label: 'Salesforce CRM',    x: 1055, y: 128, serviceType: 'business',       parentId: 'dn2',       level: 1 },
-  { id: 'dn2_l1_2', label: 'Bloomberg Feed',    x: 1055, y: 196, serviceType: 'infrastructure', parentId: 'dn2',       level: 1 },
-  { id: 'dn2_l2_1', label: 'ServiceNow ITSM',   x: 1218, y: 112, serviceType: 'platform',       parentId: 'dn2_l1_1', level: 2 },
-  { id: 'dn2_l2_2', label: 'Jira Cloud',        x: 1218, y: 178, serviceType: 'platform',       parentId: 'dn2_l1_1', level: 2 },
-  // dn3 (Halo Global) — max 2 levels
-  { id: 'dn3_l1_1', label: 'Reuters Data',      x: 1055, y: 270, serviceType: 'infrastructure', parentId: 'dn3',       level: 1 },
-  { id: 'dn3_l1_2', label: 'MSCI Analytics',    x: 1055, y: 336, serviceType: 'business',       parentId: 'dn3',       level: 1 },
-  { id: 'dn3_l2_1', label: 'Refinitiv Eikon',   x: 1218, y: 258, serviceType: 'platform',       parentId: 'dn3_l1_1', level: 2 },
-  // dn1, dn4, dn5, bi2 — 1 level each
-  { id: 'dn1_l1_1', label: 'SharePoint Online', x: 1055, y: 52,  serviceType: 'platform',       parentId: 'dn1',       level: 1 },
-  { id: 'dn4_l1_1', label: 'FIX Protocol Hub',  x: 1055, y: 396, serviceType: 'infrastructure', parentId: 'dn4',       level: 1 },
-  { id: 'dn5_l1_1', label: 'EMEA Settlement',   x: 1055, y: 462, serviceType: 'business',       parentId: 'dn5',       level: 1 },
-  { id: 'bi2_l1_1', label: 'SGX Connect',       x: 608,  y: 572, serviceType: 'infrastructure', parentId: 'bi2',       level: 1 },
-];
-
-const LEVEL_LINKS: LevelLink[] = [
-  { id: 'dn2_l1_1_lk', source: 'dn2',       target: 'dn2_l1_1', direction: 'downstream',    serviceType: 'business'       },
-  { id: 'dn2_l1_2_lk', source: 'dn2',       target: 'dn2_l1_2', direction: 'downstream',    serviceType: 'infrastructure' },
-  { id: 'dn2_l2_1_lk', source: 'dn2_l1_1', target: 'dn2_l2_1', direction: 'downstream',    serviceType: 'platform'       },
-  { id: 'dn2_l2_2_lk', source: 'dn2_l1_1', target: 'dn2_l2_2', direction: 'downstream',    serviceType: 'platform'       },
-  { id: 'dn3_l1_1_lk', source: 'dn3',       target: 'dn3_l1_1', direction: 'downstream',    serviceType: 'infrastructure' },
-  { id: 'dn3_l1_2_lk', source: 'dn3',       target: 'dn3_l1_2', direction: 'downstream',    serviceType: 'business'       },
-  { id: 'dn3_l2_1_lk', source: 'dn3_l1_1', target: 'dn3_l2_1', direction: 'downstream',    serviceType: 'platform'       },
-  { id: 'dn1_l1_1_lk', source: 'dn1',       target: 'dn1_l1_1', direction: 'downstream',    serviceType: 'platform'       },
-  { id: 'dn4_l1_1_lk', source: 'dn4',       target: 'dn4_l1_1', direction: 'downstream',    serviceType: 'infrastructure' },
-  { id: 'dn5_l1_1_lk', source: 'dn5',       target: 'dn5_l1_1', direction: 'downstream',    serviceType: 'business'       },
-  { id: 'bi2_l1_1_lk', source: 'bi2',       target: 'bi2_l1_1', direction: 'bidirectional', serviceType: 'infrastructure' },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Level helpers
-// ─────────────────────────────────────────────────────────────────────────────
-function getMaxLevels(nodeId: string): number {
-  const l1 = LEVEL_NODES.filter(n => n.parentId === nodeId && n.level === 1);
-  if (!l1.length) return 0;
-  return l1.some(p => LEVEL_NODES.some(n => n.parentId === p.id && n.level === 2)) ? 2 : 1;
+// ─── Data types ───────────────────────────────────────────────────────────────
+interface RelCI {
+  sysId:     string;
+  name:      string;
+  sysClass:  string;
+  direction: Direction;
 }
 
-function levelNodeIds(rootId: string, depth: number): Set<string> {
-  const s = new Set<string>();
-  if (depth < 1) return s;
-  const l1 = LEVEL_NODES.filter(n => n.parentId === rootId && n.level === 1);
-  l1.forEach(n => s.add(n.id));
-  if (depth >= 2)
-    l1.forEach(p => LEVEL_NODES.filter(n => n.parentId === p.id).forEach(n => s.add(n.id)));
-  return s;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const sn = (v: unknown): string => {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object' && v !== null && 'value' in v)
+    return String((v as Record<string, unknown>).value ?? '');
+  return String(v);
+};
+
+function classToServiceType(cls: string): ServiceType {
+  if (cls === 'cmdb_ci_service') return 'business';
+  if (cls === 'cmdb_ci_service_auto') return 'platform';
+  return 'infrastructure';
 }
 
-function levelLinkIds(rootId: string, depth: number): Set<string> {
-  const nodeSet = new Set([rootId, ...levelNodeIds(rootId, depth)]);
-  return new Set(LEVEL_LINKS.filter(l => nodeSet.has(l.source) && nodeSet.has(l.target)).map(l => l.id));
+/** Actual depth of the subtree rooted at nodeId, up to maxRemaining hops. */
+function getSubtreeDepth(nodeId: string, cm: Map<string, RelCI[]>, maxRemaining: number): number {
+  if (maxRemaining <= 0) return 0;
+  const children = cm.get(nodeId) ?? [];
+  if (children.length === 0) return 0;
+  return 1 + Math.max(0, ...children.map(c => getSubtreeDepth(c.sysId, cm, maxRemaining - 1)));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Edge builder — produces a React Flow edge definition
-// ─────────────────────────────────────────────────────────────────────────────
-function buildEdge(l: LinkDef | LevelLink, hidden: boolean): Edge {
-  const color = DIR_COLOR[l.direction];
-  const isBi  = l.direction === 'bidirectional';
+// ─── CMDB fetch — L1 (direct relations of center) ────────────────────────────
+async function fetchRelationships(sysId: string): Promise<RelCI[]> {
+  const TYPE_Q = `type.nameIN${IMP_TYPE},${RDF_TYPE}`;
+  const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
+    queryTable<Record<string, unknown>>({
+      table: 'cmdb_rel_ci',
+      query: `${TYPE_Q}^parent.sys_id=${sysId}`,
+      fields: ['child.sys_id', 'child.name', 'child.sys_class_name'],
+      limit: 300,
+    }),
+    queryTable<Record<string, unknown>>({
+      table: 'cmdb_rel_ci',
+      query: `${TYPE_Q}^child.sys_id=${sysId}`,
+      fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name'],
+      limit: 300,
+    }),
+  ]);
+
+  const upSet = new Set<string>();
+  const dnSet = new Set<string>();
+  const ciMap = new Map<string, { name: string; cls: string }>();
+
+  for (const r of asParent) {
+    const id = sn(r['child.sys_id']);
+    if (!id || id === sysId) continue;
+    ciMap.set(id, { name: sn(r['child.name']), cls: sn(r['child.sys_class_name']) });
+    dnSet.add(id);
+  }
+  for (const r of asChild) {
+    const id = sn(r['parent.sys_id']);
+    if (!id || id === sysId) continue;
+    ciMap.set(id, { name: sn(r['parent.name']), cls: sn(r['parent.sys_class_name']) });
+    upSet.add(id);
+  }
+
+  return [...ciMap.entries()].map(([id, { name, cls }]) => ({
+    sysId: id, name, sysClass: cls,
+    direction: upSet.has(id) && dnSet.has(id) ? 'bidirectional' : upSet.has(id) ? 'upstream' : 'downstream',
+  }));
+}
+
+// ─── CMDB fetch — children of multiple nodes (one hop each) ──────────────────
+async function fetchChildrenForNodes(
+  nodeIds: string[],
+  visited: Set<string>,
+): Promise<Map<string, RelCI[]>> {
+  if (!nodeIds.length) return new Map();
+
+  const nodeIdSet = new Set(nodeIds);
+  const TYPE_Q = `type.nameIN${IMP_TYPE},${RDF_TYPE}`;
+  const ids = nodeIds.join(',');
+
+  const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
+    queryTable<Record<string, unknown>>({
+      table: 'cmdb_rel_ci',
+      query: `${TYPE_Q}^parent.sys_idIN${ids}`,
+      fields: ['parent.sys_id', 'child.sys_id', 'child.name', 'child.sys_class_name'],
+      limit: 500,
+    }),
+    queryTable<Record<string, unknown>>({
+      table: 'cmdb_rel_ci',
+      query: `${TYPE_Q}^child.sys_idIN${ids}`,
+      fields: ['child.sys_id', 'parent.sys_id', 'parent.name', 'parent.sys_class_name'],
+      limit: 500,
+    }),
+  ]);
+
+  const result = new Map<string, RelCI[]>();
+  const seenPairs = new Set<string>();
+
+  const add = (parentId: string, child: RelCI) => {
+    const key = `${parentId}:${child.sysId}`;
+    if (seenPairs.has(key)) return;
+    seenPairs.add(key);
+    if (!result.has(parentId)) result.set(parentId, []);
+    result.get(parentId)!.push(child);
+  };
+
+  for (const r of asParent) {
+    const pId  = sn(r['parent.sys_id']);
+    const cId  = sn(r['child.sys_id']);
+    if (!cId || visited.has(cId) || !nodeIdSet.has(pId)) continue;
+    add(pId, { sysId: cId, name: sn(r['child.name']), sysClass: sn(r['child.sys_class_name']), direction: 'downstream' });
+  }
+  for (const r of asChild) {
+    const cId  = sn(r['child.sys_id']);
+    const pId  = sn(r['parent.sys_id']);
+    if (!pId || visited.has(pId) || !nodeIdSet.has(cId)) continue;
+    add(cId, { sysId: pId, name: sn(r['parent.name']), sysClass: sn(r['parent.sys_class_name']), direction: 'upstream' });
+  }
+
+  return result;
+}
+
+// ─── Edge builder ─────────────────────────────────────────────────────────────
+interface EdgeDef { id: string; source: string; target: string; direction: Direction; serviceType: ServiceType; }
+
+function buildEdge({ id, source, target, direction, serviceType }: EdgeDef, hidden: boolean): Edge {
+  const color = DIR_COLOR[direction];
+  const isBi  = direction === 'bidirectional';
   return {
-    id:     l.id,
-    source: l.source,
-    target: l.target,
-    hidden,
-    type:   'default',           // React Flow's default smooth bezier curve
-    style:  {
-      stroke: color, strokeWidth: 2, opacity: 0.88,
-      ...(isBi ? { strokeDasharray: '7 4' } : {}),
-    },
-    markerEnd:   { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
+    id, source, target, hidden, type: 'default',
+    style: { stroke: color, strokeWidth: 2, opacity: 0.88, ...(isBi ? { strokeDasharray: '7 4' } : {}) },
+    markerEnd:  { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     ...(isBi ? { markerStart: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 } } : {}),
-    data:   { direction: l.direction, serviceType: l.serviceType },
+    data: { direction, serviceType },
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Initial state builders  (called ONCE on mount)
-// ─────────────────────────────────────────────────────��───────────────────────
-function buildInitialNodes(openMenu: NodeData['onOpenMenu']): Node[] {
-  return [
-    // Base nodes
-    ...NODE_DATA.map(n => ({
-      id:       n.id,
-      type:     n.serviceType === 'center' ? 'centerNode' : 'appNode',
-      position: { x: n.x, y: n.y },
-      hidden:   false,
-      data: {
-        label:       n.label,
-        serviceType: n.serviceType,
-        isCenter:    n.serviceType === 'center',
-        maxLevels:   n.serviceType === 'center' ? 0 : getMaxLevels(n.id),
-        curLevel:    0,
-        onOpenMenu:  openMenu,
-      } satisfies NodeData,
-    })),
-    // Level nodes — all hidden initially
-    ...LEVEL_NODES.map(n => ({
-      id:       n.id,
-      type:     'appNode',
-      position: { x: n.x, y: n.y },
-      hidden:   true,
-      data: {
-        label:       n.label,
-        serviceType: n.serviceType,
-        isCenter:    false,
-        maxLevels:   0,
-        curLevel:    0,
-        onOpenMenu:  openMenu,
-      } satisfies NodeData,
-    })),
-  ];
-}
-
-function buildInitialEdges(): Edge[] {
-  return [
-    ...LINK_DATA.map(l => buildEdge(l, false)),
-    ...LEVEL_LINKS.map(l => buildEdge(l, true)),  // all hidden initially
-  ];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom node data shape
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Node data shape ──────────────────────────────────────────────────────────
 interface NodeData {
-  label:      string;
+  label:       string;
   serviceType: ServiceType | 'center';
-  isCenter:   boolean;
-  maxLevels:  number;
-  curLevel:   number;
-  onOpenMenu: (nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent) => void;
-  [key: string]: unknown;   // React Flow requires this for generic Node<NodeData>
+  isCenter:    boolean;
+  maxLevels:   number;
+  curLevel:    number;
+  onOpenMenu:  (nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent) => void;
+  [key: string]: unknown;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom node: standard application node
-// — Pure JSX, no canvas overlays, no hacks.
-//   The ⋮ button and level badge are real React elements inside the node.
-// ─────────────────────────────────────────────────────────────────────────────
-const AppNode = memo(({ id, data }: NodeProps) => {
-  const d = data as NodeData;
-  const svc = d.serviceType === 'center' ? null : SVC_STYLE[d.serviceType as ServiceType];
+// ─── Recursive child placer ───────────────────────────────────────────────────
+type ChainDir = 'left' | 'right';
 
+function placeChildrenRecursive(
+  parentId:       string,
+  parentPos:      { x: number; y: number },
+  chainDir:       ChainDir,
+  currentDepth:   number,  // 1 = first level of children (L2 from center)
+  maxExpandDepth: number,  // how deep to show from the L1 node
+  childrenByNode: Map<string, RelCI[]>,
+  openMenu:       NodeData['onOpenMenu'],
+  nodes:          Node[],
+  edges:          Edge[],
+  placedIds:      Set<string>,
+): void {
+  if (currentDepth > maxExpandDepth) return;
+
+  const children = childrenByNode.get(parentId) ?? [];
+  if (!children.length) return;
+
+  const X_STEP  = chainDir === 'left' ? -200 : 200;
+  const x       = parentPos.x + X_STEP;
+  const spacing = Math.max(55, Math.min(85, 400 / Math.max(1, children.length)));
+  const startY  = parentPos.y - ((children.length - 1) * spacing) / 2;
+
+  children.forEach((child, i) => {
+    if (placedIds.has(child.sysId)) return;
+    placedIds.add(child.sysId);
+
+    const pos     = { x, y: startY + i * spacing };
+    const svcType = classToServiceType(child.sysClass);
+
+    nodes.push({
+      id: child.sysId, type: 'appNode', position: pos, hidden: false,
+      data: {
+        label: child.name || child.sysId, serviceType: svcType,
+        isCenter: false, maxLevels: 0, curLevel: 0, onOpenMenu: openMenu,
+      } satisfies NodeData,
+    });
+
+    const src = child.direction === 'upstream' ? child.sysId : parentId;
+    const tgt = child.direction === 'upstream' ? parentId    : child.sysId;
+    edges.push(buildEdge({ id: `e-lv-${parentId}-${child.sysId}`, source: src, target: tgt, direction: child.direction, serviceType: svcType }, false));
+
+    placeChildrenRecursive(child.sysId, pos, chainDir, currentDepth + 1, maxExpandDepth, childrenByNode, openMenu, nodes, edges, placedIds);
+  });
+}
+
+// ─── Full diagram builder ─────────────────────────────────────────────────────
+interface DiagramResult {
+  nodes:     Node[];
+  edges:     Edge[];
+  // Used by the filter-update effect to determine visibility per node
+  nodeL1Map: Map<string, { direction: Direction; svcType: ServiceType }>;
+}
+
+function buildDiagram(
+  relCIs:         RelCI[],
+  childrenByNode: Map<string, RelCI[]>,
+  expandedLevels: Record<string, number>,
+  maxDepth:       number,
+  selectedApp:    AppItem | null | undefined,
+  openMenu:       NodeData['onOpenMenu'],
+): DiagramResult {
+  const CX = CENTER_X, CY = CENTER_Y;
+
+  const upstream   = relCIs.filter(r => r.direction === 'upstream');
+  const downstream = relCIs.filter(r => r.direction === 'downstream');
+  const bidir      = relCIs.filter(r => r.direction === 'bidirectional');
+
+  const nodes:     Node[] = [];
+  const edges:     Edge[] = [];
+  const placedIds  = new Set<string>(['center']);
+  const nodeL1Map  = new Map<string, { direction: Direction; svcType: ServiceType }>();
+
+  // Center
+  nodes.push({
+    id: 'center', type: 'centerNode', position: { x: CX, y: CY }, hidden: false,
+    data: { label: selectedApp?.name ?? 'Selected Application', serviceType: 'center', isCenter: true, maxLevels: 0, curLevel: 0, onOpenMenu: openMenu } satisfies NodeData,
+  });
+
+  const maxCol  = Math.max(upstream.length, downstream.length, 1);
+  const spacing = Math.max(55, Math.min(85, 420 / maxCol));
+  const colYs   = (count: number) => {
+    const start = CY - ((count - 1) * spacing) / 2;
+    return Array.from({ length: count }, (_, i) => start + i * spacing);
+  };
+
+  const placeL1 = (ci: RelCI, pos: { x: number; y: number }, chainDir: ChainDir, edgeSrc: string, edgeTgt: string) => {
+    const svcType    = classToServiceType(ci.sysClass);
+    const maxLvls    = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
+    const curLvl     = expandedLevels[ci.sysId] ?? 0;
+    const l1Info     = { direction: ci.direction, svcType };
+
+    placedIds.add(ci.sysId);
+    nodeL1Map.set(ci.sysId, l1Info);
+
+    nodes.push({
+      id: ci.sysId, type: 'appNode', position: pos, hidden: false,
+      data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, onOpenMenu: openMenu } satisfies NodeData,
+    });
+    edges.push(buildEdge({ id: `e-${edgeSrc === 'center' ? 'dn' : 'up'}-${ci.sysId}`, source: edgeSrc, target: edgeTgt, direction: ci.direction, serviceType: svcType }, false));
+
+    // Expand descendants if requested
+    if (curLvl > 0) {
+      placeChildrenRecursive(ci.sysId, pos, chainDir, 1, curLvl, childrenByNode, openMenu, nodes, edges, placedIds);
+      // Also map all newly placed expanded nodes to this L1 info
+      nodes.forEach(n => { if (!nodeL1Map.has(n.id) && n.id !== 'center') nodeL1Map.set(n.id, l1Info); });
+    }
+  };
+
+  const upYs = colYs(upstream.length);
+  upstream.forEach((ci, i) =>
+    placeL1(ci, { x: 200, y: upYs[i] }, 'left', ci.sysId, 'center'));
+
+  const dnYs = colYs(downstream.length);
+  downstream.forEach((ci, i) =>
+    placeL1(ci, { x: 800, y: dnYs[i] }, 'right', 'center', ci.sysId));
+
+  const biSpacing = bidir.length > 1 ? Math.min(190, 560 / (bidir.length - 1)) : 0;
+  const biStartX  = CX - ((bidir.length - 1) * biSpacing) / 2;
+  bidir.forEach((ci, i) => {
+    const svcType = classToServiceType(ci.sysClass);
+    const maxLvls = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
+    const curLvl  = expandedLevels[ci.sysId] ?? 0;
+    const pos     = { x: biStartX + i * biSpacing, y: CY + 210 };
+    const l1Info  = { direction: ci.direction as Direction, svcType };
+
+    placedIds.add(ci.sysId);
+    nodeL1Map.set(ci.sysId, l1Info);
+
+    nodes.push({
+      id: ci.sysId, type: 'appNode', position: pos, hidden: false,
+      data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, onOpenMenu: openMenu } satisfies NodeData,
+    });
+    edges.push(buildEdge({ id: `e-bi-${ci.sysId}`, source: 'center', target: ci.sysId, direction: 'bidirectional', serviceType: svcType }, false));
+
+    if (curLvl > 0) {
+      placeChildrenRecursive(ci.sysId, pos, 'right', 1, curLvl, childrenByNode, openMenu, nodes, edges, placedIds);
+      nodes.forEach(n => { if (!nodeL1Map.has(n.id) && n.id !== 'center') nodeL1Map.set(n.id, l1Info); });
+    }
+  });
+
+  return { nodes, edges, nodeL1Map };
+}
+
+// ─── AppNode ──────────────────────────────────────────────────────────────────
+const AppNode = memo(({ id, data }: NodeProps) => {
+  const d   = data as NodeData;
+  const svc = d.serviceType === 'center' ? null : SVC_STYLE[d.serviceType as ServiceType];
   return (
-    <div
-      style={{
-        width:        NW,
-        height:       NH,
-        background:   svc?.bg  ?? '#F3F4F6',
-        border:       `1.5px solid ${svc?.border ?? '#9CA3AF'}`,
-        borderRadius: 8,
-        position:     'relative',
-        display:      'flex',
-        alignItems:   'center',
-        justifyContent: 'center',
-        cursor:       'grab',
-        userSelect:   'none',
-      }}
-    >
-      {/* React Flow connection handles — invisible, just used for edge routing */}
+    <div style={{
+      width: NW, minHeight: NH,
+      background: svc?.bg ?? '#F3F4F6', border: `1.5px solid ${svc?.border ?? '#9CA3AF'}`,
+      borderRadius: 8, position: 'relative',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '6px 22px 6px 8px',
+      cursor: 'grab', userSelect: 'none',
+    }}>
       <Handle type="target" position={Position.Left}  style={HANDLE_STYLE} />
       <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
-
-      {/* Node label */}
       <span style={{
         fontSize: 11, color: svc?.text ?? '#374151',
         fontFamily: 'system-ui,-apple-system,sans-serif',
-        maxWidth: NW - 24, overflow: 'hidden',
-        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        whiteSpace: 'normal', wordBreak: 'break-word',
+        textAlign: 'center', lineHeight: '1.35',
         pointerEvents: 'none',
-      }}>
-        {d.label}
-      </span>
-
-      {/* ⋮ Action button — naturally part of the node JSX */}
+      }}>{d.label}</span>
       <button
         className="absolute top-0.5 right-0.5 p-0.5 rounded opacity-30 hover:opacity-100 hover:bg-black/10 text-gray-500 transition-opacity"
         style={{ fontSize: 0 }}
-        onPointerDown={e => e.stopPropagation()} // don't start drag when clicking ⋮
+        onPointerDown={e => e.stopPropagation()}
         onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, false, e); }}
         title="Actions"
-      >
-        <MoreHorizontal size={13} />
-      </button>
+      ><MoreHorizontal size={13} /></button>
 
-      {/* Level badge — shows expandable depth or current expansion */}
+      {/* +N expansion badge */}
       {d.maxLevels > 0 && (
         <button
           className="absolute bottom-0.5 left-1 leading-none"
@@ -301,9 +402,7 @@ const AppNode = memo(({ id, data }: NodeProps) => {
         >
           <span
             className={`inline-flex items-center gap-px rounded-full px-1.5
-              ${d.curLevel > 0
-                ? 'bg-blue-600 text-white ring-1 ring-blue-400'
-                : 'bg-white/90 text-gray-500 border border-gray-300'}`}
+              ${d.curLevel > 0 ? 'bg-blue-600 text-white ring-1 ring-blue-400' : 'bg-white/90 text-gray-500 border border-gray-300'}`}
             style={{ fontSize: 8.5, fontWeight: 700, lineHeight: '15px' }}
           >
             {d.curLevel > 0 ? `L${d.curLevel}` : `+${d.maxLevels}`}
@@ -315,74 +414,76 @@ const AppNode = memo(({ id, data }: NodeProps) => {
 });
 AppNode.displayName = 'AppNode';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom node: center / hub node
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── CenterNode ───────────────────────────────────────────────────────────────
 const CenterNode = memo(({ id, data }: NodeProps) => {
   const d = data as NodeData;
   return (
-    <div
-      style={{
-        width: CW, height: CH,
-        background: '#1D4ED8', border: '2px solid #1E40AF',
-        borderRadius: 10, position: 'relative',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: 'grab', userSelect: 'none',
-        boxShadow: '0 2px 12px rgba(29,78,216,0.35)',
-      }}
-    >
+    <div style={{
+      width: CW, height: CH,
+      background: '#1D4ED8', border: '2px solid #1E40AF', borderRadius: 10,
+      position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'grab', userSelect: 'none', boxShadow: '0 2px 12px rgba(29,78,216,0.35)',
+    }}>
       <Handle type="target" position={Position.Left}  style={HANDLE_STYLE} />
       <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
       <span style={{
         fontSize: 12, fontWeight: 600, color: '#fff',
         fontFamily: 'system-ui,-apple-system,sans-serif',
-        maxWidth: CW - 28, overflow: 'hidden',
-        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        maxWidth: CW - 28, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         pointerEvents: 'none',
-      }}>
-        {d.label}
-      </span>
+      }}>{d.label}</span>
       <button
         className="absolute top-0.5 right-0.5 p-0.5 rounded opacity-40 hover:opacity-100 hover:bg-white/20 text-white transition-opacity"
         style={{ fontSize: 0 }}
         onPointerDown={e => e.stopPropagation()}
         onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, true, e); }}
         title="Hub actions"
-      >
-        <MoreHorizontal size={13} />
-      </button>
+      ><MoreHorizontal size={13} /></button>
     </div>
   );
 });
 CenterNode.displayName = 'CenterNode';
 
 const HANDLE_STYLE: React.CSSProperties = {
-  opacity: 0, width: 6, height: 6,
-  minWidth: 0, minHeight: 0,
-  background: 'transparent', border: 'none',
-  pointerEvents: 'none',
+  opacity: 0, width: 6, height: 6, minWidth: 0, minHeight: 0,
+  background: 'transparent', border: 'none', pointerEvents: 'none',
 };
 
-// nodeTypes must be defined OUTSIDE the component to avoid React Flow warnings
 const NODE_TYPES = { appNode: AppNode, centerNode: CenterNode };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Context menu state
-// ─────────────────────────────────────────────────────────────────────────────
-interface MenuState {
-  nodeId: string; label: string; isCenter: boolean;
-  x: number; y: number;  // fixed viewport coords
-}
+interface MenuState { nodeId: string; label: string; isCenter: boolean; x: number; y: number; }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Inner diagram (needs ReactFlowProvider context for useReactFlow)
-// ─────────────────────────────────────────────────────────────────────────────
-function DiagramFlow({ filters, onEditRelationship }: Props) {
-  const { fitView } = useReactFlow();
+// ─── DiagramFlow ──────────────────────────────────────────────────────────────
+function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: Props) {
+  const { setCenter } = useReactFlow();
 
-  // ── Stable callbacks (empty deps — state setters are always stable) ──────────
-  const [nodeMenu, setNodeMenu] = useState<MenuState | null>(null);
-  const [expandedLevels, setExpandedLevels] = useState<Record<string, number>>({});
+  const [nodeMenu,        setNodeMenu]        = useState<MenuState | null>(null);
+  const [relCIs,          setRelCIs]          = useState<RelCI[]>([]);
+  const [childrenByNode,  setChildrenByNode]  = useState<Map<string, RelCI[]>>(new Map());
+  const [expandedLevels,  setExpandedLevels]  = useState<Record<string, number>>({});
+  const [maxDepth,        setMaxDepth]        = useState<number>(DEFAULT_DEPTH);
+  const [loading,         setLoading]         = useState(false);
+  const [nodes, setNodes, onNodesChange]      = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange]      = useEdgesState<Edge>([]);
+
+  // Stable refs for callbacks that need current state
+  const relCIsRef        = useRef<RelCI[]>([]);
+  const childrenRef      = useRef(new Map<string, RelCI[]>());
+  const onSelectAppRef   = useRef<typeof onSelectApp>(onSelectApp);
+  const nodeL1MapRef     = useRef(new Map<string, { direction: Direction; svcType: ServiceType }>());
+  useEffect(() => { relCIsRef.current      = relCIs; },         [relCIs]);
+  useEffect(() => { childrenRef.current    = childrenByNode; }, [childrenByNode]);
+  useEffect(() => { onSelectAppRef.current = onSelectApp; },    [onSelectApp]);
+
+  // Fetch max depth from system property once on mount
+  useEffect(() => {
+    getSysProperties([DEPTH_PROP])
+      .then(props => {
+        const v = parseInt(props[DEPTH_PROP] ?? '', 10);
+        if (!isNaN(v) && v > 0) setMaxDepth(v);
+      })
+      .catch(() => {});
+  }, []);
 
   const openMenu = useCallback((
     nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent,
@@ -390,110 +491,144 @@ function DiagramFlow({ filters, onEditRelationship }: Props) {
     e.stopPropagation();
     setNodeMenu({
       nodeId, label, isCenter,
-      x: Math.min(e.clientX, window.innerWidth  - 240),
-      y: Math.min(e.clientY + 6, window.innerHeight - 440),
+      x: Math.min(e.clientX,     window.innerWidth  - 260),
+      y: Math.min(e.clientY + 6, window.innerHeight - 360),
     });
-  }, []); // setNodeMenu is stable, so empty deps is correct
+  }, []);
 
-  const setLevel = useCallback((nodeId: string, lvl: number) => {
+  const closeMenu  = useCallback(() => setNodeMenu(null), []);
+  const setLevel   = useCallback((nodeId: string, lvl: number) => {
     setExpandedLevels(prev => ({ ...prev, [nodeId]: lvl }));
     setNodeMenu(null);
   }, []);
 
-  const closeMenu = useCallback(() => setNodeMenu(null), []);
-
-  // ── React Flow state (initialised ONCE with all nodes/edges) ─────────────────
-  // Level nodes start hidden; visibility is toggled by the effects below.
-  // useNodesState handles drag automatically — positions update on every drag move.
-  const [nodes, setNodes, onNodesChange] = useNodesState(buildInitialNodes(openMenu));
-  const [edges, setEdges, onEdgesChange] = useEdgesState(buildInitialEdges());
-
-  // ── Update visibility when filters OR expanded levels change ─────────────────
-  // Key insight: setNodes(prev => prev.map(...)) preserves drag positions because
-  // only `hidden` and `data.curLevel` are updated — `position` is left untouched.
+  // ── Fetch L1 relationships when selected app changes ─────────────────────
   useEffect(() => {
-    // Which base-level edges are visible?
-    const visibleBaseLinks = new Set(
-      LINK_DATA
-        .filter(l => filters[l.direction] && filters[l.serviceType])
-        .map(l => l.id),
+    const sysId = selectedApp?.sysId;
+    if (!sysId) { setRelCIs([]); setChildrenByNode(new Map()); setExpandedLevels({}); return; }
+
+    setLoading(true);
+    setRelCIs([]);
+    setChildrenByNode(new Map());
+    setExpandedLevels({});
+
+    fetchRelationships(sysId)
+      .then(async l1Nodes => {
+        setRelCIs(l1Nodes);
+
+        // Fetch deeper levels up to maxDepth
+        if (maxDepth <= 1 || !l1Nodes.length) return;
+
+        const visited  = new Set<string>([sysId, ...l1Nodes.map(n => n.sysId)]);
+        const combined = new Map<string, RelCI[]>();
+
+        let currentLevel = l1Nodes.map(n => n.sysId);
+
+        for (let depth = 2; depth <= maxDepth; depth++) {
+          if (!currentLevel.length) break;
+          const levelMap = await fetchChildrenForNodes(currentLevel, visited);
+          const nextLevel: string[] = [];
+
+          for (const [parentId, children] of levelMap) {
+            combined.set(parentId, children);
+            for (const c of children) {
+              if (!visited.has(c.sysId)) { visited.add(c.sysId); nextLevel.push(c.sysId); }
+            }
+          }
+          currentLevel = nextLevel;
+        }
+
+        setChildrenByNode(combined);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  // maxDepth intentionally included so deep levels are fetched if property loads after app
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedApp?.sysId, maxDepth]);
+
+  // ── Rebuild diagram whenever data or expansion changes ────────────────────
+  const prevSysIdRef = useRef('');
+  useEffect(() => {
+    const sysId    = selectedApp?.sysId ?? '';
+    const isNewApp = sysId !== prevSysIdRef.current;
+    prevSysIdRef.current = sysId;
+
+    const { nodes: n, edges: e, nodeL1Map } = buildDiagram(
+      relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp, openMenu,
     );
-    // Which base nodes have at least one visible edge?
-    const visibleBaseNodes = new Set<string>(['center']);
-    LINK_DATA.forEach(l => {
-      if (visibleBaseLinks.has(l.id)) {
-        visibleBaseNodes.add(l.source);
-        visibleBaseNodes.add(l.target);
-      }
-    });
+    nodeL1MapRef.current = nodeL1Map;
+    setNodes(n);
+    setEdges(e);
 
-    // Which level node/edge ids should be visible?
-    const visLevelNodeIds = new Set<string>();
-    const visLevelLinkIds = new Set<string>();
-    Object.entries(expandedLevels).forEach(([rootId, depth]) => {
-      if (depth < 1) return;
-      levelNodeIds(rootId, depth).forEach(id => visLevelNodeIds.add(id));
-      levelLinkIds(rootId, depth).forEach(id => visLevelLinkIds.add(id));
-    });
+    if (isNewApp || relCIs.length > 0) {
+      const zoom = Math.max(0.5, 1.1 - relCIs.length * 0.035);
+      setTimeout(() => setCenter(CENTER_X, CENTER_Y, { zoom, duration: 420 }), 80);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp?.sysId]);
 
+  // ── Filter changes: update hidden only (preserve drag positions) ──────────
+  useEffect(() => {
     setNodes(prev => prev.map(node => {
-      const isLevelNode   = LEVEL_NODES.some(n => n.id === node.id);
-      const newHidden     = isLevelNode
-        ? !visLevelNodeIds.has(node.id)
-        : !visibleBaseNodes.has(node.id);
-      const newCurLevel   = expandedLevels[node.id] ?? 0;
-
-      // Only create a new object reference when something actually changed
-      if (node.hidden === newHidden && (node.data as NodeData).curLevel === newCurLevel) return node;
-
-      return {
-        ...node,
-        hidden: newHidden,
-        data:   { ...node.data, curLevel: newCurLevel },
-      };
+      if (node.id === 'center') return node;
+      const l1Info = nodeL1MapRef.current.get(node.id);
+      if (!l1Info) return node;
+      const newHidden = !(filters[l1Info.direction] && filters[l1Info.svcType]);
+      if (node.hidden === newHidden) return node;
+      return { ...node, hidden: newHidden };
     }));
-
     setEdges(prev => prev.map(edge => {
-      const baseLink  = LINK_DATA.find(l => l.id === edge.id);
-      const levelLink = LEVEL_LINKS.find(l => l.id === edge.id);
-      let   newHidden: boolean;
-
-      if (baseLink)       newHidden = !visibleBaseLinks.has(edge.id);
-      else if (levelLink) newHidden = !visLevelLinkIds.has(edge.id)
-                                   || !filters[levelLink.direction]
-                                   || !filters[levelLink.serviceType];
-      else                newHidden = edge.hidden ?? false;
-
+      const sourceL1 = nodeL1MapRef.current.get(edge.source);
+      const targetL1 = nodeL1MapRef.current.get(edge.target);
+      const l1Info   = sourceL1 ?? targetL1;
+      if (!l1Info) return edge;
+      const newHidden = !(filters[l1Info.direction] && filters[l1Info.svcType]);
       if (edge.hidden === newHidden) return edge;
       return { ...edge, hidden: newHidden };
     }));
-  }, [filters, expandedLevels, setNodes, setEdges]);
+  }, [filters, setNodes, setEdges]);
 
-  // ── Smooth fit-view whenever expansion changes ────────────────────────────────
-  const prevExpandRef = useRef('');
-  useEffect(() => {
-    const key = JSON.stringify(expandedLevels);
-    if (key === prevExpandRef.current) return;
-    prevExpandRef.current = key;
-    // Small timeout so the hidden→visible DOM update settles first
-    const t = setTimeout(() => fitView({ padding: 0.1, duration: 480 }), 60);
-    return () => clearTimeout(t);
-  }, [expandedLevels, fitView]);
+  // ─── Render ────────────────────────────────────────────────────────────────
+  // How many levels can the currently-hovered node expand?
+  const menuNodeMaxLvl  = nodeMenu && !nodeMenu.isCenter
+    ? getSubtreeDepth(nodeMenu.nodeId, childrenRef.current, maxDepth - 1)
+    : 0;
+  const menuNodeCurLvl  = nodeMenu ? (expandedLevels[nodeMenu.nodeId] ?? 0) : 0;
+  const isL1Node        = nodeMenu ? relCIsRef.current.some(r => r.sysId === nodeMenu.nodeId) : false;
 
-  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="relative w-full rounded-xl border border-gray-200 overflow-hidden" style={{ height: 590 }}>
+
+      {loading && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+            <span className="text-sm text-gray-500">Loading relationships…</span>
+          </div>
+        </div>
+      )}
+
+      {!loading && relCIs.length === 0 && selectedApp?.sysId && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center">
+          <div className="text-center text-gray-400 px-6">
+            <p className="text-sm font-medium text-gray-500">No relationships found</p>
+            <p className="text-xs mt-1 leading-relaxed">
+              No upstream or downstream connections of type<br />
+              <span className="font-medium text-gray-500 italic">impacts::impacted by</span> or{' '}
+              <span className="font-medium text-gray-500 italic">Receives data from::Sends data to</span>
+            </p>
+          </div>
+        </div>
+      )}
+
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={nodes} edges={edges}
         nodeTypes={NODE_TYPES}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        nodeOrigin={[0.5, 0.5]}   // positions refer to node centers
-        fitView
-        fitViewOptions={{ padding: 0.1 }}
-        minZoom={0.2}
-        maxZoom={2.5}
+        nodeOrigin={[0.5, 0.5]}
+        fitView fitViewOptions={{ padding: 0.15 }}
+        minZoom={0.2} maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
         onPaneClick={closeMenu}
         style={{ background: '#F8FAFC' }}
@@ -502,14 +637,13 @@ function DiagramFlow({ filters, onEditRelationship }: Props) {
         <Controls showInteractive={false} className="rounded-lg" />
       </ReactFlow>
 
-      {/* ── Context / action menu (position: fixed so it's never clipped) ─────── */}
+      {/* ── Context menu ────────────────────────────────────────────────────── */}
       {nodeMenu && (
         <div
-          className="fixed z-[9999] w-56 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
+          className="fixed z-[9999] w-60 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
           style={{ left: nodeMenu.x, top: nodeMenu.y }}
           onClick={e => e.stopPropagation()}
         >
-          {/* Header */}
           <div className="px-3 py-2 border-b border-gray-100">
             <p className="text-xs font-semibold text-gray-800 truncate">{nodeMenu.label}</p>
             <p className="text-[10px] text-gray-400 mt-0.5">
@@ -517,14 +651,30 @@ function DiagramFlow({ filters, onEditRelationship }: Props) {
             </p>
           </div>
 
-          {/* Common action */}
           <div className="py-1">
-            <MI icon={<Eye size={14} className="text-gray-400" />} label="View Application Details" onClick={closeMenu} />
+            <MI
+              icon={<Eye size={14} className="text-gray-400" />}
+              label="View Application Details"
+              onClick={() => {
+                if (!nodeMenu.isCenter) {
+                  const rel = relCIsRef.current.find(r => r.sysId === nodeMenu.nodeId);
+                  if (rel && onSelectAppRef.current) {
+                    onSelectAppRef.current({
+                      id: rel.sysId, name: rel.name, sysId: rel.sysId,
+                      table: rel.sysClass || 'cmdb_ci_service',
+                      app: rel.name, dept: '', env: '', status: '',
+                      incidents: 0, changes: 0, criticality: '', servers: 0, lastUpdated: '',
+                    });
+                  }
+                }
+                closeMenu();
+              }}
+            />
 
             {nodeMenu.isCenter ? (
               <>
-                <MI icon={<ArrowUp    size={14} className="text-orange-400" />} label="Add Upstream Relationship"     onClick={closeMenu} />
-                <MI icon={<ArrowDown  size={14} className="text-blue-400"   />} label="Add Downstream Relationship"   onClick={closeMenu} />
+                <MI icon={<ArrowUp        size={14} className="text-orange-400" />} label="Add Upstream Relationship"     onClick={closeMenu} />
+                <MI icon={<ArrowDown      size={14} className="text-blue-400"   />} label="Add Downstream Relationship"   onClick={closeMenu} />
                 <MI icon={<ArrowLeftRight size={14} className="text-violet-400" />} label="Add Bidirectional Relationship" onClick={closeMenu} />
                 <div className="border-t border-gray-100 my-1" />
                 <MI icon={<Edit2 size={14} className="text-gray-400" />} label="Edit CI Details"
@@ -541,54 +691,48 @@ function DiagramFlow({ filters, onEditRelationship }: Props) {
             )}
           </div>
 
-          {/* ── Relationship level picker (only for expandable nodes) ─────────── */}
-          {!nodeMenu.isCenter && getMaxLevels(nodeMenu.nodeId) > 0 && (() => {
-            const maxLvl = getMaxLevels(nodeMenu.nodeId);
-            const curLvl = expandedLevels[nodeMenu.nodeId] ?? 0;
-            return (
-              <>
-                <div className="border-t border-gray-100" />
-                <div className="px-3 py-3">
-                  <div className="flex items-center gap-1.5 mb-2.5">
-                    <Network size={13} className="text-blue-500 flex-shrink-0" />
-                    <span className="text-[11px] font-semibold text-gray-700">Expand Relationships</span>
-                  </div>
-
-                  {/* Level buttons 0 … maxLvl */}
-                  <div
-                    className="grid gap-1 mb-2"
-                    style={{ gridTemplateColumns: `repeat(${maxLvl + 1}, 1fr)` }}
-                  >
-                    {Array.from({ length: maxLvl + 1 }, (_, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setLevel(nodeMenu.nodeId, i)}
-                        className="py-1.5 rounded-md border text-xs font-semibold transition-all"
-                        style={{
-                          background:  curLvl === i ? '#2563EB' : '#F9FAFB',
-                          color:       curLvl === i ? '#fff'    : '#374151',
-                          borderColor: curLvl === i ? '#2563EB' : '#E5E7EB',
-                          boxShadow:   curLvl === i ? '0 1px 4px rgba(37,99,235,.4)' : 'none',
-                        }}
-                      >
-                        {i === 0 ? '0' : `${i}L`}
-                      </button>
-                    ))}
-                  </div>
-
-                  <p className="text-[10px] text-gray-400 leading-snug">
-                    {curLvl === 0
-                      ? `Direct connection only · ${maxLvl} more level${maxLvl > 1 ? 's' : ''} available`
-                      : `Showing ${curLvl} level${curLvl > 1 ? 's' : ''} of downstream relationships`}
-                  </p>
+          {/* ── Level expansion picker (L1 nodes with descendants only) ─── */}
+          {isL1Node && menuNodeMaxLvl > 0 && (
+            <>
+              <div className="border-t border-gray-100" />
+              <div className="px-3 py-3">
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <Network size={13} className="text-blue-500 flex-shrink-0" />
+                  <span className="text-[11px] font-semibold text-gray-700">Expand Relationships</span>
                 </div>
-              </>
-            );
-          })()}
+
+                <div
+                  className="grid gap-1 mb-2"
+                  style={{ gridTemplateColumns: `repeat(${menuNodeMaxLvl + 1}, 1fr)` }}
+                >
+                  {Array.from({ length: menuNodeMaxLvl + 1 }, (_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setLevel(nodeMenu.nodeId, i)}
+                      className="py-1.5 rounded-md border text-xs font-semibold transition-all"
+                      style={{
+                        background:  menuNodeCurLvl === i ? '#2563EB' : '#F9FAFB',
+                        color:       menuNodeCurLvl === i ? '#fff'    : '#374151',
+                        borderColor: menuNodeCurLvl === i ? '#2563EB' : '#E5E7EB',
+                        boxShadow:   menuNodeCurLvl === i ? '0 1px 4px rgba(37,99,235,.4)' : 'none',
+                      }}
+                    >
+                      {i === 0 ? '0' : `${i}L`}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="text-[10px] text-gray-400 leading-snug">
+                  {menuNodeCurLvl === 0
+                    ? `Direct connection only · up to ${menuNodeMaxLvl} more level${menuNodeMaxLvl > 1 ? 's' : ''} available`
+                    : `Showing ${menuNodeCurLvl} level${menuNodeCurLvl > 1 ? 's' : ''} of relationships`}
+                </p>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* Drag hint */}
       <div className="absolute bottom-2 right-14 pointer-events-none">
         <span className="text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded-full border border-gray-200 shadow-sm">
           Drag to rearrange · Scroll to zoom
@@ -598,9 +742,7 @@ function DiagramFlow({ filters, onEditRelationship }: Props) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Wrapper — ReactFlowProvider makes useReactFlow() available in DiagramFlow
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Wrapper ──────────────────────────────────────────────────────────────────
 export default function RelationshipDiagram(props: Props) {
   return (
     <ReactFlowProvider>
@@ -609,9 +751,6 @@ export default function RelationshipDiagram(props: Props) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tiny menu-item helper
-// ─────────────────────────────────────────────────────────────────────────────
 function MI({ icon, label, onClick, danger = false }: {
   icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean;
 }) {
