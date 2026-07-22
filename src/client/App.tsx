@@ -10,7 +10,7 @@ import ApplicationDetails from './app/components/ApplicationDetails';
 import CIDetailView, { type CIItem } from './app/components/CIDetailView';
 import GlobalSearchBar from './app/components/GlobalSearchBar';
 import { type AppItem } from './app/data/appData';
-import { queryTable } from './api/servicenow';
+import { queryTable, getSysProperties, APP_SCOPE } from './api/servicenow';
 
 type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' | 'dashboard' | 'network-links' | 'not-found';
 
@@ -27,6 +27,8 @@ const PAGE_TO_VIEW: Record<string, View> = {
   app: 'app-home',
   ci:  'ci-search',
 };
+
+const HIERARCHY_PROP = `${APP_SCOPE}.enable.new.app.hierarchy`;
 
 function isServiceClass(table: string) {
   return table.startsWith('cmdb_ci_service');
@@ -84,6 +86,17 @@ export function App({ username }: Props) {
   const [selectedCI,  setSelectedCI]  = useState<CIItem  | null>(null);
   const [ciSource, setCISource]       = useState<'ci-search' | 'app-details'>('ci-search');
   const [notFoundCtx, setNotFoundCtx] = useState<{ table: string; sysId: string } | null>(null);
+  // true = 3-level hierarchy (default); false = 2-level hierarchy
+  const [hierarchyMode, setHierarchyMode] = useState<boolean>(true);
+
+  useEffect(() => {
+    getSysProperties([HIERARCHY_PROP])
+      .then(props => {
+        const val = props[HIERARCHY_PROP];
+        setHierarchyMode(val === undefined || val.toLowerCase() === 'true');
+      })
+      .catch(() => setHierarchyMode(true));
+  }, []);
 
   const initials = username.split('.').map(p => p.charAt(0).toUpperCase()).join('').slice(0, 2);
 
@@ -241,7 +254,22 @@ export function App({ username }: Props) {
           <span className="text-white font-semibold text-lg">CLSA</span>
         </div>
         <div className="flex-1 flex justify-center px-4">
-          <GlobalSearchBar onSelectCI={(ci) => handleViewCI(ci, 'ci-search')} />
+          <GlobalSearchBar onSelectCI={(ci) => {
+            // In 2-level hierarchy mode, cmdb_ci_service records are app families
+            // or instances — redirect them to the app detail page.
+            if (!hierarchyMode && ci.class === 'cmdb_ci_service') {
+              handleSelectApp({
+                id: ci.id, sysId: ci.id, table: 'cmdb_ci_service',
+                name: ci.name, app: ci.name,
+                family: '', dept: '',
+                env: ci.environment ?? 'Production',
+                status: 'Operational', incidents: 0, changes: 0,
+                criticality: 'Medium', servers: 0, lastUpdated: '',
+              });
+            } else {
+              handleViewCI(ci, 'ci-search');
+            }
+          }} />
         </div>
         <div className="shrink-0 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
           {initials}
