@@ -1525,11 +1525,6 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
             {/* ── Live Data Section ── */}
             <div className="mb-2">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Live Data</span>
-              </div>
-
               {liveLoading && (
                 <div className="space-y-4">
                   {[1, 2, 3].map(i => (
@@ -1587,35 +1582,6 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 />
               ))}
             </div>
-
-            {/* ── Demo Data Section ── */}
-            <div className="flex items-center gap-3 my-6">
-              <div className="flex-1 border-t border-dashed border-gray-300" />
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">Demo Data</span>
-              <div className="flex-1 border-t border-dashed border-gray-300" />
-            </div>
-
-            {filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-                <Search className="w-12 h-12 mb-3 opacity-30" />
-                <p className="text-sm">No demo applications match your filters.</p>
-              </div>
-            ) : (
-              appFamilies.map(family => {
-                const appGroups = byFamily.get(family.id)!;
-                if (appGroups.size === 0) return null;
-                return (
-                  <FamilySection
-                    key={family.id}
-                    family={family}
-                    appGroups={appGroups}
-                    viewMode={viewMode}
-                    onSelectApp={onSelectApp}
-                    onFlagClick={(app, flagType) => setPanel({ app, flagType })}
-                  />
-                );
-              })
-            )}
           </div>
         </main>
       </div>
