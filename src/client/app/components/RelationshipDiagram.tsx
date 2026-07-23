@@ -539,7 +539,7 @@ interface MenuState { nodeId: string; label: string; isCenter: boolean; x: numbe
 
 // ─── DiagramFlow ──────────────────────────────────────────────────────────────
 function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp, onSelectApp }: Props) {
-  const { setCenter } = useReactFlow();
+  const { setCenter, getZoom } = useReactFlow();
 
   const [nodeMenu,        setNodeMenu]        = useState<MenuState | null>(null);
   const [relCIs,          setRelCIs]          = useState<RelCI[]>([]);
@@ -557,6 +557,7 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
   const nodeL1MapRef     = useRef(new Map<string, { direction: Direction; svcType: ServiceType }>());
   const nodeInfoMapRef   = useRef(new Map<string, { name: string; sysClass: string }>());
   const nodeSearchRef    = useRef(nodeSearch);
+  const focusNodeIdRef   = useRef<string | null>(null);
   useEffect(() => { relCIsRef.current      = relCIs; },         [relCIs]);
   useEffect(() => { childrenRef.current    = childrenByNode; }, [childrenByNode]);
   useEffect(() => { onSelectAppRef.current = onSelectApp; },    [onSelectApp]);
@@ -585,6 +586,7 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
 
   const closeMenu  = useCallback(() => setNodeMenu(null), []);
   const setLevel   = useCallback((nodeId: string, lvl: number) => {
+    if (lvl > 0) focusNodeIdRef.current = nodeId;
     setExpandedLevels(prev => ({ ...prev, [nodeId]: lvl }));
     setNodeMenu(null);
   }, []);
@@ -660,7 +662,14 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
     setNodes(styledNodes);
     setEdges(e);
 
-    if (isNewApp || relCIs.length > 0) {
+    const focusId = focusNodeIdRef.current;
+    if (focusId) {
+      focusNodeIdRef.current = null;
+      const target = styledNodes.find(n => n.id === focusId);
+      if (target) {
+        setTimeout(() => setCenter(target.position.x, target.position.y, { zoom: getZoom(), duration: 420 }), 80);
+      }
+    } else if (isNewApp) {
       const zoom = Math.max(0.5, 1.1 - relCIs.length * 0.035);
       setTimeout(() => setCenter(CENTER_X, CENTER_Y, { zoom, duration: 420 }), 80);
     }

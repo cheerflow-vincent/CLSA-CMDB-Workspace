@@ -1,13 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
-import { bootstrapAuth, initUserToken } from './api/servicenow'
+import { initUserToken } from './api/servicenow'
 import './tailwind.css'
 
-const { username } = bootstrapAuth()
-
 function Root() {
-  return <App username={username} />
+  return <App />
 }
 
 // Fetch the ServiceNow user token before rendering so all API calls are

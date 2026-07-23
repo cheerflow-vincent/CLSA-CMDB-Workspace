@@ -551,15 +551,11 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
           <table className="w-full">
             <thead className="bg-gray-50 border-y border-gray-200">
               <tr>
-                {['CI Name','Type / Class','Environment','Location / Endpoints','Owner','Support Group','Last Modified','Action'].map(col => (
+                {['CI Name','Type / Class','Environment','Location / Endpoints','Owner','Support Group','Last Modified'].map(col => (
                   <th key={col} className="px-6 py-3 text-left">
-                    {col !== 'Action' ? (
-                      <button className="flex items-center gap-2 text-xs font-medium text-gray-700 uppercase hover:text-gray-900">
-                        {col}<ArrowUpDown className="w-4 h-4" />
-                      </button>
-                    ) : (
-                      <span className="text-xs font-medium text-gray-700 uppercase">{col}</span>
-                    )}
+                    <button className="flex items-center gap-2 text-xs font-medium text-gray-700 uppercase hover:text-gray-900">
+                      {col}<ArrowUpDown className="w-4 h-4" />
+                    </button>
                   </th>
                 ))}
               </tr>
@@ -573,21 +569,18 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
                   { key: 'owner',        placeholder: 'Filter owner…'   },
                   { key: 'supportGroup', placeholder: 'Filter group…'   },
                   { key: 'lastModified', placeholder: 'Filter date…'    },
-                  { key: null,           placeholder: ''                 },
-                ] as { key: keyof typeof colFilters | null; placeholder: string }[]).map(({ key, placeholder }, idx) => (
-                  <td key={idx} className="px-3 pb-2 pt-1">
-                    {key !== null ? (
-                      <div className="relative">
-                        <input type="text" value={colFilters[key]} placeholder={placeholder}
-                          onChange={e => setCol(key, e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300" />
-                        {colFilters[key] && (
-                          <button onClick={() => setCol(key, '')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
+                ] as { key: keyof typeof colFilters; placeholder: string }[]).map(({ key, placeholder }) => (
+                  <td key={key} className="px-3 pb-2 pt-1">
+                    <div className="relative">
+                      <input type="text" value={colFilters[key]} placeholder={placeholder}
+                        onChange={e => setCol(key, e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300" />
+                      {colFilters[key] && (
+                        <button onClick={() => setCol(key, '')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 ))}
               </tr>
@@ -595,7 +588,7 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
             <tbody className="divide-y divide-gray-200">
               {liveLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={7} className="px-6 py-12 text-center text-gray-400 text-sm">
                     <div className="flex items-center justify-center gap-2">
                       <svg className="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -607,36 +600,55 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
                 </tr>
               ) : displayData.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={7} className="px-6 py-12 text-center text-gray-400 text-sm">
                     No records found. Try adjusting your filters and click Search.
                   </td>
                 </tr>
               ) : (
                 displayData.map(item => (
                   <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <p className="font-medium text-gray-900">{item.name}</p>
-                      <p className="text-sm text-gray-500">{item.class}</p>
-                      {(item.hasIncident || item.hasChange) && (
-                        <div className="flex gap-2 mt-1">
-                          {item.hasIncident && (
-                            <button
-                              title="View linked incidents"
-                              onClick={() => setPanel({ ciId: item.id, ciName: item.name, flagType: 'incident' })}
-                              className="inline-flex items-center justify-center w-6 h-6 bg-red-100 rounded hover:bg-red-200 transition-colors">
-                              <AlertCircle className="w-4 h-4 text-red-600" />
-                            </button>
-                          )}
-                          {item.hasChange && (
-                            <button
-                              title="View linked changes"
-                              onClick={() => setPanel({ ciId: item.id, ciName: item.name, flagType: 'change' })}
-                              className="inline-flex items-center justify-center w-6 h-6 bg-yellow-100 rounded hover:bg-yellow-200 transition-colors">
-                              <Calendar className="w-4 h-4 text-yellow-600" />
-                            </button>
-                          )}
-                        </div>
-                      )}
+                    <td className="px-6 py-4 max-w-[240px]">
+                      <div className="flex flex-col items-start gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onViewDetails(item)}
+                          title="View CI details"
+                          className="font-medium text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
+                        >
+                          {item.name}
+                        </button>
+                        <p className="text-sm text-gray-500">{item.class}</p>
+                        {(item.hasIncident || item.hasChange) && (
+                          <div className="flex gap-2 mt-0.5">
+                            {item.hasIncident && (
+                              <button
+                                title="View linked incidents"
+                                onClick={() => setPanel({ ciId: item.id, ciName: item.name, flagType: 'incident' })}
+                                className="inline-flex items-center justify-center w-6 h-6 bg-red-100 rounded hover:bg-red-200 transition-colors">
+                                <AlertCircle className="w-4 h-4 text-red-600" />
+                              </button>
+                            )}
+                            {item.hasChange && (
+                              <button
+                                title="View linked changes"
+                                onClick={() => setPanel({ ciId: item.id, ciName: item.name, flagType: 'change' })}
+                                className="inline-flex items-center justify-center w-6 h-6 bg-yellow-100 rounded hover:bg-yellow-200 transition-colors">
+                                <Calendar className="w-4 h-4 text-yellow-600" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        <a
+                          href={`/${item.table || 'cmdb_ci'}.do?sys_id=${item.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                          title="Open in ServiceNow"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          Open in ServiceNow
+                        </a>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-700">{item.type}</td>
                     <td className="px-6 py-4 text-sm text-gray-700">{item.environment}</td>
@@ -644,21 +656,6 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
                     <td className="px-6 py-4 text-sm text-gray-700">{item.owner}</td>
                     <td className="px-6 py-4 text-sm text-gray-700">{item.supportGroup}</td>
                     <td className="px-6 py-4 text-sm text-gray-700">{item.lastModified}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col items-start gap-1.5">
-                        <button onClick={() => onViewDetails(item)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                          View Detail
-                        </button>
-                        <a
-                          href={`/${item.table || 'cmdb_ci'}.do?sys_id=${item.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium"
-                        >
-                          <ExternalLink className="w-3 h-3" /> Open in ServiceNow
-                        </a>
-                      </div>
-                    </td>
                   </tr>
                 ))
               )}

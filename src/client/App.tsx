@@ -14,8 +14,6 @@ import { queryTable, getSysProperties, APP_SCOPE } from './api/servicenow';
 
 type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' | 'dashboard' | 'network-links' | 'not-found';
 
-interface Props { username: string }
-
 // ── URL / routing helpers ─────────────────────────────────────────────────────
 
 // Map between View names and the ?page= URL value
@@ -73,7 +71,7 @@ function pushPageUrl(view: View) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function App({ username }: Props) {
+export function App() {
   // Determine initial view SYNCHRONOUSLY from URL — prevents any flash of the
   // wrong page. Detail deep-links (table+sys_id) start in 'loading' until the
   // API call resolves; ?page= params resolve immediately.
@@ -97,8 +95,6 @@ export function App({ username }: Props) {
       })
       .catch(() => setHierarchyMode(true));
   }, []);
-
-  const initials = username.split('.').map(p => p.charAt(0).toUpperCase()).join('').slice(0, 2);
 
   // ── Navigate to a record fetched from the API ─────────────────────────────
   //
@@ -247,13 +243,19 @@ export function App({ username }: Props) {
     <div className="size-full flex flex-col bg-gray-50 h-screen overflow-hidden">
       {/* ── Top header ───────────────────────────────────────────────────── */}
       <header className="h-14 flex items-center gap-4 px-6 shadow-lg shrink-0" style={{ background: '#00005A' }}>
-        <div className="flex items-center shrink-0">
+        <a
+          href={`${window.location.origin}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open ServiceNow home"
+          className="flex items-center shrink-0 rounded hover:opacity-90 transition-opacity"
+        >
           <img
             src="/x_citi4_clsa_cmd_0.workspace_logo.png"
             alt="CLSA"
             className="h-8 w-auto object-contain"
           />
-        </div>
+        </a>
         <div className="flex-1 flex justify-center px-4">
           <GlobalSearchBar onSelectCI={(ci) => {
             // In 2-level hierarchy mode, cmdb_ci_service records are app families
@@ -271,9 +273,6 @@ export function App({ username }: Props) {
               handleViewCI(ci, 'ci-search');
             }
           }} />
-        </div>
-        <div className="shrink-0 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-          {initials}
         </div>
       </header>
 

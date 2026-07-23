@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Search, Server, Database, DollarSign,
-  AlertCircle, Calendar, ChevronLeft, ChevronRight, ChevronDown, Loader2, ExternalLink,
+  AlertCircle, Calendar, ChevronLeft, ChevronRight, ChevronDown, Loader2,
 } from 'lucide-react';
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE } from './RelationshipDiagram';
 import type { DiagramFilters } from './RelationshipDiagram';
@@ -307,17 +307,6 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   <span className="flex-1 text-sm font-semibold text-gray-900 truncate">
                     {selectedApp?.name ?? '—'}
                   </span>
-                  {selectedApp?.sysId && selectedApp?.table && (
-                    <a
-                      href={`/${selectedApp.table}.do?sys_id=${selectedApp.sysId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Open in ServiceNow"
-                      className="p-1 hover:bg-indigo-50 rounded flex-shrink-0 text-indigo-500 hover:text-indigo-700 transition-colors"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
-                  )}
                   <button onClick={() => setDetailsPanelOpen(false)}
                     className="p-1 hover:bg-gray-100 rounded flex-shrink-0">
                     <ChevronRight className="w-4 h-4 text-gray-500" />

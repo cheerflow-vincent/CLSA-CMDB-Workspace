@@ -287,7 +287,6 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
               Instance Info
               {detLoading && <Loader2 className="inline-block ml-1.5 w-3 h-3 animate-spin text-blue-400" />}
             </th>
-            <th className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -297,9 +296,28 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
             const detail  = detailMap.get(row.sysId);
             return (
               <tr key={row.sysId} className={`hover:bg-gray-50 transition-colors ${meta.rowCls}`}>
-                {/* App name */}
-                <td className="px-5 py-4 font-medium text-gray-800 max-w-[200px]">
-                  <span className="break-words">{row.name}</span>
+                {/* App name + actions */}
+                <td className="px-5 py-4 max-w-[220px]">
+                  <div className="flex flex-col items-start gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleViewDetails(row)}
+                      title="View application details"
+                      className="text-sm font-medium text-gray-800 hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
+                    >
+                      {row.name}
+                    </button>
+                    <a
+                      href={`/${row.sysClass || 'cmdb_ci_service'}.do?sys_id=${row.sysId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                      title="Open in ServiceNow"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Open in ServiceNow
+                    </a>
+                  </div>
                 </td>
 
                 {/* Direction badge */}
@@ -322,28 +340,6 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
                 {/* Instance info */}
                 <td className="px-5 py-4">
                   <InstanceInfoCell detail={detail} />
-                </td>
-
-                {/* Actions */}
-                <td className="px-5 py-4 text-right">
-                  <div className="inline-flex items-center gap-2">
-                    <button
-                      onClick={() => handleViewDetails(row)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-colors whitespace-nowrap"
-                    >
-                      View Details
-                    </button>
-                    <a
-                      href={`/${row.sysClass || 'cmdb_ci_service'}.do?sys_id=${row.sysId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 text-xs font-medium text-indigo-600 hover:bg-indigo-50 hover:border-indigo-400 transition-colors whitespace-nowrap"
-                      title="Open in ServiceNow"
-                    >
-                      <ExternalLink size={12} />
-                      ServiceNow
-                    </a>
-                  </div>
                 </td>
               </tr>
             );
