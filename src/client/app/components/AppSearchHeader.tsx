@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, X, ArrowRight, ChevronRight, Loader2 } from 'lucide-react';
+import { Search, X, ArrowRight, ChevronRight, Loader2, ExternalLink } from 'lucide-react';
 import { queryTable, getSysProperties, APP_SCOPE } from '../../api/servicenow';
 import { mockApplications, type AppItem } from '../data/appData';
 
@@ -216,20 +216,32 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
 
       {/* Breadcrumb (detail mode) */}
       {mode === 'detail' && (
-        <nav className="flex items-center gap-1.5 mb-4 text-sm">
-          <button
-            onClick={onBackToHome}
-            className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
-          >
-            Application Mapping
-          </button>
-          <ChevronRight className="w-4 h-4 text-gray-400" />
-          <span className="text-gray-400">All Applications</span>
-          <ChevronRight className="w-4 h-4 text-gray-400" />
-          <span className="text-gray-800 font-medium truncate max-w-xs">
-            {currentApp?.name ?? 'Application Detail'}
-          </span>
-        </nav>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <nav className="flex items-center gap-1.5 text-sm min-w-0">
+            <button
+              onClick={onBackToHome}
+              className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
+            >
+              Application Mapping
+            </button>
+            <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+            <span className="text-gray-400">All Applications</span>
+            <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+            <span className="text-gray-800 font-medium truncate max-w-xs">
+              {currentApp?.name ?? 'Application Detail'}
+            </span>
+          </nav>
+          {currentApp?.sysId && (
+            <a
+              href={`/${currentApp.table || 'cmdb_ci_service'}.do?sys_id=${currentApp.sysId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" /> Open in ServiceNow
+            </a>
+          )}
+        </div>
       )}
 
       {/* Jump to Application Details — shown in both home and detail modes */}

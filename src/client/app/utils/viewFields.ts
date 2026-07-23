@@ -3,13 +3,25 @@ import { queryTable } from '../../api/servicenow';
 /** One field configured in a form view */
 export interface ViewField { element: string; label: string }
 
-/** Coerce any API value to a plain string. */
+/** Coerce any API value to a plain string (prefers display_value). */
 export const str = (v: unknown): string => {
   if (v == null) return '';
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
     if (o.display_value != null) return String(o.display_value);
     if (o.value        != null) return String(o.value);
+    return '';
+  }
+  return String(v);
+};
+
+/** Coerce any API value to its raw database value (prefers value). */
+export const raw = (v: unknown): string => {
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (o.value        != null) return String(o.value);
+    if (o.display_value != null) return String(o.display_value);
     return '';
   }
   return String(v);

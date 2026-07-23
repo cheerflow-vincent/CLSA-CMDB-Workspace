@@ -3,12 +3,12 @@ import {
   Search, AlertCircle, Calendar, CheckCircle2, Clock,
   ChevronDown, ChevronUp, ChevronRight, X, LayoutGrid, List,
   Layers, TrendingUp, ArrowRight, Building2, SlidersHorizontal,
-  Box, Package, Database, Loader2,
+  Box, Package, Database, Loader2, ExternalLink,
 } from 'lucide-react';
 import FlagDetailPanel, { type FlagType, type IncidentRecord, type ChangeRecord } from './FlagDetailPanel';
 import AppSearchHeader from './AppSearchHeader';
 import { queryTable } from '../../api/servicenow';
-import { type ViewField, str, loadViewFields as loadViewFieldsUtil } from '../utils/viewFields';
+import { type ViewField, str, raw, loadViewFields as loadViewFieldsUtil } from '../utils/viewFields';
 import {
   mockApplications, appIncidents, appChanges, appFamilies,
   type AppItem, type AppFamily,
@@ -235,9 +235,9 @@ async function loadThreeLevelInstanceDetails(mapping: ThreeLevelMapping): Promis
   const FILTER_EXTRA = ['department', 'u_tier'];
 
   const coreInsts = await chunkedIN<Record<string, unknown>>(
-    'cmdb_ci_service_auto', 'sys_id', instanceIds, '', CORE, 500, { displayValue: true },
+    'cmdb_ci_service_auto', 'sys_id', instanceIds, '', CORE, 500, { displayValue: 'all' },
   );
-  const tableNames = [...new Set(coreInsts.map(i => str(i.sys_class_name)).filter(Boolean))];
+  const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
 
   const [viewFieldsByTable, incRows, chgRows] = await Promise.all([
     Promise.all(tableNames.map(t => loadViewFields(t).then(vf => ({ table: t, vf })))),
@@ -273,15 +273,15 @@ async function loadThreeLevelInstanceDetails(mapping: ThreeLevelMapping): Promis
   const fetchFields  = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
 
   const fullInsts = await chunkedIN<Record<string, unknown>>(
-    'cmdb_ci_service_auto', 'sys_id', instanceIds, '', fetchFields, 500, { displayValue: true },
+    'cmdb_ci_service_auto', 'sys_id', instanceIds, '', fetchFields, 500, { displayValue: 'all' },
   );
 
   for (const i of fullInsts) {
-    const tableName = str(i.sys_class_name);
+    const tableName = raw(i.sys_class_name);
     const fieldValues: Record<string, string> = {};
     for (const field of fetchFields) fieldValues[field] = str(i[field]);
-    instMap.set(str(i.sys_id), {
-      sys_id:             str(i.sys_id),
+    instMap.set(raw(i.sys_id) || str(i.sys_id), {
+      sys_id:             raw(i.sys_id) || str(i.sys_id),
       name:               str(i.name),
       sys_class_name:     tableName,
       operational_status: str(i.operational_status),
@@ -353,7 +353,7 @@ async function chunkedIN<T>(
   extraQuery: string,
   fields: string[],
   limitPerChunk: number,
-  options?: { displayValue?: boolean },
+  options?: { displayValue?: boolean | 'all' },
 ): Promise<T[]> {
   const all: T[] = [];
   for (let i = 0; i < ids.length; i += CHUNK) {
@@ -361,7 +361,7 @@ async function chunkedIN<T>(
     const q = extraQuery ? `${inField}IN${slice}^${extraQuery}` : `${inField}IN${slice}`;
     const { result = [] } = await queryTable<T>({
       table, query: q, fields, limit: limitPerChunk,
-      ...(options?.displayValue ? { displayValue: true } : {}),
+      ...(options?.displayValue ? { displayValue: options.displayValue } : {}),
     });
     all.push(...result);
   }
@@ -444,9 +444,9 @@ async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<Li
   const { appFamilyMeta, appToInstances, instanceSvcIds } = mapping;
 
   const coreInsts = await chunkedIN<Record<string, unknown>>(
-    SVC_TABLE, 'sys_id', instanceSvcIds, '', CORE, 500, { displayValue: true },
+    SVC_TABLE, 'sys_id', instanceSvcIds, '', CORE, 500, { displayValue: 'all' },
   );
-  const tableNames = [...new Set(coreInsts.map(i => str(i.sys_class_name)).filter(Boolean))];
+  const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
 
   const [viewFieldsByTable, incRows, chgRows] = await Promise.all([
     Promise.all(tableNames.map(t => loadViewFields(t).then(vf => ({ table: t, vf })))),
@@ -482,16 +482,16 @@ async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<Li
   const fetchFields  = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
 
   const fullInsts = await chunkedIN<Record<string, unknown>>(
-    SVC_TABLE, 'sys_id', instanceSvcIds, '', fetchFields, 500, { displayValue: true },
+    SVC_TABLE, 'sys_id', instanceSvcIds, '', fetchFields, 500, { displayValue: 'all' },
   );
 
   const instMap = new Map<string, LiveInstance>();
   for (const i of fullInsts) {
-    const tableName = str(i.sys_class_name);
+    const tableName = raw(i.sys_class_name);
     const fieldValues: Record<string, string> = {};
     for (const field of fetchFields) fieldValues[field] = str(i[field]);
-    instMap.set(str(i.sys_id), {
-      sys_id:             str(i.sys_id),
+    instMap.set(raw(i.sys_id) || str(i.sys_id), {
+      sys_id:             raw(i.sys_id) || str(i.sys_id),
       name:               str(i.name),
       sys_class_name:     tableName,
       operational_status: str(i.operational_status),
@@ -621,7 +621,15 @@ function LiveInstanceCard({ inst, svcName, onViewDetails, onFlagClick }: {
           </div>
         )}
       </div>
-      <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end bg-gray-50 rounded-b-xl">
+      <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50 rounded-b-xl gap-2">
+        <a
+          href={`/${inst.sys_class_name || 'cmdb_ci_service'}.do?sys_id=${inst.sys_id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+        >
+          <ExternalLink className="w-3.5 h-3.5" /> ServiceNow
+        </a>
         <button onClick={onViewDetails}
           className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors group-hover:underline">
           View Details <ArrowRight className="w-3.5 h-3.5" />
@@ -674,8 +682,17 @@ function LiveInstanceRow({ inst, onViewDetails, onFlagClick }: {
             <Calendar className="w-3 h-3" />CHG
           </button>
         )}
+        <a
+          href={`/${inst.sys_class_name || 'cmdb_ci_service'}.do?sys_id=${inst.sys_id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+          title="Open in ServiceNow"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
         <button onClick={onViewDetails}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium ml-2">
+          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium ml-1">
           View Details <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -743,7 +760,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
                       ? 'Operational' : 'Degraded',
                     incidents: inst.incidents, changes: inst.changes,
                     criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: SVC_TABLE,
+                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
                     safe(inst.name) || inst.sys_id, ft,
@@ -765,7 +782,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
                       ? 'Operational' : 'Degraded',
                     incidents: inst.incidents, changes: inst.changes,
                     criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: SVC_TABLE,
+                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
                     inst.name, ft,
@@ -849,7 +866,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                       ? 'Operational' : 'Degraded',
                     incidents: inst.incidents, changes: inst.changes,
                     criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: SVC_TABLE,
+                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
                     safe(inst.name) || inst.sys_id, ft,
@@ -871,7 +888,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                       ? 'Operational' : 'Degraded',
                     incidents: inst.incidents, changes: inst.changes,
                     criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: SVC_TABLE,
+                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
                     safe(inst.name) || inst.sys_id, ft,

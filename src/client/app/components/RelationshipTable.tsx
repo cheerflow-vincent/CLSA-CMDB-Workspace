@@ -45,9 +45,9 @@ const DEFAULT_VIEW_FIELDS: ViewField[] = [
 const DIR_META: Record<Direction, {
   label: string; icon: React.ReactNode; rowCls: string; badgeCls: string;
 }> = {
-  upstream:      { label: 'Upstream',       icon: <ArrowUp       size={13} />, rowCls: 'border-l-4 border-orange-400', badgeCls: 'bg-orange-50 text-orange-700 ring-1 ring-orange-300' },
-  downstream:    { label: 'Downstream',     icon: <ArrowDown     size={13} />, rowCls: 'border-l-4 border-blue-400',   badgeCls: 'bg-blue-50   text-blue-700   ring-1 ring-blue-300'   },
-  bidirectional: { label: 'Bi-directional', icon: <ArrowLeftRight size={13} />, rowCls: 'border-l-4 border-violet-400', badgeCls: 'bg-violet-50 text-violet-700 ring-1 ring-violet-300' },
+  upstream:      { label: 'Upstream',       icon: <ArrowUp       size={13} />, rowCls: '', badgeCls: 'bg-orange-50 text-orange-700 ring-1 ring-orange-300' },
+  downstream:    { label: 'Downstream',     icon: <ArrowDown     size={13} />, rowCls: '', badgeCls: 'bg-blue-50   text-blue-700   ring-1 ring-blue-300'   },
+  bidirectional: { label: 'Bi-directional', icon: <ArrowLeftRight size={13} />, rowCls: '', badgeCls: 'bg-violet-50 text-violet-700 ring-1 ring-violet-300' },
 };
 
 /** Broader CI-class → human label map; falls back to humanising the raw name. */
@@ -326,13 +326,24 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
 
                 {/* Actions */}
                 <td className="px-5 py-4 text-right">
-                  <button
-                    onClick={() => handleViewDetails(row)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-colors whitespace-nowrap"
-                  >
-                    <ExternalLink size={12} />
-                    View Details
-                  </button>
+                  <div className="inline-flex items-center gap-2">
+                    <button
+                      onClick={() => handleViewDetails(row)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition-colors whitespace-nowrap"
+                    >
+                      View Details
+                    </button>
+                    <a
+                      href={`/${row.sysClass || 'cmdb_ci_service'}.do?sys_id=${row.sysId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 text-xs font-medium text-indigo-600 hover:bg-indigo-50 hover:border-indigo-400 transition-colors whitespace-nowrap"
+                      title="Open in ServiceNow"
+                    >
+                      <ExternalLink size={12} />
+                      ServiceNow
+                    </a>
+                  </div>
                 </td>
               </tr>
             );

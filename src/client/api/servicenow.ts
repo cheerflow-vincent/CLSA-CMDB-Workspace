@@ -79,7 +79,8 @@ interface TableQueryParams {
   limit?: number
   offset?: number
   orderBy?: string
-  displayValue?: boolean
+  /** false (default) = raw values; true = display values; 'all' = both as {value,display_value} objects */
+  displayValue?: boolean | 'all'
 }
 
 export async function queryTable<T>({
@@ -98,7 +99,8 @@ export async function queryTable<T>({
   if (query) params.sysparm_query = query
   if (fields.length) params.sysparm_fields = fields.join(',')
   if (orderBy) params.sysparm_orderby = orderBy
-  if (displayValue) params.sysparm_display_value = 'true'
+  if (displayValue === 'all') params.sysparm_display_value = 'all'
+  else if (displayValue) params.sysparm_display_value = 'true'
 
   const r = await axios.get(`/api/now/table/${table}`, { params })
   const totalCount = parseInt(r.headers['x-total-count'] ?? '0', 10)

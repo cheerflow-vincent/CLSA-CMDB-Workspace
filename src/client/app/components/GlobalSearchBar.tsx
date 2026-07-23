@@ -28,7 +28,22 @@ const DOT_WALK: Record<string, string> = {
 // Fields always fetched regardless of result.field property
 const BASE_API_FIELDS = ['sys_id', 'name', 'sys_class_name', 'environment', 'install_status'];
 
-// ── Install status lookup ─────────────────────────────────────────────────────
+// ── ServiceNow field type returned when sysparm_display_value=all ─────────────
+// Choice/reference/glide-class fields become objects; plain strings stay strings.
+type SnField = string | { value: string; display_value: string };
+
+/** Extract display value (human-readable) from an SnField. */
+function dv(f: SnField | undefined): string {
+  if (!f) return '';
+  return typeof f === 'object' ? (f.display_value ?? '') : f;
+}
+/** Extract raw database value from an SnField. */
+function rv(f: SnField | undefined): string {
+  if (!f) return '';
+  return typeof f === 'object' ? (f.value ?? '') : f;
+}
+
+// ── Install status lookup (keyed by raw numeric code) ────────────────────────
 const INSTALL_STATUS: Record<string, { label: string; color: string }> = {
   '1':   { label: 'Installed',       color: 'text-green-600' },
   '2':   { label: 'On Order',        color: 'text-blue-500'  },
@@ -50,13 +65,15 @@ interface SearchConfig {
   apiFields:    string[];   // actual field names to request (with dot-walking)
 }
 
-// ── API row shape ─────────────────────────────────────────────────────────────
-type ApiCI = Record<string, string> & {
-  sys_id: string;
-  name: string;
-  sys_class_name: string;
-  environment: string;
-  install_status: string;
+// ── API row shape (sysparm_display_value=all) ──────────────────────────────────
+// Choice/reference/glide-class fields come back as SnField objects; plain
+// string fields (name, dot-walked results) stay as plain strings.
+type ApiCI = Record<string, SnField> & {
+  sys_id:         string;       // sys_id is always a plain string
+  name:           string;       // plain string field
+  sys_class_name: SnField;      // glide-class — wrapped as {value,display_value}
+  environment:    SnField;      // choice field — may be wrapped
+  install_status: SnField;      // integer choice — wrapped
 };
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -92,15 +109,19 @@ function buildQuery(cfg: SearchConfig, term: string): string {
 }
 
 function apiToCIItem(r: ApiCI): CIItem {
+  // With displayValue:'all', most fields arrive as {value, display_value} objects.
+  const classLabel = dv(r.sys_class_name);   // e.g. "Server"
+  const tableName  = rv(r.sys_class_name);   // e.g. "cmdb_ci_server"
   return {
-    id:           r.sys_id,
-    name:         r.name,
-    type:         formatClassName(r.sys_class_name),
-    class:        r.sys_class_name,
-    environment:  r.environment ?? '',
-    location:     r['location.name'] ?? '',
-    owner:        r['managed_by.name'] ?? r['assigned_to.name'] ?? '',
-    supportGroup: r['support_group.name'] ?? '',
+    id:           rv(r.sys_id as SnField) || String(r.sys_id),
+    name:         dv(r.name as SnField) || rv(r.name as SnField),
+    type:         formatClassName(classLabel),
+    class:        classLabel,
+    table:        tableName || 'cmdb_ci',
+    environment:  dv(r.environment) ?? '',
+    location:     dv(r['location.name'] as SnField),
+    owner:        dv(r['managed_by.name'] as SnField) || dv(r['assigned_to.name'] as SnField),
+    supportGroup: dv(r['support_group.name'] as SnField),
     lastModified: '',
     hasIncident:  false,
     hasChange:    false,
@@ -147,22 +168,23 @@ function Highlight({ text, query }: { text: string; query: string }) {
   );
 }
 
-function EnvBadge({ env }: { env: string }) {
-  if (!env) return null;
-  const isProd = /prod/i.test(env);
+function EnvBadge({ env }: { env: SnField }) {
+  const envStr = dv(env);
+  if (!envStr) return null;
+  const isProd = /prod/i.test(envStr);
   return (
     <span className={`shrink-0 text-xs font-medium px-2.5 py-0.5 rounded-full ${
       isProd
         ? 'bg-green-100 text-green-700 border border-green-200'
         : 'bg-amber-100 text-amber-700 border border-amber-200'
     }`}>
-      {isProd ? 'Production' : env || 'Non-Prod'}
+      {isProd ? 'Production' : envStr || 'Non-Prod'}
     </span>
   );
 }
 
-function StatusDot({ value }: { value: string }) {
-  const s = INSTALL_STATUS[value];
+function StatusDot({ value }: { value: SnField }) {
+  const s = INSTALL_STATUS[rv(value)];
   if (!s) return null;
   return <span className={`text-xs font-medium ${s.color}`}>{s.label}</span>;
 }
@@ -174,7 +196,7 @@ function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
     if (f === 'name') continue; // shown as header
 
     if (f === 'install_status') {
-      const s = INSTALL_STATUS[r.install_status];
+      const s = INSTALL_STATUS[rv(r.install_status)];
       if (s) items.push(
         <span key="status" className={`text-xs font-medium ${s.color}`}>{s.label}</span>
       );
@@ -184,23 +206,24 @@ function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
     if (f === 'sys_class_name') {
       items.push(
         <span key="class" className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
-          {formatClassName(r.sys_class_name)}
+          {formatClassName(dv(r.sys_class_name))}
         </span>
       );
       continue;
     }
 
-    // Reference / other fields
-    const apiKey  = DOT_WALK[f] ?? f;
-    const rawVal  = r[apiKey];
-    if (!rawVal) continue;
+    // Reference / other fields — use dv() so reference objects show their label
+    const apiKey   = DOT_WALK[f] ?? f;
+    const fieldVal = r[apiKey];
+    const display  = dv(fieldVal as SnField);
+    if (!display) continue;
 
     // Human-readable label for the field
     const label = f === 'managed_by' ? 'Owner'
                 : f === 'assigned_to' ? 'Owner'
                 : f.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     items.push(
-      <span key={f} className="text-xs text-gray-500">{label}: <span className="text-gray-700">{rawVal}</span></span>
+      <span key={f} className="text-xs text-gray-500">{label}: <span className="text-gray-700">{display}</span></span>
     );
   }
 
@@ -246,10 +269,11 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
     try {
       const snQuery = buildQuery(config, term.trim());
       const { result } = await queryTable<ApiCI>({
-        table:  'cmdb_ci',
-        query:  snQuery,
-        fields: config.apiFields,
-        limit:  8,
+        table:        'cmdb_ci',
+        query:        snQuery,
+        fields:       config.apiFields,
+        limit:        8,
+        displayValue: 'all',
       });
       setResults(result ?? []);
     } catch {
@@ -321,26 +345,30 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
             </div>
 
             <ul>
-              {results.map((r, i) => (
-                <li key={r.sys_id}>
-                  <button
-                    onClick={() => handleSelect(r)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left group"
-                  >
-                    {/* Left: Name + key info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        <Highlight text={r.name} query={query} />
-                      </p>
-                      <KeyInfo r={r} cfg={config} />
-                    </div>
+              {results.map((r, i) => {
+                const id   = rv(r.sys_id as SnField) || String(i);
+                const name = dv(r.name as SnField) || rv(r.name as SnField);
+                return (
+                  <li key={id}>
+                    <button
+                      onClick={() => handleSelect(r)}
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition-colors text-left group"
+                    >
+                      {/* Left: Name + key info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          <Highlight text={name} query={query} />
+                        </p>
+                        <KeyInfo r={r} cfg={config} />
+                      </div>
 
-                    {/* Right: environment badge */}
-                    <EnvBadge env={r.environment} />
-                  </button>
-                  {i < results.length - 1 && <div className="mx-4 border-t border-gray-100" />}
-                </li>
-              ))}
+                      {/* Right: environment badge */}
+                      <EnvBadge env={r.environment} />
+                    </button>
+                    {i < results.length - 1 && <div className="mx-4 border-t border-gray-100" />}
+                  </li>
+                );
+              })}
             </ul>
 
             <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">

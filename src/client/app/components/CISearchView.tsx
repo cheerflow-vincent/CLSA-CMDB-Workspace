@@ -3,7 +3,7 @@ import {
   Server, Database, CircuitBoard, Network, Search,
   ChevronDown, ArrowUpDown, ChevronLeft, ChevronRight,
   AlertCircle, Calendar, Layers, Check, X,
-  Download, FileText
+  Download, FileText, ExternalLink
 } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
 import { queryTable } from '../../api/servicenow';
@@ -59,7 +59,7 @@ const tabLabels: Record<Tab, string> = {
   databases: 'Databases', circuits: 'Circuits', 'business-services': 'Business Services',
 };
 // ─── v2 live-data config ──────────────────────────────────────────────────────
-type DisplayRecord = typeof mockData[0];
+type DisplayRecord = CIItem;
 // Base fields requested for every table. Dot-walking resolves reference fields
 // to flat strings — safer than sysparm_display_value=true which can return
 // { value, display_value } objects that crash React rendering.
@@ -93,12 +93,13 @@ const V2_TABS: V2TabCfg[] = [
     subtitle: r => r.business_criticality ?? '',
   },
 ];
-function mapRecord(r: Record<string,string>, cfg: Pick<V2TabCfg,'label'|'subtitle'>): DisplayRecord {
+function mapRecord(r: Record<string,string>, cfg: Pick<V2TabCfg,'label'|'subtitle'|'table'>): DisplayRecord {
   return {
     id:           r.sys_id ?? '',
     name:         r.name ?? '—',
     type:         cfg.label || (r.sys_class_name ?? ''),
     class:        cfg.subtitle(r),
+    table:        cfg.table,
     environment:  r.environment ?? '',
     location:     r['location.name'] ?? '',
     owner:        r['managed_by.name'] ?? '',
@@ -644,9 +645,19 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
                     <td className="px-6 py-4 text-sm text-gray-700">{item.supportGroup}</td>
                     <td className="px-6 py-4 text-sm text-gray-700">{item.lastModified}</td>
                     <td className="px-6 py-4">
-                      <button onClick={() => onViewDetails(item)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                        View Detail
-                      </button>
+                      <div className="flex flex-col items-start gap-1.5">
+                        <button onClick={() => onViewDetails(item)} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                          View Detail
+                        </button>
+                        <a
+                          href={`/${item.table || 'cmdb_ci'}.do?sys_id=${item.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Open in ServiceNow
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 ))

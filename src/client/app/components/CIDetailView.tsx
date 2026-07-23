@@ -18,6 +18,8 @@ export interface CIItem {
   name: string;
   type: string;
   class: string;
+  /** Raw ServiceNow table name (e.g. cmdb_ci_server) used to build the classic record URL */
+  table?: string;
   environment: string;
   location: string;
   owner: string;
@@ -204,6 +206,14 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp }: CIDet
                 <ExternalLink className="w-3 h-3" />
               </button>
             )}
+            <a
+              href={`/${ci.table || 'cmdb_ci'}.do?sys_id=${ci.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" /> Open in ServiceNow
+            </a>
             <button onClick={() => setShowEditModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors">
               <Edit2 className="w-4 h-4" /> Edit

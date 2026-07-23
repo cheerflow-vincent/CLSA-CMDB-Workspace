@@ -211,7 +211,7 @@ export function App({ username }: Props) {
     setSelectedCI(ci);
     setCISource(source);
     setCurrentView('ci-detail');
-    pushUrl(ci.class, ci.id, source);
+    pushUrl(ci.table || ci.class, ci.id, source);
   };
 
   // In-app Back buttons use the browser history stack — equivalent to the
@@ -246,18 +246,19 @@ export function App({ username }: Props) {
   return (
     <div className="size-full flex flex-col bg-gray-50 h-screen overflow-hidden">
       {/* ── Top header ───────────────────────────────────────────────────── */}
-      <header className="h-14 bg-gradient-to-r from-blue-900 via-blue-700 to-blue-600 flex items-center gap-4 px-6 shadow-lg shrink-0">
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
-            <span className="text-white text-xs font-bold">C</span>
-          </div>
-          <span className="text-white font-semibold text-lg">CLSA</span>
+      <header className="h-14 flex items-center gap-4 px-6 shadow-lg shrink-0" style={{ background: '#00005A' }}>
+        <div className="flex items-center shrink-0">
+          <img
+            src="/x_citi4_clsa_cmd_0.workspace_logo.png"
+            alt="CLSA"
+            className="h-8 w-auto object-contain"
+          />
         </div>
         <div className="flex-1 flex justify-center px-4">
           <GlobalSearchBar onSelectCI={(ci) => {
             // In 2-level hierarchy mode, cmdb_ci_service records are app families
             // or instances — redirect them to the app detail page.
-            if (!hierarchyMode && ci.class === 'cmdb_ci_service') {
+            if (!hierarchyMode && (ci.table === 'cmdb_ci_service' || ci.class === 'cmdb_ci_service')) {
               handleSelectApp({
                 id: ci.id, sysId: ci.id, table: 'cmdb_ci_service',
                 name: ci.name, app: ci.name,

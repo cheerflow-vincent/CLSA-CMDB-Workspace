@@ -23,7 +23,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   MoreHorizontal, MoreVertical, Eye, Edit2, Plus, Trash2,
-  ArrowUp, ArrowDown, ArrowLeftRight, Loader2, Network,
+  ArrowUp, ArrowDown, ArrowLeftRight, Loader2, Network, ExternalLink,
 } from 'lucide-react';
 import { queryTable, getSysProperties } from '../../api/servicenow';
 import type { AppItem } from '../data/appData';
@@ -782,6 +782,26 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
                 }}
               />
             )}
+
+            {/* Open in ServiceNow — available for all nodes */}
+            {(() => {
+              const info     = nodeInfoMapRef.current.get(nodeMenu.nodeId);
+              const sysId    = nodeMenu.isCenter ? selectedApp?.sysId  : nodeMenu.nodeId;
+              const table    = nodeMenu.isCenter ? (selectedApp?.table || 'cmdb_ci_service') : (info?.sysClass || 'cmdb_ci_service');
+              if (!sysId) return null;
+              return (
+                <a
+                  href={`/${table}.do?sys_id=${sysId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={closeMenu}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-sm text-indigo-600 hover:bg-indigo-50 transition-colors"
+                >
+                  <ExternalLink size={14} className="flex-shrink-0" />
+                  Open in ServiceNow
+                </a>
+              );
+            })()}
 
             {nodeMenu.isCenter ? (
               <>
