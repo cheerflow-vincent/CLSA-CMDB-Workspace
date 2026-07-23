@@ -39,6 +39,7 @@ export interface DiagramFilters {
 
 interface Props {
   filters:             DiagramFilters;
+  nodeSearch?:         string;
   onEditRelationship:  () => void;
   selectedApp?:        AppItem | null;
   onSelectApp?:        (app: AppItem) => void;
@@ -212,13 +213,16 @@ function buildEdge({ id, source, target, direction, serviceType }: EdgeDef, hidd
 }
 
 // ─── Node data shape ──────────────────────────────────────────────────────────
+type SearchHighlight = 'none' | 'match' | 'dim';
+
 interface NodeData {
-  label:       string;
-  serviceType: ServiceType | 'center';
-  isCenter:    boolean;
-  maxLevels:   number;
-  curLevel:    number;
-  onOpenMenu:  (nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent) => void;
+  label:           string;
+  serviceType:     ServiceType | 'center';
+  isCenter:        boolean;
+  maxLevels:       number;
+  curLevel:        number;
+  searchHighlight: SearchHighlight;
+  onOpenMenu:      (nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent) => void;
   [key: string]: unknown;
 }
 
@@ -272,7 +276,7 @@ function placeChildrenRecursive(
       id: child.sysId, type: 'appNode', position: pos, hidden: false,
       data: {
         label: child.name || child.sysId, serviceType: svcType,
-        isCenter: false, maxLevels: maxLvls, curLevel: curLvl, onOpenMenu: openMenu,
+        isCenter: false, maxLevels: maxLvls, curLevel: curLvl, searchHighlight: 'none', onOpenMenu: openMenu,
       } satisfies NodeData,
     });
 
@@ -316,10 +320,12 @@ function layoutSide(
 
 // ─── Full diagram builder ─────────────────────────────────────────────────────
 interface DiagramResult {
-  nodes:     Node[];
-  edges:     Edge[];
+  nodes:       Node[];
+  edges:       Edge[];
   // Used by the filter-update effect to determine visibility per node
-  nodeL1Map: Map<string, { direction: Direction; svcType: ServiceType }>;
+  nodeL1Map:   Map<string, { direction: Direction; svcType: ServiceType }>;
+  // Used by the context menu to navigate to any placed node's detail page
+  nodeInfoMap: Map<string, { name: string; sysClass: string }>;
 }
 
 function buildDiagram(
@@ -336,29 +342,31 @@ function buildDiagram(
   const downstream = relCIs.filter(r => r.direction === 'downstream');
   const bidir      = relCIs.filter(r => r.direction === 'bidirectional');
 
-  const nodes:     Node[] = [];
-  const edges:     Edge[] = [];
-  const placedIds  = new Set<string>(['center']);
-  const nodeL1Map  = new Map<string, { direction: Direction; svcType: ServiceType }>();
+  const nodes:       Node[] = [];
+  const edges:       Edge[] = [];
+  const placedIds    = new Set<string>(['center']);
+  const nodeL1Map    = new Map<string, { direction: Direction; svcType: ServiceType }>();
+  const nodeInfoMap  = new Map<string, { name: string; sysClass: string }>();
 
   // Center
   nodes.push({
     id: 'center', type: 'centerNode', position: { x: CX, y: CY }, hidden: false,
-    data: { label: selectedApp?.name ?? 'Selected Application', serviceType: 'center', isCenter: true, maxLevels: 0, curLevel: 0, onOpenMenu: openMenu } satisfies NodeData,
+    data: { label: selectedApp?.name ?? 'Selected Application', serviceType: 'center', isCenter: true, maxLevels: 0, curLevel: 0, searchHighlight: 'none', onOpenMenu: openMenu } satisfies NodeData,
   });
 
   const placeL1 = (ci: RelCI, pos: { x: number; y: number }, chainDir: ChainDir, edgeSrc: string, edgeTgt: string) => {
     const svcType = classToServiceType(ci.sysClass);
-    const maxLvls = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
+    const maxLvls = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth);
     const curLvl  = expandedLevels[ci.sysId] ?? 0;
     const l1Info  = { direction: ci.direction, svcType };
 
     placedIds.add(ci.sysId);
     nodeL1Map.set(ci.sysId, l1Info);
+    nodeInfoMap.set(ci.sysId, { name: ci.name, sysClass: ci.sysClass });
 
     nodes.push({
       id: ci.sysId, type: 'appNode', position: pos, hidden: false,
-      data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, onOpenMenu: openMenu } satisfies NodeData,
+      data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, searchHighlight: 'none', onOpenMenu: openMenu } satisfies NodeData,
     });
     edges.push(buildEdge({ id: `e-${edgeSrc === 'center' ? 'dn' : 'up'}-${ci.sysId}`, source: edgeSrc, target: edgeTgt, direction: ci.direction, serviceType: svcType }, false));
 
@@ -381,17 +389,18 @@ function buildDiagram(
     const biSpacing   = rowCount > 1 ? Math.min(190, 560 / (rowCount - 1)) : 0;
     const biStartX    = CX - ((rowCount - 1) * biSpacing) / 2;
     const svcType     = classToServiceType(ci.sysClass);
-    const maxLvls     = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth - 1);
+    const maxLvls     = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth);
     const curLvl      = expandedLevels[ci.sysId] ?? 0;
     const pos         = { x: biStartX + col * biSpacing, y: CY + 220 + row * BI_ROW_Y_GAP };
     const l1Info      = { direction: ci.direction as Direction, svcType };
 
     placedIds.add(ci.sysId);
     nodeL1Map.set(ci.sysId, l1Info);
+    nodeInfoMap.set(ci.sysId, { name: ci.name, sysClass: ci.sysClass });
 
     nodes.push({
       id: ci.sysId, type: 'appNode', position: pos, hidden: false,
-      data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, onOpenMenu: openMenu } satisfies NodeData,
+      data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, searchHighlight: 'none', onOpenMenu: openMenu } satisfies NodeData,
     });
     edges.push(buildEdge({ id: `e-bi-${ci.sysId}`, source: 'center', target: ci.sysId, direction: 'bidirectional', serviceType: svcType }, false));
 
@@ -401,7 +410,18 @@ function buildDiagram(
     }
   });
 
-  return { nodes, edges, nodeL1Map };
+  // Also register any expanded child nodes into nodeInfoMap
+  // (placeChildrenRecursive already placed them as Node objects; extract info from childrenByNode)
+  const addChildInfo = (parentId: string, depth: number) => {
+    if (depth <= 0) return;
+    for (const child of childrenByNode.get(parentId) ?? []) {
+      if (!nodeInfoMap.has(child.sysId)) nodeInfoMap.set(child.sysId, { name: child.name, sysClass: child.sysClass });
+      addChildInfo(child.sysId, depth - 1);
+    }
+  };
+  for (const ci of relCIs) addChildInfo(ci.sysId, maxDepth);
+
+  return { nodes, edges, nodeL1Map, nodeInfoMap };
 }
 
 // ─── AppNode ──────────────────────────────────────────────────────────────────
@@ -409,11 +429,18 @@ function buildDiagram(
 //   [label — flex:1]  [+N badge]  [⋮ menu]
 // The badge takes the position of a "specific action icon" (like trash), and
 // the vertical ⋮ takes the position of the generic dropdown trigger.
+const SEARCH_EXTRA: Record<SearchHighlight, React.CSSProperties> = {
+  none:  {},
+  match: { boxShadow: '0 0 0 2.5px #3B82F6, 0 0 14px 4px rgba(59,130,246,0.40)', borderColor: '#3B82F6' },
+  dim:   { opacity: 0.22, filter: 'grayscale(40%)' },
+};
+
 const AppNode = memo(({ id, data }: NodeProps) => {
   const d         = data as NodeData;
   const svc       = d.serviceType === 'center' ? null : SVC_STYLE[d.serviceType as ServiceType];
   const hasExpand = d.maxLevels > 0;
   const borderClr = svc?.border ?? '#9CA3AF';
+  const searchSty = SEARCH_EXTRA[d.searchHighlight ?? 'none'];
 
   return (
     <div style={{
@@ -423,6 +450,8 @@ const AppNode = memo(({ id, data }: NodeProps) => {
       display: 'flex', alignItems: 'center', gap: 2,
       padding: '5px 4px 5px 8px',
       cursor: 'grab', userSelect: 'none', overflow: 'hidden',
+      transition: 'opacity 0.2s, box-shadow 0.2s, filter 0.2s',
+      ...searchSty,
     }}>
       <Handle type="target" position={Position.Left}  style={HANDLE_STYLE} />
       <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
@@ -509,7 +538,7 @@ const NODE_TYPES = { appNode: AppNode, centerNode: CenterNode };
 interface MenuState { nodeId: string; label: string; isCenter: boolean; x: number; y: number; }
 
 // ─── DiagramFlow ──────────────────────────────────────────────────────────────
-function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: Props) {
+function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp, onSelectApp }: Props) {
   const { setCenter } = useReactFlow();
 
   const [nodeMenu,        setNodeMenu]        = useState<MenuState | null>(null);
@@ -526,9 +555,12 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
   const childrenRef      = useRef(new Map<string, RelCI[]>());
   const onSelectAppRef   = useRef<typeof onSelectApp>(onSelectApp);
   const nodeL1MapRef     = useRef(new Map<string, { direction: Direction; svcType: ServiceType }>());
+  const nodeInfoMapRef   = useRef(new Map<string, { name: string; sysClass: string }>());
+  const nodeSearchRef    = useRef(nodeSearch);
   useEffect(() => { relCIsRef.current      = relCIs; },         [relCIs]);
   useEffect(() => { childrenRef.current    = childrenByNode; }, [childrenByNode]);
   useEffect(() => { onSelectAppRef.current = onSelectApp; },    [onSelectApp]);
+  useEffect(() => { nodeSearchRef.current  = nodeSearch; },     [nodeSearch]);
 
   // Fetch max depth from system property once on mount
   useEffect(() => {
@@ -609,11 +641,23 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
     const isNewApp = sysId !== prevSysIdRef.current;
     prevSysIdRef.current = sysId;
 
-    const { nodes: n, edges: e, nodeL1Map } = buildDiagram(
+    const { nodes: n, edges: e, nodeL1Map, nodeInfoMap } = buildDiagram(
       relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp, openMenu,
     );
-    nodeL1MapRef.current = nodeL1Map;
-    setNodes(n);
+    nodeL1MapRef.current   = nodeL1Map;
+    nodeInfoMapRef.current = nodeInfoMap;
+
+    // Apply active search highlight immediately so rebuild doesn't reset glow/dim
+    const q = nodeSearchRef.current.trim().toLowerCase();
+    const styledNodes = q
+      ? n.map(node => {
+          if (node.id === 'center') return node;
+          const label = ((node.data as NodeData).label as string).toLowerCase();
+          const sh: SearchHighlight = label.includes(q) ? 'match' : 'none';
+          return { ...node, data: { ...node.data, searchHighlight: sh } };
+        })
+      : n;
+    setNodes(styledNodes);
     setEdges(e);
 
     if (isNewApp || relCIs.length > 0) {
@@ -622,6 +666,18 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp?.sysId]);
+
+  // ── Search: glow matches, dim non-matches (preserve positions) ───────────
+  useEffect(() => {
+    const q = nodeSearch.trim().toLowerCase();
+    setNodes(prev => prev.map(node => {
+      if (node.id === 'center') return node;
+      const label = ((node.data as NodeData).label as string).toLowerCase();
+      const sh: SearchHighlight = q && label.includes(q) ? 'match' : 'none';
+      if ((node.data as NodeData).searchHighlight === sh) return node;
+      return { ...node, data: { ...node.data, searchHighlight: sh } };
+    }));
+  }, [nodeSearch, setNodes]);
 
   // ── Filter changes: update hidden only (preserve drag positions) ──────────
   useEffect(() => {
@@ -647,13 +703,13 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
   // ─── Render ────────────────────────────────────────────────────────────────
   // How many levels can the currently-hovered node expand?
   const menuNodeMaxLvl  = nodeMenu && !nodeMenu.isCenter
-    ? getSubtreeDepth(nodeMenu.nodeId, childrenRef.current, maxDepth - 1)
+    ? getSubtreeDepth(nodeMenu.nodeId, childrenRef.current, maxDepth)
     : 0;
   const menuNodeCurLvl  = nodeMenu ? (expandedLevels[nodeMenu.nodeId] ?? 0) : 0;
   const isL1Node        = nodeMenu ? relCIsRef.current.some(r => r.sysId === nodeMenu.nodeId) : false;
 
   return (
-    <div className="relative w-full rounded-xl border border-gray-200 overflow-hidden" style={{ height: 590 }}>
+    <div className="relative w-full h-full overflow-hidden" style={{ minHeight: 400 }}>
 
       {loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-sm">
@@ -708,24 +764,24 @@ function DiagramFlow({ filters, onEditRelationship, selectedApp, onSelectApp }: 
           </div>
 
           <div className="py-1">
-            <MI
-              icon={<Eye size={14} className="text-gray-400" />}
-              label="View Application Details"
-              onClick={() => {
-                if (!nodeMenu.isCenter) {
-                  const rel = relCIsRef.current.find(r => r.sysId === nodeMenu.nodeId);
-                  if (rel && onSelectAppRef.current) {
+            {!nodeMenu.isCenter && (
+              <MI
+                icon={<Eye size={14} className="text-gray-400" />}
+                label="View Application Details"
+                onClick={() => {
+                  const info = nodeInfoMapRef.current.get(nodeMenu.nodeId);
+                  if (info && onSelectAppRef.current) {
                     onSelectAppRef.current({
-                      id: rel.sysId, name: rel.name, sysId: rel.sysId,
-                      table: rel.sysClass || 'cmdb_ci_service',
-                      app: rel.name, dept: '', env: '', status: '',
+                      id: nodeMenu.nodeId, name: info.name, sysId: nodeMenu.nodeId,
+                      table: info.sysClass || 'cmdb_ci_service',
+                      app: info.name, dept: '', env: '', status: '',
                       incidents: 0, changes: 0, criticality: '', servers: 0, lastUpdated: '',
                     });
                   }
-                }
-                closeMenu();
-              }}
-            />
+                  closeMenu();
+                }}
+              />
+            )}
 
             {nodeMenu.isCenter ? (
               <>

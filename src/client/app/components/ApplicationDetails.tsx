@@ -123,6 +123,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [nodeSearch, setNodeSearch] = useState('');
   const [filters, setFilters] = useState<DiagramFilters>({
     upstream: true, downstream: true, bidirectional: true,
     platform: true, infrastructure: true, business: true,
@@ -182,119 +183,123 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
         onBackToHome={onBack}
       />
 
-      {/* ── Main content ── */}
-      <div className="flex-1 overflow-hidden p-6">
-        <div className="bg-white rounded-lg border border-gray-200 h-full flex flex-col">
+      {/* ── Main content: fills remaining viewport height ── */}
+      <div className="flex-1 overflow-hidden flex">
 
-          <div className="flex-1 overflow-hidden flex">
+        {/* ── Left: diagram / table ── */}
+        <div className="flex-1 flex flex-col min-w-0 bg-white border-r border-gray-200">
 
-            {/* ── Left: diagram area ── */}
-            <div className="flex-1 overflow-auto min-w-0">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Upstream / Downstream Relationships</h3>
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Search Nodes"
-                      className="pl-9 pr-4 py-2 border border-gray-300 rounded-lg w-64 text-sm"
-                    />
-                  </div>
-                </div>
+          {/* Sticky toolbar */}
+          <div className="flex-shrink-0 border-b border-gray-200 bg-white px-5 py-3">
 
-                {/* Filters + View Toggle */}
-                <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-100">
-                  <div className="flex items-center justify-between flex-wrap gap-4">
-
-                    {/* Direction filters */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mr-1">Direction</span>
-
-                      <button onClick={() => toggleFilter('upstream')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
-                          filters.upstream ? 'bg-orange-50 border-orange-300 text-orange-800' : 'bg-white border-gray-200 text-gray-400'
-                        }`}>
-                        <svg width="22" height="10" viewBox="0 0 22 10">
-                          <line x1="0" y1="5" x2="16" y2="5" stroke={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'} strokeWidth="2"/>
-                          <polygon points="16,2 22,5 16,8" fill={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'}/>
-                        </svg>
-                        Upstream
-                      </button>
-
-                      <button onClick={() => toggleFilter('downstream')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
-                          filters.downstream ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-gray-200 text-gray-400'
-                        }`}>
-                        <svg width="22" height="10" viewBox="0 0 22 10">
-                          <line x1="0" y1="5" x2="16" y2="5" stroke={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'} strokeWidth="2"/>
-                          <polygon points="16,2 22,5 16,8" fill={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'}/>
-                        </svg>
-                        Downstream
-                      </button>
-
-                      <button onClick={() => toggleFilter('bidirectional')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
-                          filters.bidirectional ? 'bg-violet-50 border-violet-300 text-violet-800' : 'bg-white border-gray-200 text-gray-400'
-                        }`}>
-                        <svg width="26" height="10" viewBox="0 0 26 10">
-                          <polygon points="0,5 6,2 6,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
-                          <line x1="6" y1="5" x2="20" y2="5" stroke={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'} strokeWidth="2" strokeDasharray="4 2"/>
-                          <polygon points="20,2 26,5 20,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
-                        </svg>
-                        Bi-directional
-                      </button>
-                    </div>
-
-                    <div className="h-6 w-px bg-gray-300 hidden sm:block" />
-
-                    {/* Service type filters */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mr-1">Services</span>
-
-                      {[
-                        { key: 'platform'       as const, label: 'Platform',       svc: SVC_STYLE.platform,       active: filters.platform,       activeCls: 'border-blue-300 text-blue-800'  },
-                        { key: 'infrastructure' as const, label: 'Infrastructure', svc: SVC_STYLE.infrastructure, active: filters.infrastructure, activeCls: 'border-slate-300 text-slate-700' },
-                        { key: 'business'       as const, label: 'Business',       svc: SVC_STYLE.business,       active: filters.business,       activeCls: 'border-green-300 text-green-800' },
-                      ].map(({ key, label, svc, active, activeCls }) => (
-                        <button key={key} onClick={() => toggleFilter(key)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
-                            active ? activeCls : 'bg-white border-gray-200 text-gray-400'
-                          }`}
-                          style={active ? { backgroundColor: svc.bg } : {}}>
-                          <span className="inline-block w-3 h-3 rounded-sm"
-                            style={{ backgroundColor: active ? svc.border : '#E5E7EB' }} />
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* View toggle */}
-                    <div className="flex items-center gap-2 ml-auto">
-                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">View</span>
-                      <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-                        <button onClick={() => setViewMode('map')}
-                          className={`px-4 py-1.5 text-sm transition-colors ${viewMode === 'map' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
-                          Map
-                        </button>
-                        <button onClick={() => setViewMode('table')}
-                          className={`px-4 py-1.5 text-sm transition-colors ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
-                          Table
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {viewMode === 'map'
-                  ? <RelationshipDiagram filters={filters} onEditRelationship={() => setShowEditModal(true)} selectedApp={selectedApp} onSelectApp={onSelectApp} />
-                  : <RelationshipTable />}
+            {/* Title + Search */}
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900">Upstream / Downstream Relationships</h3>
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search Nodes"
+                  value={nodeSearch}
+                  onChange={e => setNodeSearch(e.target.value)}
+                  className="pl-9 pr-4 py-1.5 border border-gray-300 rounded-lg w-56 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                />
               </div>
             </div>
 
-            {/* ── Right: info panel ── */}
-            {detailsPanelOpen && (
-              <div className="w-96 border-l border-gray-200 bg-gray-50 overflow-y-auto flex-shrink-0">
+            {/* Filters + View Toggle */}
+            <div className="flex items-center flex-wrap gap-2">
+
+              {/* Direction filters */}
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Direction</span>
+
+              <button onClick={() => toggleFilter('upstream')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                  filters.upstream ? 'bg-orange-50 border-orange-300 text-orange-800' : 'bg-white border-gray-200 text-gray-400'
+                }`}>
+                <svg width="18" height="8" viewBox="0 0 22 10">
+                  <line x1="0" y1="5" x2="16" y2="5" stroke={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'} strokeWidth="2"/>
+                  <polygon points="16,2 22,5 16,8" fill={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'}/>
+                </svg>
+                Upstream
+              </button>
+
+              <button onClick={() => toggleFilter('downstream')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                  filters.downstream ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-gray-200 text-gray-400'
+                }`}>
+                <svg width="18" height="8" viewBox="0 0 22 10">
+                  <line x1="0" y1="5" x2="16" y2="5" stroke={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'} strokeWidth="2"/>
+                  <polygon points="16,2 22,5 16,8" fill={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'}/>
+                </svg>
+                Downstream
+              </button>
+
+              <button onClick={() => toggleFilter('bidirectional')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                  filters.bidirectional ? 'bg-violet-50 border-violet-300 text-violet-800' : 'bg-white border-gray-200 text-gray-400'
+                }`}>
+                <svg width="22" height="8" viewBox="0 0 26 10">
+                  <polygon points="0,5 6,2 6,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
+                  <line x1="6" y1="5" x2="20" y2="5" stroke={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'} strokeWidth="2" strokeDasharray="4 2"/>
+                  <polygon points="20,2 26,5 20,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
+                </svg>
+                Bi-directional
+              </button>
+
+              <div className="h-5 w-px bg-gray-200 mx-1" />
+
+              {/* Service type filters */}
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Services</span>
+
+              {[
+                { key: 'platform'       as const, label: 'Platform',       svc: SVC_STYLE.platform,       active: filters.platform,       activeCls: 'border-blue-300 text-blue-800'  },
+                { key: 'infrastructure' as const, label: 'Infrastructure', svc: SVC_STYLE.infrastructure, active: filters.infrastructure, activeCls: 'border-slate-300 text-slate-700' },
+                { key: 'business'       as const, label: 'Business',       svc: SVC_STYLE.business,       active: filters.business,       activeCls: 'border-green-300 text-green-800' },
+              ].map(({ key, label, svc, active, activeCls }) => (
+                <button key={key} onClick={() => toggleFilter(key)}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                    active ? activeCls : 'bg-white border-gray-200 text-gray-400'
+                  }`}
+                  style={active ? { backgroundColor: svc.bg } : {}}>
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm"
+                    style={{ backgroundColor: active ? svc.border : '#E5E7EB' }} />
+                  {label}
+                </button>
+              ))}
+
+              {/* View toggle — pushed to the right */}
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">View</span>
+                <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+                  <button onClick={() => setViewMode('map')}
+                    className={`px-3.5 py-1 text-xs font-medium transition-colors ${viewMode === 'map' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    Map
+                  </button>
+                  <button onClick={() => setViewMode('table')}
+                    className={`px-3.5 py-1 text-xs font-medium transition-colors ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    Table
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Canvas / table — fills all remaining height ── */}
+          {viewMode === 'map' ? (
+            <div className="flex-1 min-h-0">
+              <RelationshipDiagram filters={filters} nodeSearch={nodeSearch} onEditRelationship={() => setShowEditModal(true)} selectedApp={selectedApp} onSelectApp={onSelectApp} />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-5">
+              <RelationshipTable selectedApp={selectedApp} nodeSearch={nodeSearch} filters={filters} onSelectApp={onSelectApp} />
+            </div>
+          )}
+        </div>
+
+        {/* ── Right: info panel — ~30% of viewport, min 320px, max 480px ── */}
+        {detailsPanelOpen && (
+          <div className="w-[30%] min-w-[320px] max-w-[480px] flex-shrink-0 border-l border-gray-200 bg-gray-50 overflow-y-auto">
 
                 {/* Sticky header */}
                 <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-2.5">
@@ -323,7 +328,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
                         {overviewFields.map(({ element, label }) => (
                           <div key={element} className="flex gap-3 px-3 py-2">
-                            <dt className="text-xs text-gray-400 flex-shrink-0 w-28 pt-px">{label}</dt>
+                            <dt className="text-xs text-gray-400 flex-shrink-0 w-32 pt-px">{label}</dt>
                             <dd className="text-xs text-gray-800 leading-snug break-words min-w-0">
                               {overviewValues[element] || '—'}
                             </dd>
@@ -383,7 +388,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                                       })}
                                       className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''} ${onViewCI ? 'hover:bg-blue-50/60 cursor-pointer' : 'hover:bg-blue-50/40 cursor-default'}`}
                                     >
-                                      <td className="px-3 py-1.5 font-mono text-[11px] text-blue-700 max-w-[100px] truncate">{s.name}</td>
+                                      <td className="px-3 py-1.5 font-mono text-[11px] text-blue-700 max-w-[150px] truncate">{s.name}</td>
                                       <td className="px-2 py-1.5"><EnvBadge env={s.env} /></td>
                                       <td className="px-2 py-1.5 text-[11px] text-gray-600 whitespace-nowrap">{s.os}</td>
                                       <td className="px-2 py-1.5 text-[11px] text-gray-500">{s.loc}</td>
@@ -444,7 +449,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                                       })}
                                       className={`transition-colors ${onViewCI ? 'hover:bg-purple-50/60 cursor-pointer' : 'hover:bg-purple-50/40 cursor-default'}`}
                                     >
-                                      <td className="px-3 py-1.5 font-mono text-[11px] text-blue-700 max-w-[100px] truncate">{db.name}</td>
+                                      <td className="px-3 py-1.5 font-mono text-[11px] text-blue-700 max-w-[150px] truncate">{db.name}</td>
                                       <td className="px-2 py-1.5">
                                         <span className="text-[10px] font-medium bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">
                                           {db.type}
@@ -554,8 +559,6 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               </button>
             )}
 
-          </div>
-        </div>
       </div>
 
       {showEditModal && <EditRelationshipModal onClose={() => setShowEditModal(false)} />}
