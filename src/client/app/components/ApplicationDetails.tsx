@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type CSSProperties } from 'react';
 import {
   Search, Server, Database, DollarSign,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, ChevronDown, Loader2,
@@ -117,6 +117,41 @@ interface ApplicationDetailsProps {
 
 type ViewMode = 'map' | 'table';
 type ExpandKey = 'servers' | 'databases' | 'incidents' | 'changes';
+
+/** Inline layout styles — SN global CSS overrides Tailwind utilities on some instances. */
+const OVERVIEW_ROW_STYLE: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '128px 1fr',
+  columnGap: '12px',
+  padding: '8px 12px',
+  alignItems: 'start',
+};
+const OVERVIEW_LABEL_STYLE: CSSProperties = {
+  fontSize: '0.75rem',
+  lineHeight: '1.25rem',
+  color: '#9CA3AF',
+};
+const OVERVIEW_VALUE_STYLE: CSSProperties = {
+  fontSize: '0.75rem',
+  lineHeight: '1.25rem',
+  color: '#1F2937',
+  wordBreak: 'break-word',
+  minWidth: 0,
+};
+const VIEW_TOGGLE_BTN_BASE: CSSProperties = {
+  padding: '4px 14px',
+  margin: 0,
+  border: 'none',
+  fontSize: '0.75rem',
+  fontWeight: 500,
+  lineHeight: '1rem',
+  cursor: 'pointer',
+  display: 'inline-block',
+  minWidth: '52px',
+  textAlign: 'center',
+  verticalAlign: 'middle',
+  boxSizing: 'border-box',
+};
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp }: ApplicationDetailsProps) {
@@ -272,12 +307,26 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               <div className="flex items-center gap-2 ml-auto">
                 <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">View</span>
                 <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
-                  <button onClick={() => setViewMode('map')}
-                    className={`px-3.5 py-1 text-xs font-medium transition-colors ${viewMode === 'map' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('map')}
+                    style={{
+                      ...VIEW_TOGGLE_BTN_BASE,
+                      backgroundColor: viewMode === 'map' ? '#2563EB' : '#FFFFFF',
+                      color: viewMode === 'map' ? '#FFFFFF' : '#4B5563',
+                    }}
+                  >
                     Map
                   </button>
-                  <button onClick={() => setViewMode('table')}
-                    className={`px-3.5 py-1 text-xs font-medium transition-colors ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('table')}
+                    style={{
+                      ...VIEW_TOGGLE_BTN_BASE,
+                      backgroundColor: viewMode === 'table' ? '#2563EB' : '#FFFFFF',
+                      color: viewMode === 'table' ? '#FFFFFF' : '#4B5563',
+                    }}
+                  >
                     Table
                   </button>
                 </div>
@@ -327,11 +376,11 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                     ) : (
                       <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
                         {overviewFields.map(({ element, label }) => (
-                          <div key={element} className="flex gap-3 px-3 py-2">
-                            <dt className="text-xs text-gray-400 flex-shrink-0 w-32 pt-px">{label}</dt>
-                            <dd className="text-xs text-gray-800 leading-snug break-words min-w-0">
+                          <div key={element} style={OVERVIEW_ROW_STYLE}>
+                            <span style={OVERVIEW_LABEL_STYLE}>{label}</span>
+                            <span style={OVERVIEW_VALUE_STYLE}>
                               {overviewValues[element] || '—'}
-                            </dd>
+                            </span>
                           </div>
                         ))}
                       </div>
