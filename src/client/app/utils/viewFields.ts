@@ -121,3 +121,100 @@ export async function loadViewFields(
     return defaultFields;
   }
 }
+
+/** Resolve column labels for a set of field elements on a table. */
+async function labelListElements(
+  tableName: string,
+  fieldNames: string[],
+): Promise<ViewField[]> {
+  const { result: docs = [] } = await queryTable<{ element: unknown; label: unknown }>({
+    table: 'sys_documentation',
+    query: `name=${tableName}^language=en^elementIN${fieldNames.join(',')}`,
+    fields: ['element', 'label'],
+    limit: fieldNames.length + 10,
+  });
+  const labelMap = new Map(docs.map(d => [str(d.element), str(d.label)]));
+  return fieldNames.map(e => ({
+    element: e,
+    label: labelMap.get(e) || e.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+  }));
+}
+
+/** Fetch columns from sys_ui_list_element for a resolved list sys_id. */
+async function resolveListElementsByListId(
+  tableName: string,
+  listSysId: string,
+  limit: number,
+): Promise<ViewField[] | null> {
+  const { result: elems = [] } = await queryTable<{ element: unknown }>({
+    table: 'sys_ui_list_element',
+    query: `list_id=${listSysId}^ORDERBYposition`,
+    fields: ['element', 'position'],
+    limit,
+  });
+  const fieldNames = elems.map(e => str(e.element)).filter(Boolean);
+  if (!fieldNames.length) return null;
+  return labelListElements(tableName, fieldNames);
+}
+
+/** Dot-walk fallback on sys_ui_list_element.list_id (some instances). */
+async function resolveListFieldsDotWalk(
+  tableName: string,
+  listTitle: string,
+  limit: number,
+): Promise<ViewField[] | null> {
+  const { result: elems = [] } = await queryTable<{ element: unknown }>({
+    table: 'sys_ui_list_element',
+    query: `list_id.name=${tableName}^list_id.view.title=${listTitle}^ORDERBYposition`,
+    fields: ['element', 'position'],
+    limit,
+  });
+  const fieldNames = elems.map(e => str(e.element)).filter(Boolean);
+  if (!fieldNames.length) return null;
+  return labelListElements(tableName, fieldNames);
+}
+
+async function findListSysId(listQuery: string): Promise<string | null> {
+  const { result = [] } = await queryTable<{ sys_id: unknown }>({
+    table: 'sys_ui_list',
+    query: listQuery,
+    fields: ['sys_id'],
+    limit: 1,
+  });
+  const id = result[0] ? raw(result[0].sys_id) : '';
+  return id || null;
+}
+
+/**
+ * Load list-layout columns for a CI table:
+ *  1. Find sys_ui_list by name + view.title, then sys_ui_list_element by list_id
+ *  2. Default list on the given table (view.name empty)
+ *  3. Dot-walk fallback on list_id
+ *  4. `defaultFields` fallback
+ */
+export async function loadListFields(
+  tableName: string,
+  listTitle: string,
+  defaultFields: ViewField[] = [],
+): Promise<ViewField[]> {
+  try {
+    const namedListId = await findListSysId(`name=${tableName}^view.title=${listTitle}`);
+    if (namedListId) {
+      const cols = await resolveListElementsByListId(tableName, namedListId, 50);
+      if (cols) return cols;
+    }
+
+    const defaultListId = await findListSysId(`name=${tableName}^view.name=`);
+    if (defaultListId) {
+      const cols = await resolveListElementsByListId(tableName, defaultListId, 20);
+      if (cols) return cols;
+    }
+
+    const dotWalk = await resolveListFieldsDotWalk(tableName, listTitle, 50);
+    if (dotWalk) return dotWalk;
+
+    return defaultFields;
+  } catch {
+    return defaultFields;
+  }
+}

@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from 'react';
+import { useState, useEffect, type ElementType } from 'react';
 import {
   Search, Server, Database, DollarSign,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, ChevronDown, Loader2,
@@ -11,33 +11,21 @@ import AppSearchHeader from './AppSearchHeader';
 import { type AppItem } from '../data/appData';
 import type { CIItem } from './CIDetailView';
 import { type ViewField, str, loadViewFields } from '../utils/viewFields';
+import {
+  fetchRelatedCICount,
+  fetchRelatedCIPage,
+  RELATED_CI_PAGE_SIZE,
+  SERVER_REL_CONFIG,
+  DATABASE_REL_CONFIG,
+  type RelatedCIConfig,
+  type RelatedCIRow,
+} from '../utils/relatedCIs';
 import { queryTable } from '../../api/servicenow';
 
 const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
 const OVERVIEW_DEFAULT_LIMIT = 10;
 
-// ── Panel mock data ───────────────────────────────────────────────────────────
-const APP_SERVERS = [
-  { name: 'zhkdp2616',  os: 'RHEL 7.8',  env: 'Production',     loc: 'HKD' },
-  { name: 'xhkdp2845',  os: 'RHEL 8.5',  env: 'Production',     loc: 'HKD' },
-  { name: 'vhlwp3789',  os: 'Win 2019',   env: 'DR',             loc: 'HKG' },
-  { name: 'zzsclp1108', os: 'RHEL 7.8',  env: 'Non-production', loc: 'SHG' },
-  { name: 'zzsclp1191', os: 'Win 2019',   env: 'Production',     loc: 'SHG' },
-  { name: 'hkgpd3201',  os: 'RHEL 8.5',  env: 'Production',     loc: 'HKG' },
-  { name: 'sngpd4892',  os: 'RHEL 7.8',  env: 'Production',     loc: 'SNG' },
-  { name: 'mumpd6610',  os: 'Win 2016',   env: 'DR',             loc: 'MUM' },
-  { name: 'hkgdr1234',  os: 'RHEL 8.5',  env: 'DR',             loc: 'HKG' },
-  { name: 'shgpd0891',  os: 'RHEL 7.8',  env: 'Production',     loc: 'SHG' },
-  { name: 'hkdnp2501',  os: 'Win 2019',   env: 'Non-production', loc: 'HKD' },
-  { name: 'znkdp3317',  os: 'RHEL 8.5',  env: 'Production',     loc: 'HKG' },
-];
-
-const APP_DATABASES = [
-  { name: 'cobrahkg@zhkdp2616', type: 'Oracle 18.2', env: 'Production', loc: 'HKD' },
-  { name: 'cobrahkg@zszcb1111', type: 'Oracle 18.2', env: 'DR',         loc: 'SHG' },
-  { name: 'cobrahkg@zhkdp2617', type: 'Oracle 18.2', env: 'Production', loc: 'HKD' },
-];
-
+// ── Panel mock data (incidents / changes only) ───────────────────────────────
 const APP_INCIDENTS = [
   { number: 'INC0012345', priority: 'P2', state: 'In Progress', desc: 'CPU spike >95% sustained on zhkdp2616',  opened: '10 Apr 2026' },
   { number: 'INC0012201', priority: 'P3', state: 'Resolved',    desc: 'Disk usage warning on /var partition',    opened: '02 Apr 2026' },
@@ -118,40 +106,208 @@ interface ApplicationDetailsProps {
 type ViewMode = 'map' | 'table';
 type ExpandKey = 'servers' | 'databases' | 'incidents' | 'changes';
 
-/** Inline layout styles — SN global CSS overrides Tailwind utilities on some instances. */
-const OVERVIEW_ROW_STYLE: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '128px 1fr',
-  columnGap: '12px',
-  padding: '8px 12px',
-  alignItems: 'start',
-};
-const OVERVIEW_LABEL_STYLE: CSSProperties = {
-  fontSize: '0.75rem',
-  lineHeight: '1.25rem',
-  color: '#9CA3AF',
-};
-const OVERVIEW_VALUE_STYLE: CSSProperties = {
-  fontSize: '0.75rem',
-  lineHeight: '1.25rem',
-  color: '#1F2937',
-  wordBreak: 'break-word',
-  minWidth: 0,
-};
-const VIEW_TOGGLE_BTN_BASE: CSSProperties = {
-  padding: '4px 14px',
-  margin: 0,
-  border: 'none',
-  fontSize: '0.75rem',
-  fontWeight: 500,
-  lineHeight: '1rem',
-  cursor: 'pointer',
-  display: 'inline-block',
-  minWidth: '52px',
-  textAlign: 'center',
-  verticalAlign: 'middle',
-  boxSizing: 'border-box',
-};
+function formatClassLabel(cls: string): string {
+  return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function buildCIItem(row: RelatedCIRow): CIItem {
+  return {
+    id: row.sysId,
+    name: row.values.name || row.sysId,
+    type: formatClassLabel(row.sysClass),
+    class: row.sysClass,
+    table: row.sysClass,
+    environment: row.values.environment ?? '',
+    location: row.values.location ?? '',
+    owner: '',
+    supportGroup: '',
+    lastModified: '',
+    hasIncident: false,
+    hasChange: false,
+  };
+}
+
+function RelatedCISection({
+  config,
+  appSysId,
+  isOpen,
+  onToggle,
+  onViewCI,
+  title,
+  Icon,
+  iconBg,
+  iconColor,
+  badgeBg,
+  badgeText,
+  badgeBorder,
+  hoverRow,
+}: {
+  config: RelatedCIConfig;
+  appSysId?: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  onViewCI?: (ci: CIItem) => void;
+  title: string;
+  Icon: ElementType;
+  iconBg: string;
+  iconColor: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  hoverRow: string;
+}) {
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+  const [columns, setColumns] = useState<ViewField[]>([]);
+  const [rows, setRows] = useState<RelatedCIRow[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setPage(0);
+    setRows([]);
+    setColumns([]);
+    if (!appSysId) {
+      setTotalCount(0);
+      return;
+    }
+    fetchRelatedCICount(appSysId, config)
+      .then(setTotalCount)
+      .catch(() => setTotalCount(0));
+  }, [appSysId, config]);
+
+  useEffect(() => {
+    if (!isOpen || !appSysId) return;
+    setLoading(true);
+    fetchRelatedCIPage(appSysId, config, page)
+      .then(({ rows: pageRows, columns: pageCols, totalCount: count }) => {
+        setRows(pageRows);
+        setColumns(pageCols);
+        setTotalCount(count);
+      })
+      .catch(() => {
+        setRows([]);
+        setColumns(config.defaultColumns);
+      })
+      .finally(() => setLoading(false));
+  }, [isOpen, appSysId, page, config]);
+
+  const pageSize = RELATED_CI_PAGE_SIZE;
+  const start = totalCount === 0 ? 0 : page * pageSize + 1;
+  const end = Math.min((page + 1) * pageSize, totalCount);
+  const showPagination = totalCount > pageSize;
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <button onClick={onToggle}
+        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
+        <div className={`p-1.5 ${iconBg} rounded flex-shrink-0`}>
+          <Icon className={`w-4 h-4 ${iconColor}`} />
+        </div>
+        <span className="flex-1 text-xs text-gray-600 font-medium">{title}</span>
+        <span className={`text-xs font-semibold ${badgeBg} ${badgeText} border ${badgeBorder} px-2.5 py-0.5 rounded-full`}>
+          {totalCount}
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="border-t border-gray-100">
+          {loading ? (
+            <div className="flex items-center justify-center py-8 text-gray-400 gap-2 text-xs">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+            </div>
+          ) : totalCount === 0 ? (
+            <p className="px-3 py-6 text-xs text-gray-400 italic text-center">No related records found.</p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {columns.map(col => (
+                        <th key={col.element}
+                          className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide first:pl-3">
+                          {col.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {rows.map((row, i) => (
+                      <tr key={row.sysId} className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}>
+                        {columns.map((col, colIdx) => {
+                          const val = row.values[col.element] || '—';
+                          if (colIdx === 0) {
+                            return (
+                              <td key={col.element} className="px-3 py-1.5 max-w-[150px]">
+                                {onViewCI ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onViewCI(buildCIItem(row))}
+                                    className={`font-mono text-[11px] text-blue-700 truncate block max-w-full text-left hover:underline ${hoverRow}`}
+                                    title={val}
+                                  >
+                                    {val}
+                                  </button>
+                                ) : (
+                                  <span className="font-mono text-[11px] text-gray-700 truncate block">{val}</span>
+                                )}
+                              </td>
+                            );
+                          }
+                          if (col.element === 'environment' && val !== '—') {
+                            return (
+                              <td key={col.element} className="px-2 py-1.5">
+                                <EnvBadge env={val} />
+                              </td>
+                            );
+                          }
+                          return (
+                            <td key={col.element} className="px-2 py-1.5 text-[11px] text-gray-600 truncate max-w-[120px]" title={val}>
+                              {val}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {showPagination && (
+                <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                  <span className="text-[11px] text-gray-400">
+                    Showing {start}–{end} of {totalCount}
+                  </span>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setPage(p => p - 1)}
+                      disabled={page === 0}
+                      className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Previous page"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-gray-600" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPage(p => p + 1)}
+                      disabled={(page + 1) * pageSize >= totalCount}
+                      className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Next page"
+                    >
+                      <ChevronRight className="w-4 h-4 text-gray-600" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp }: ApplicationDetailsProps) {
@@ -310,22 +466,14 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   <button
                     type="button"
                     onClick={() => setViewMode('map')}
-                    style={{
-                      ...VIEW_TOGGLE_BTN_BASE,
-                      backgroundColor: viewMode === 'map' ? '#2563EB' : '#FFFFFF',
-                      color: viewMode === 'map' ? '#FFFFFF' : '#4B5563',
-                    }}
+                    className={`clsa-view-toggle-btn${viewMode === 'map' ? ' clsa-view-toggle-btn--active' : ''}`}
                   >
                     Map
                   </button>
                   <button
                     type="button"
                     onClick={() => setViewMode('table')}
-                    style={{
-                      ...VIEW_TOGGLE_BTN_BASE,
-                      backgroundColor: viewMode === 'table' ? '#2563EB' : '#FFFFFF',
-                      color: viewMode === 'table' ? '#FFFFFF' : '#4B5563',
-                    }}
+                    className={`clsa-view-toggle-btn${viewMode === 'table' ? ' clsa-view-toggle-btn--active' : ''}`}
                   >
                     Table
                   </button>
@@ -376,9 +524,9 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                     ) : (
                       <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
                         {overviewFields.map(({ element, label }) => (
-                          <div key={element} style={OVERVIEW_ROW_STYLE}>
-                            <span style={OVERVIEW_LABEL_STYLE}>{label}</span>
-                            <span style={OVERVIEW_VALUE_STYLE}>
+                          <div key={element} className="clsa-overview-row">
+                            <span className="clsa-overview-label">{label}</span>
+                            <span className="clsa-overview-value">
                               {overviewValues[element] || '—'}
                             </span>
                           </div>
@@ -392,128 +540,37 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Infrastructure</p>
                     <div className="space-y-2">
 
-                      {/* Servers expandable */}
-                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                        <button onClick={() => toggleExpand('servers')}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
-                          <div className="p-1.5 bg-blue-100 rounded flex-shrink-0">
-                            <Server className="w-4 h-4 text-blue-600" />
-                          </div>
-                          <span className="flex-1 text-xs text-gray-600 font-medium">Servers hosting the application</span>
-                          <span className="text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full">
-                            142
-                          </span>
-                          <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${expanded.servers ? 'rotate-180' : ''}`} />
-                        </button>
+                      <RelatedCISection
+                        config={SERVER_REL_CONFIG}
+                        appSysId={selectedApp?.sysId}
+                        isOpen={expanded.servers}
+                        onToggle={() => toggleExpand('servers')}
+                        onViewCI={onViewCI}
+                        title="Servers hosting the application"
+                        Icon={Server}
+                        iconBg="bg-blue-100"
+                        iconColor="text-blue-600"
+                        badgeBg="bg-blue-50"
+                        badgeText="text-blue-700"
+                        badgeBorder="border-blue-200"
+                        hoverRow="cursor-pointer"
+                      />
 
-                        {expanded.servers && (
-                          <div className="border-t border-gray-100">
-                            <div className="overflow-x-auto">
-                              <table className="w-full">
-                                <thead>
-                                  <tr className="bg-gray-50 border-b border-gray-100">
-                                    <th className="px-3 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Name</th>
-                                    <th className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Env</th>
-                                    <th className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">OS</th>
-                                    <th className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Loc</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50">
-                                  {APP_SERVERS.map((s, i) => (
-                                    <tr
-                                      key={i}
-                                      onClick={() => onViewCI?.({
-                                        id: `srv-${i}`,
-                                        name: s.name,
-                                        type: 'Server',
-                                        class: s.os,
-                                        environment: s.env,
-                                        location: s.loc,
-                                        owner: 'Bhaskar Baruah',
-                                        supportGroup: 'DS - TechOps Support Group',
-                                        lastModified: 'N/A',
-                                        hasIncident: false,
-                                        hasChange: false,
-                                      })}
-                                      className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''} ${onViewCI ? 'hover:bg-blue-50/60 cursor-pointer' : 'hover:bg-blue-50/40 cursor-default'}`}
-                                    >
-                                      <td className="px-3 py-1.5 font-mono text-[11px] text-blue-700 max-w-[150px] truncate">{s.name}</td>
-                                      <td className="px-2 py-1.5"><EnvBadge env={s.env} /></td>
-                                      <td className="px-2 py-1.5 text-[11px] text-gray-600 whitespace-nowrap">{s.os}</td>
-                                      <td className="px-2 py-1.5 text-[11px] text-gray-500">{s.loc}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 text-center">
-                              <span className="text-[11px] text-gray-400">Showing 12 of 142 servers</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Databases expandable */}
-                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                        <button onClick={() => toggleExpand('databases')}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
-                          <div className="p-1.5 bg-purple-100 rounded flex-shrink-0">
-                            <Database className="w-4 h-4 text-purple-600" />
-                          </div>
-                          <span className="flex-1 text-xs text-gray-600 font-medium">Databases used by the application</span>
-                          <span className="text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 px-2.5 py-0.5 rounded-full">
-                            3
-                          </span>
-                          <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${expanded.databases ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        {expanded.databases && (
-                          <div className="border-t border-gray-100">
-                            <div className="overflow-x-auto">
-                              <table className="w-full">
-                                <thead>
-                                  <tr className="bg-gray-50 border-b border-gray-100">
-                                    <th className="px-3 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Name</th>
-                                    <th className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Type</th>
-                                    <th className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Env</th>
-                                    <th className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Loc</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50">
-                                  {APP_DATABASES.map((db, i) => (
-                                    <tr
-                                      key={i}
-                                      onClick={() => onViewCI?.({
-                                        id: `db-${i}`,
-                                        name: db.name,
-                                        type: 'Database',
-                                        class: db.type,
-                                        environment: db.env,
-                                        location: db.loc,
-                                        owner: 'Bhaskar Baruah',
-                                        supportGroup: 'DS - DB Support Group',
-                                        lastModified: 'N/A',
-                                        hasIncident: false,
-                                        hasChange: false,
-                                      })}
-                                      className={`transition-colors ${onViewCI ? 'hover:bg-purple-50/60 cursor-pointer' : 'hover:bg-purple-50/40 cursor-default'}`}
-                                    >
-                                      <td className="px-3 py-1.5 font-mono text-[11px] text-blue-700 max-w-[150px] truncate">{db.name}</td>
-                                      <td className="px-2 py-1.5">
-                                        <span className="text-[10px] font-medium bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">
-                                          {db.type}
-                                        </span>
-                                      </td>
-                                      <td className="px-2 py-1.5"><EnvBadge env={db.env} /></td>
-                                      <td className="px-2 py-1.5 text-[11px] text-gray-500">{db.loc}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <RelatedCISection
+                        config={DATABASE_REL_CONFIG}
+                        appSysId={selectedApp?.sysId}
+                        isOpen={expanded.databases}
+                        onToggle={() => toggleExpand('databases')}
+                        onViewCI={onViewCI}
+                        title="Databases used by the application"
+                        Icon={Database}
+                        iconBg="bg-purple-100"
+                        iconColor="text-purple-600"
+                        badgeBg="bg-purple-50"
+                        badgeText="text-purple-700"
+                        badgeBorder="border-purple-200"
+                        hoverRow="cursor-pointer"
+                      />
 
                       {/* Total cost — static */}
                       <div className="bg-white rounded-lg border border-gray-200 px-3 py-2.5 flex items-center gap-3">
