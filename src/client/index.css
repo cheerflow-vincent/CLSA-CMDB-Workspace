@@ -25,51 +25,6 @@
   line-height: inherit;
 }
 
-/* App detail overview rows — grid layout resilient to SN dt/dd and form styles */
-.clsa-portal .clsa-overview-row {
-  display: grid;
-  grid-template-columns: 128px 1fr;
-  column-gap: 12px;
-  padding: 8px 12px;
-  align-items: start;
-}
-
-.clsa-portal .clsa-overview-label {
-  font-size: 0.75rem;
-  line-height: 1.25rem;
-  color: #9ca3af;
-}
-
-.clsa-portal .clsa-overview-value {
-  font-size: 0.75rem;
-  line-height: 1.25rem;
-  color: #1f2937;
-  word-break: break-word;
-  min-width: 0;
-}
-
-/* Map / Table segmented toggle — explicit sizing overrides SN button resets */
-.clsa-portal .clsa-view-toggle-btn {
-  padding: 4px 14px;
-  margin: 0;
-  border: none;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1rem;
-  cursor: pointer;
-  display: inline-block;
-  min-width: 52px;
-  text-align: center;
-  vertical-align: middle;
-  background-color: #ffffff;
-  color: #4b5563;
-}
-
-.clsa-portal .clsa-view-toggle-btn--active {
-  background-color: #2563eb;
-  color: #ffffff;
-}
-
 /* React Flow container must be explicit height */
 .clsa-portal .react-flow {
   height: 100%;
