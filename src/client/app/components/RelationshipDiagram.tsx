@@ -22,7 +22,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  MoreHorizontal, MoreVertical, Eye, Edit2, Plus, Trash2,
+  MoreVertical, Eye, Edit2, Plus, Trash2,
   ArrowUp, ArrowDown, ArrowLeftRight, Loader2, Network, ExternalLink,
 } from 'lucide-react';
 import { queryTable, getSysProperties } from '../../api/servicenow';
@@ -503,26 +503,29 @@ const CenterNode = memo(({ id, data }: NodeProps) => {
   const d = data as NodeData;
   return (
     <div style={{
-      width: CW, height: CH,
+      width: CW, minHeight: CH,
       background: '#1D4ED8', border: '2px solid #1E40AF', borderRadius: 10,
-      position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      display: 'flex', alignItems: 'center', gap: 2,
+      padding: '5px 4px 5px 8px',
       cursor: 'grab', userSelect: 'none', boxShadow: '0 2px 12px rgba(29,78,216,0.35)',
     }}>
       <Handle type="target" position={Position.Left}  style={HANDLE_STYLE} />
       <Handle type="source" position={Position.Right} style={HANDLE_STYLE} />
       <span style={{
+        flex: 1,
         fontSize: 12, fontWeight: 600, color: '#fff',
         fontFamily: 'system-ui,-apple-system,sans-serif',
-        maxWidth: CW - 28, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        whiteSpace: 'normal', wordBreak: 'break-word',
+        lineHeight: '1.35', textAlign: 'center',
         pointerEvents: 'none',
       }}>{d.label}</span>
       <button
-        className="absolute top-0.5 right-0.5 p-0.5 rounded opacity-40 hover:opacity-100 hover:bg-white/20 text-white transition-opacity"
-        style={{ fontSize: 0 }}
+        className="nodrag flex-shrink-0 p-0.5 rounded opacity-40 hover:opacity-100 hover:bg-white/20 text-white transition-opacity"
+        style={{ lineHeight: 0 }}
         onPointerDown={e => e.stopPropagation()}
         onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, true, e); }}
         title="Hub actions"
-      ><MoreHorizontal size={13} /></button>
+      ><MoreVertical size={13} /></button>
     </div>
   );
 });

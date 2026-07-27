@@ -218,3 +218,369 @@ export async function loadListFields(
     return defaultFields;
   }
 }
+
+// ─── Form layout (sys_ui_form → sections → elements) ─────────────────────────
+
+export type FormLayoutRow =
+  | { kind: 'full'; field: ViewField }
+  | { kind: 'columns'; left: ViewField[]; right: ViewField[] };
+
+export interface FormSectionLayout {
+  caption: string | null;
+  rows: FormLayoutRow[];
+}
+
+export interface FormLayoutResult {
+  sections: FormSectionLayout[];
+  resolvedTable: string;
+  resolvedView: 'named' | 'default';
+}
+
+interface RawUiElement {
+  element: string;
+  position: number;
+  type: string;
+}
+
+type MarkerKind = 'split' | 'end_split' | 'begin_split' | 'field' | 'skip';
+
+function markerKind(el: RawUiElement): MarkerKind {
+  const tokens = [el.type, el.element].filter(Boolean);
+  for (const t of tokens) {
+    if (t === '.split') return 'split';
+    if (t === '.end_split' || t === '.end') return 'end_split';
+    if (t === '.begin_split') return 'begin_split';
+  }
+  if (!el.element || el.element.startsWith('.')) return 'skip';
+  return 'field';
+}
+
+function toRawUiElement(rec: { element: unknown; position: unknown; type: unknown }): RawUiElement {
+  return {
+    element: str(rec.element),
+    position: parseInt(str(rec.position), 10) || 0,
+    type: str(rec.type),
+  };
+}
+
+/** Collect all field element names from parsed rows (for API fetch). */
+export function flattenSectionFields(section: FormSectionLayout): string[] {
+  const names: string[] = [];
+  for (const row of section.rows) {
+    if (row.kind === 'full') names.push(row.field.element);
+    else {
+      names.push(...row.left.map(f => f.element), ...row.right.map(f => f.element));
+    }
+  }
+  return names;
+}
+
+/**
+ * Parse sys_ui_element stream into layout rows (ServiceNow form semantics).
+ *
+ * - Fields before `.split` → left column; fields between `.split` and `.end_split` → right column
+ * - After `.end_split` → full-width rows until `.begin_split` or an implicit split block
+ * - `.begin_split` → start a new two-column block (left until next `.split`)
+ * - Section with no split markers → full-width rows, or paired columns when `fallbackColumns === 2`
+ */
+export function parseElementRows(
+  elems: RawUiElement[],
+  fallbackColumns: 1 | 2 = 1,
+): FormLayoutRow[] {
+  const rows: FormLayoutRow[] = [];
+  type Mode = 'neutral' | 'two_col' | 'full_only';
+
+  let mode: Mode = 'neutral';
+  let pendingFields: RawUiElement[] = [];
+  let leftCol: RawUiElement[] = [];
+  let rightCol: RawUiElement[] = [];
+  let pastSplit = false;
+  let sawSplitMarker = false;
+
+  const toField = (e: RawUiElement): ViewField => ({ element: e.element, label: e.element });
+
+  const flushTwoCol = () => {
+    if (!leftCol.length && !rightCol.length) return;
+    rows.push({
+      kind: 'columns',
+      left: leftCol.map(toField),
+      right: rightCol.map(toField),
+    });
+    leftCol = [];
+    rightCol = [];
+    pastSplit = false;
+  };
+
+  const emitPendingAsFull = () => {
+    for (const f of pendingFields) {
+      rows.push({ kind: 'full', field: toField(f) });
+    }
+    pendingFields = [];
+  };
+
+  const startTwoColBlock = () => {
+    mode = 'two_col';
+    leftCol = [];
+    rightCol = [];
+    pastSplit = false;
+  };
+
+  for (const el of elems) {
+    switch (markerKind(el)) {
+      case 'begin_split':
+        sawSplitMarker = true;
+        if (mode === 'neutral') emitPendingAsFull();
+        else if (mode === 'two_col') flushTwoCol();
+        startTwoColBlock();
+        break;
+
+      case 'split':
+        sawSplitMarker = true;
+        if (mode === 'neutral') {
+          leftCol = [...pendingFields];
+          pendingFields = [];
+          mode = 'two_col';
+        } else if (mode === 'full_only') {
+          startTwoColBlock();
+        }
+        pastSplit = true;
+        break;
+
+      case 'end_split':
+        sawSplitMarker = true;
+        if (mode === 'neutral') emitPendingAsFull();
+        else if (mode === 'two_col') flushTwoCol();
+        mode = 'full_only';
+        break;
+
+      case 'field':
+        if (mode === 'neutral') pendingFields.push(el);
+        else if (mode === 'full_only') rows.push({ kind: 'full', field: toField(el) });
+        else if (pastSplit) rightCol.push(el);
+        else leftCol.push(el);
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  if (mode === 'neutral' && pendingFields.length) {
+    if (!sawSplitMarker && fallbackColumns === 2) {
+      for (let i = 0; i < pendingFields.length; i += 2) {
+        if (i + 1 < pendingFields.length) {
+          rows.push({
+            kind: 'columns',
+            left: [toField(pendingFields[i])],
+            right: [toField(pendingFields[i + 1])],
+          });
+        } else {
+          rows.push({ kind: 'full', field: toField(pendingFields[i]) });
+        }
+      }
+    } else {
+      emitPendingAsFull();
+    }
+  } else if (mode === 'two_col') {
+    flushTwoCol();
+  }
+
+  return rows;
+}
+
+function applyLabels(rows: FormLayoutRow[], labelMap: Map<string, string>): void {
+  for (const row of rows) {
+    if (row.kind === 'full') {
+      row.field.label = labelMap.get(row.field.element) || row.field.label;
+    } else {
+      for (const f of [...row.left, ...row.right]) {
+        f.label = labelMap.get(f.element) || f.label;
+      }
+    }
+  }
+}
+
+function collectFieldNames(rows: FormLayoutRow[]): string[] {
+  const names: string[] = [];
+  for (const row of rows) {
+    if (row.kind === 'full') names.push(row.field.element);
+    else names.push(...row.left.map(f => f.element), ...row.right.map(f => f.element));
+  }
+  return names;
+}
+
+function parseColumns(v: unknown): 1 | 2 {
+  const n = parseInt(str(v), 10);
+  return n >= 2 ? 2 : 1;
+}
+
+async function findFormSysId(
+  tableName: string,
+  viewTitle: string | null,
+): Promise<string | null> {
+  const viewClause = viewTitle ? `view.title=${viewTitle}` : 'view.name=';
+  const queries = [
+    `name=${tableName}^${viewClause}^sys_userISEMPTY^active=true`,
+    `name=${tableName}^${viewClause}^sys_userISEMPTY`,
+  ];
+  for (const query of queries) {
+    const { result = [] } = await queryTable<{ sys_id: unknown }>({
+      table: 'sys_ui_form',
+      query,
+      fields: ['sys_id'],
+      limit: 1,
+    });
+    const id = result[0] ? raw(result[0].sys_id) : '';
+    if (id) return id;
+  }
+  return null;
+}
+
+async function fetchSectionElements(sectionId: string): Promise<RawUiElement[]> {
+  const { result = [] } = await queryTable<{ element: unknown; position: unknown; type: unknown }>({
+    table: 'sys_ui_element',
+    query: `sys_ui_section=${sectionId}^ORDERBYposition`,
+    fields: ['element', 'position', 'type'],
+    limit: 200,
+  });
+  return result.map(toRawUiElement);
+}
+
+async function loadLegacySingleSection(
+  tableName: string,
+  viewTitle: string | null,
+): Promise<FormSectionLayout[] | null> {
+  const viewClause = viewTitle
+    ? `sys_ui_section.view.title=${viewTitle}`
+    : 'sys_ui_section.view.name=';
+  const { result = [] } = await queryTable<{ element: unknown; position: unknown; type: unknown }>({
+    table: 'sys_ui_element',
+    query: `${viewClause}^sys_ui_section.name=${tableName}^ORDERBYposition`,
+    fields: ['element', 'position', 'type'],
+    limit: 200,
+  });
+  const elems = result.map(toRawUiElement);
+  const rows = parseElementRows(elems, 1);
+  if (!collectFieldNames(rows).length) return null;
+  return [{ caption: null, rows }];
+}
+
+async function applySectionLabels(
+  tableName: string,
+  sections: FormSectionLayout[] | null,
+): Promise<FormSectionLayout[] | null> {
+  if (!sections?.length) return sections;
+  const allFieldNames = sections.flatMap(s => collectFieldNames(s.rows));
+  const labeled = await labelListElements(tableName, [...new Set(allFieldNames)]);
+  const labelMap = new Map(labeled.map(f => [f.element, f.label]));
+  for (const sec of sections) {
+    applyLabels(sec.rows, labelMap);
+  }
+  return sections;
+}
+
+async function resolveFormLayoutFromTable(
+  tableName: string,
+  viewTitle: string | null,
+): Promise<FormSectionLayout[] | null> {
+  const formId = await findFormSysId(tableName, viewTitle);
+  if (!formId) return applySectionLabels(tableName, await loadLegacySingleSection(tableName, viewTitle));
+
+  const { result: formSectionRows = [] } = await queryTable<{
+    sys_ui_section: unknown;
+    position: unknown;
+  }>({
+    table: 'sys_ui_form_section',
+    query: `sys_ui_form=${formId}^ORDERBYposition`,
+    fields: ['sys_ui_section', 'position'],
+    limit: 50,
+  });
+  if (!formSectionRows.length) {
+    return applySectionLabels(tableName, await loadLegacySingleSection(tableName, viewTitle));
+  }
+
+  const sections: FormSectionLayout[] = [];
+  const allFieldNames: string[] = [];
+
+  for (const row of formSectionRows) {
+    const sectionId = raw(row.sys_ui_section);
+    if (!sectionId) continue;
+
+    const { result: sectionMeta = [] } = await queryTable<{
+      caption: unknown;
+      columns: unknown;
+    }>({
+      table: 'sys_ui_section',
+      query: `sys_id=${sectionId}`,
+      fields: ['caption', 'columns'],
+      limit: 1,
+    });
+    const meta = sectionMeta[0];
+    const captionRaw = meta ? str(meta.caption).trim() : '';
+    const sectionColumns = meta ? parseColumns(meta.columns) : 1;
+
+    const elems = await fetchSectionElements(sectionId);
+    const rows = parseElementRows(elems, sectionColumns);
+    const fieldNames = collectFieldNames(rows);
+    if (!fieldNames.length && !captionRaw) continue;
+
+    allFieldNames.push(...fieldNames);
+    sections.push({ caption: captionRaw || null, rows });
+  }
+
+  if (!sections.length) return null;
+
+  return applySectionLabels(tableName, sections);
+}
+
+async function tryLoadFormLayout(
+  tableName: string,
+  viewTitle: string | null,
+): Promise<FormLayoutResult | null> {
+  const sections = await resolveFormLayoutFromTable(tableName, viewTitle);
+  if (!sections?.length) return null;
+  const hasFields = sections.some(s => collectFieldNames(s.rows).length > 0);
+  if (!hasFields) return null;
+  return {
+    sections,
+    resolvedTable: tableName,
+    resolvedView: viewTitle ? 'named' : 'default',
+  };
+}
+
+/**
+ * Load readonly form layout for CI detail:
+ * sys_ui_form → sys_ui_form_section → sys_ui_section → sys_ui_element
+ *
+ * Fallback order per plan: named view on record table → named on parent →
+ * default on record table → default on parent.
+ */
+export async function loadFormLayout(
+  recordTable: string,
+  viewTitle: string,
+  resolveParent: (table: string) => Promise<string>,
+): Promise<FormLayoutResult> {
+  const parentTable = await resolveParent(recordTable);
+  const attempts: { table: string; viewTitle: string | null }[] = [
+    { table: recordTable, viewTitle },
+    { table: parentTable, viewTitle },
+    { table: recordTable, viewTitle: null },
+    { table: parentTable, viewTitle: null },
+  ];
+
+  const seen = new Set<string>();
+  for (const { table, viewTitle: vt } of attempts) {
+    const key = `${table}:${vt ?? 'default'}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const result = await tryLoadFormLayout(table, vt);
+    if (result) return result;
+  }
+
+  return {
+    sections: [],
+    resolvedTable: recordTable,
+    resolvedView: 'named',
+  };
+}

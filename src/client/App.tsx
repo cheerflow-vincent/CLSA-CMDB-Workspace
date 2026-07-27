@@ -11,6 +11,8 @@ import CIDetailView, { type CIItem } from './app/components/CIDetailView';
 import GlobalSearchBar from './app/components/GlobalSearchBar';
 import { type AppItem } from './app/data/appData';
 import { queryTable, getSysProperties, APP_SCOPE } from './api/servicenow';
+import { str, raw } from './app/utils/viewFields';
+import { readRecordUrlParams, stampRecordHistory, isCmdbTableName } from './app/utils/routing';
 
 type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' | 'dashboard' | 'network-links' | 'not-found';
 
@@ -34,14 +36,6 @@ function isServiceClass(table: string) {
 
 function formatClassName(cls: string) {
   return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-}
-
-/** Read table + sys_id (detail deep-link). Returns null if either is missing. */
-function readUrlParams(): { table: string; sysId: string } | null {
-  const p = new URLSearchParams(window.location.search);
-  const table = p.get('table');
-  const sysId = p.get('sys_id');
-  return table && sysId ? { table, sysId } : null;
 }
 
 /** Read ?page= and return the matching View, or null if absent/unknown. */
@@ -76,7 +70,7 @@ export function App() {
   // wrong page. Detail deep-links (table+sys_id) start in 'loading' until the
   // API call resolves; ?page= params resolve immediately.
   const [currentView, setCurrentView] = useState<View>(() => {
-    if (readUrlParams()) return 'loading';
+    if (readRecordUrlParams()) return 'loading';
     return readPageParam() ?? 'ci-search';
   });
 
@@ -104,26 +98,40 @@ export function App() {
 
   function navigateToRecord(table: string, sysId: string, ciSrc: 'ci-search' | 'app-details') {
     setCurrentView('loading');
-    queryTable<Record<string, string>>({
-      table,
-      query:  `sys_id=${sysId}`,
-      fields: ['sys_id', 'name', 'sys_class_name', 'environment', 'install_status'],
-      limit:  1,
-    })
-      .then(({ result }) => {
-        const r = result?.[0];
+    const tableHint = isCmdbTableName(table) ? table : 'cmdb_ci';
+    const tablesToTry = [...new Set([tableHint, 'cmdb_ci'])];
+
+    const fetchRecord = async (): Promise<Record<string, unknown> | null> => {
+      for (const t of tablesToTry) {
+        const { result } = await queryTable<Record<string, unknown>>({
+          table: t,
+          query:  `sys_id=${sysId}`,
+          fields: ['sys_id', 'name', 'sys_class_name', 'environment', 'install_status'],
+          limit:  1,
+          displayValue: false,
+        });
+        if (result?.[0]) return result[0];
+      }
+      return null;
+    };
+
+    fetchRecord()
+      .then(r => {
         if (!r) {
-          setNotFoundCtx({ table, sysId });
+          setNotFoundCtx({ table: tableHint, sysId });
           setCurrentView('not-found');
           return;
         }
 
-        if (isServiceClass(table)) {
+        const className = raw(r.sys_class_name);
+        const recordTable = isCmdbTableName(className) ? className : tableHint;
+
+        if (isServiceClass(tableHint) || isServiceClass(recordTable)) {
           setSelectedApp({
-            id: sysId, sysId, table,
-            name: r.name ?? '', app: r.name ?? '',
+            id: sysId, sysId, table: recordTable,
+            name: str(r.name) || '', app: str(r.name) || '',
             family: 'core', dept: '',
-            env: r.environment ?? 'Production',
+            env: str(r.environment) || 'Production',
             status: 'Operational', incidents: 0, changes: 0,
             criticality: 'Medium', servers: 0, lastUpdated: '',
           });
@@ -131,10 +139,11 @@ export function App() {
         } else {
           setSelectedCI({
             id: sysId,
-            name:         r.name ?? '',
-            type:         formatClassName(r.sys_class_name ?? table),
-            class:        r.sys_class_name ?? table,
-            environment:  r.environment ?? '',
+            name:         str(r.name) || '',
+            type:         formatClassName(isCmdbTableName(className) ? className : recordTable),
+            class:        recordTable,
+            table:        recordTable,
+            environment:  str(r.environment) ?? '',
             location: '', owner: '', supportGroup: '',
             lastModified: '', hasIncident: false, hasChange: false,
           });
@@ -143,28 +152,35 @@ export function App() {
         }
       })
       .catch(() => {
-        setNotFoundCtx({ table, sysId });
+        setNotFoundCtx({ table: tableHint, sysId });
         setCurrentView('not-found');
       });
   }
 
   // ── Initial deep-link / page-param fetch ─────────────────────────────────
   useEffect(() => {
-    const params = readUrlParams();
+    const params = readRecordUrlParams();
     if (!params) {
-      // No detail params — stamp the initial entry with the resolved view so
-      // popstate can read it back (including ?page= that may already be in URL).
       const view = readPageParam() ?? 'ci-search';
       window.history.replaceState({ view }, '', window.location.href);
       return;
     }
-    // Detail deep-link: stamp current entry then fetch the record
-    window.history.replaceState(
-      { table: params.table, sysId: params.sysId, ciSource: 'ci-search' },
-      '',
-      window.location.href,
-    );
+    stampRecordHistory(params.table, params.sysId, { ciSource: 'ci-search' });
     navigateToRecord(params.table, params.sysId, 'ci-search');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-fetch detail when restored from bfcache (browser back / soft reload).
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      const params = readRecordUrlParams();
+      if (params) {
+        navigateToRecord(params.table, params.sysId, 'ci-search');
+      }
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -176,7 +192,7 @@ export function App() {
 
       // After navigation the URL already reflects the target; use it first,
       // fall back to the pushState state object for cases where URL has no params.
-      const params  = readUrlParams();
+      const params  = readRecordUrlParams();
       const table   = params?.table   ?? state?.table;
       const sysId   = params?.sysId   ?? state?.sysId;
       const ciSrc   = (state?.ciSource ?? 'ci-search') as 'ci-search' | 'app-details';
@@ -207,7 +223,8 @@ export function App() {
     setSelectedCI(ci);
     setCISource(source);
     setCurrentView('ci-detail');
-    pushUrl(ci.table || ci.class, ci.id, source);
+    const table = isCmdbTableName(ci.table) ? ci.table : (isCmdbTableName(ci.class) ? ci.class : 'cmdb_ci');
+    pushUrl(table, ci.id, source);
   };
 
   // In-app Back buttons use the browser history stack — equivalent to the
@@ -339,6 +356,7 @@ export function App() {
             )}
             {currentView === 'ci-detail' && selectedCI && (
               <CIDetailView
+                key={selectedCI.id}
                 ci={selectedCI}
                 onBack={handleBack}
                 onSelectApp={handleSelectApp}
