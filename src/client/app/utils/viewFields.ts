@@ -275,6 +275,33 @@ export function flattenSectionFields(section: FormSectionLayout): string[] {
   return names;
 }
 
+/** All unique field elements across form sections (supports dot-walk paths). */
+export function flattenLayoutFields(sections: FormSectionLayout[]): string[] {
+  return [...new Set(sections.flatMap(flattenSectionFields))];
+}
+
+/** Fetch display values for a record, including dot-walked reference fields. */
+export async function fetchRecordFieldValues(
+  table: string,
+  sysId: string,
+  elements: string[],
+): Promise<Record<string, string>> {
+  if (!elements.length) return {};
+  const { result } = await queryTable<Record<string, unknown>>({
+    table,
+    query: `sys_id=${sysId}`,
+    fields: elements,
+    displayValue: true,
+    limit: 1,
+  });
+  const rec = result?.[0] ?? {};
+  const vals: Record<string, string> = {};
+  for (const el of elements) {
+    vals[el] = str(rec[el]);
+  }
+  return vals;
+}
+
 /**
  * Parse sys_ui_element stream into layout rows (ServiceNow form semantics).
  *
@@ -388,13 +415,31 @@ export function parseElementRows(
   return rows;
 }
 
+function formatElementLabel(element: string): string {
+  return element
+    .replace(/_/g, ' ')
+    .replace(/\./g, ' › ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function labelForElement(element: string, labelMap: Map<string, string>): string {
+  const direct = labelMap.get(element);
+  if (direct) return direct;
+  const base = element.split('.')[0];
+  if (base !== element) {
+    const baseLabel = labelMap.get(base);
+    if (baseLabel) return baseLabel;
+  }
+  return formatElementLabel(element);
+}
+
 function applyLabels(rows: FormLayoutRow[], labelMap: Map<string, string>): void {
   for (const row of rows) {
     if (row.kind === 'full') {
-      row.field.label = labelMap.get(row.field.element) || row.field.label;
+      row.field.label = labelForElement(row.field.element, labelMap);
     } else {
       for (const f of [...row.left, ...row.right]) {
-        f.label = labelMap.get(f.element) || f.label;
+        f.label = labelForElement(f.element, labelMap);
       }
     }
   }
@@ -465,13 +510,23 @@ async function loadLegacySingleSection(
   return [{ caption: null, rows }];
 }
 
+function docLookupNames(elements: string[]): string[] {
+  const names = new Set<string>();
+  for (const el of elements) {
+    names.add(el);
+    const base = el.split('.')[0];
+    if (base !== el) names.add(base);
+  }
+  return [...names];
+}
+
 async function applySectionLabels(
   tableName: string,
   sections: FormSectionLayout[] | null,
 ): Promise<FormSectionLayout[] | null> {
   if (!sections?.length) return sections;
   const allFieldNames = sections.flatMap(s => collectFieldNames(s.rows));
-  const labeled = await labelListElements(tableName, [...new Set(allFieldNames)]);
+  const labeled = await labelListElements(tableName, docLookupNames(allFieldNames));
   const labelMap = new Map(labeled.map(f => [f.element, f.label]));
   for (const sec of sections) {
     applyLabels(sec.rows, labelMap);
@@ -548,12 +603,14 @@ async function tryLoadFormLayout(
   };
 }
 
+const CMDB_CI_TABLE = 'cmdb_ci';
+
 /**
  * Load readonly form layout for CI detail:
  * sys_ui_form → sys_ui_form_section → sys_ui_section → sys_ui_element
  *
- * Fallback order per plan: named view on record table → named on parent →
- * default on record table → default on parent.
+ * Fallback order: named view on record table → named on parent → named on
+ * cmdb_ci → default on record table → default on parent → default on cmdb_ci.
  */
 export async function loadFormLayout(
   recordTable: string,
@@ -564,8 +621,10 @@ export async function loadFormLayout(
   const attempts: { table: string; viewTitle: string | null }[] = [
     { table: recordTable, viewTitle },
     { table: parentTable, viewTitle },
+    { table: CMDB_CI_TABLE, viewTitle },
     { table: recordTable, viewTitle: null },
     { table: parentTable, viewTitle: null },
+    { table: CMDB_CI_TABLE, viewTitle: null },
   ];
 
   const seen = new Set<string>();

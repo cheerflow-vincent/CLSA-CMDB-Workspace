@@ -1,7 +1,7 @@
-import { useState, useEffect, type ElementType } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  Search, Server, Database, DollarSign,
-  AlertCircle, Calendar, ChevronLeft, ChevronRight, ChevronDown, Loader2,
+  Search, Server, Database, DollarSign, Network,
+  AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE } from './RelationshipDiagram';
 import type { DiagramFilters } from './RelationshipDiagram';
@@ -12,109 +12,19 @@ import { type AppItem } from '../data/appData';
 import type { CIItem } from './CIDetailView';
 import { type ViewField, str, loadViewFields } from '../utils/viewFields';
 import {
-  fetchRelatedCICount,
-  fetchRelatedCIPage,
-  RELATED_CI_PAGE_SIZE,
   SERVER_REL_CONFIG,
   DATABASE_REL_CONFIG,
-  type RelatedCIConfig,
-  type RelatedCIRow,
+  NETGEAR_REL_CONFIG,
 } from '../utils/relatedCIs';
 import {
-  fetchRelatedTaskCount,
-  fetchRelatedTaskPage,
   INCIDENT_TASK_CONFIG,
   CHANGE_TASK_CONFIG,
-  type RelatedTaskConfig,
-  type RelatedTaskRow,
 } from '../utils/relatedTasks';
+import RelatedListSection from './RelatedListSection';
 import { queryTable } from '../../api/servicenow';
 
 const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
 const OVERVIEW_DEFAULT_LIMIT = 10;
-
-// ── Badge helpers ─────────────────────────────────────────────────────────────
-function EnvBadge({ env }: { env: string }) {
-  const cls =
-    env === 'Production'     ? 'bg-green-100 text-green-700' :
-    env === 'DR'             ? 'bg-orange-100 text-orange-700' :
-                               'bg-yellow-100 text-yellow-700';
-  const short = env === 'Non-production' ? 'Non-prod' : env;
-  return (
-    <span className={`inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap ${cls}`}>
-      {short}
-    </span>
-  );
-}
-
-function PriorityBadge({ priority }: { priority: string }) {
-  const cls =
-    priority.startsWith('P1') || priority.includes('Critical') ? 'bg-red-100 text-red-700' :
-    priority.startsWith('P2') || priority.includes('High')     ? 'bg-orange-100 text-orange-700' :
-    priority.startsWith('P3') || priority.includes('Medium')   ? 'bg-yellow-100 text-yellow-700' :
-                                                                 'bg-gray-100 text-gray-600';
-  return (
-    <span className={`inline-flex text-[10px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>
-      {priority}
-    </span>
-  );
-}
-
-function StateBadge({ state }: { state: string }) {
-  const cls =
-    state === 'In Progress' ? 'bg-blue-100 text-blue-700' :
-    state === 'Resolved'    ? 'bg-green-100 text-green-700' :
-    state === 'New'         ? 'bg-violet-100 text-violet-700' :
-    state === 'Approved'    ? 'bg-green-100 text-green-700' :
-    state === 'Scheduled'   ? 'bg-blue-100 text-blue-700' :
-    state === 'Pending'     ? 'bg-yellow-100 text-yellow-700' :
-                              'bg-gray-100 text-gray-600';
-  return (
-    <span className={`inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded ${cls}`}>
-      {state}
-    </span>
-  );
-}
-
-function ChangeTypeBadge({ type }: { type: string }) {
-  const cls =
-    type === 'Emergency' ? 'bg-red-100 text-red-700' :
-    type === 'Normal'    ? 'bg-blue-100 text-blue-700' :
-                           'bg-gray-100 text-gray-600';
-  return (
-    <span className={`inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded ${cls}`}>
-      {type}
-    </span>
-  );
-}
-
-function renderTaskCell(element: string, val: string) {
-  if (val === '—') {
-    return <span className="text-[11px] text-gray-400">—</span>;
-  }
-  if (element === 'number') {
-    return (
-      <span className="font-mono text-[11px] text-gray-700 truncate block max-w-full" title={val}>
-        {val}
-      </span>
-    );
-  }
-  if (element === 'priority') return <PriorityBadge priority={val} />;
-  if (element === 'state') return <StateBadge state={val} />;
-  if (element === 'type') return <ChangeTypeBadge type={val} />;
-  if (element === 'short_description') {
-    return (
-      <span className="text-[11px] text-gray-700 line-clamp-2" title={val}>
-        {val}
-      </span>
-    );
-  }
-  return (
-    <span className="text-[11px] text-gray-600 truncate block max-w-[120px]" title={val}>
-      {val}
-    </span>
-  );
-}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ApplicationDetailsProps {
@@ -125,256 +35,7 @@ interface ApplicationDetailsProps {
 }
 
 type ViewMode = 'map' | 'table';
-type ExpandKey = 'servers' | 'databases' | 'incidents' | 'changes';
-
-function formatClassLabel(cls: string): string {
-  return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function buildCIItem(row: RelatedCIRow): CIItem {
-  return {
-    id: row.sysId,
-    name: row.values.name || row.sysId,
-    type: formatClassLabel(row.sysClass),
-    class: row.sysClass,
-    table: row.sysClass,
-    environment: row.values.environment ?? '',
-    location: row.values.location ?? '',
-    owner: '',
-    supportGroup: '',
-    lastModified: '',
-    hasIncident: false,
-    hasChange: false,
-  };
-}
-
-function isTaskConfig(
-  config: RelatedCIConfig | RelatedTaskConfig,
-): config is RelatedTaskConfig {
-  return 'extraQuery' in config;
-}
-
-function RelatedCISection({
-  config,
-  appSysId,
-  isOpen,
-  onToggle,
-  onViewCI,
-  title,
-  Icon,
-  iconBg,
-  iconColor,
-  badgeBg,
-  badgeText,
-  badgeBorder,
-  hoverRow,
-  emptyMessage = 'No related records found.',
-}: {
-  config: RelatedCIConfig | RelatedTaskConfig;
-  appSysId?: string;
-  isOpen: boolean;
-  onToggle: () => void;
-  onViewCI?: (ci: CIItem) => void;
-  title: string;
-  Icon: ElementType;
-  iconBg: string;
-  iconColor: string;
-  badgeBg: string;
-  badgeText: string;
-  badgeBorder: string;
-  hoverRow?: string;
-  emptyMessage?: string;
-}) {
-  const [totalCount, setTotalCount] = useState(0);
-  const [page, setPage] = useState(0);
-  const [columns, setColumns] = useState<ViewField[]>([]);
-  const [rows, setRows] = useState<Array<RelatedCIRow | RelatedTaskRow>>([]);
-  const [loading, setLoading] = useState(false);
-  const taskMode = isTaskConfig(config);
-
-  useEffect(() => {
-    setPage(0);
-    setRows([]);
-    setColumns([]);
-    if (!appSysId) {
-      setTotalCount(0);
-      return;
-    }
-    const loadCount = taskMode
-      ? fetchRelatedTaskCount(appSysId, config)
-      : fetchRelatedCICount(appSysId, config);
-    loadCount.then(setTotalCount).catch(() => setTotalCount(0));
-  }, [appSysId, config, taskMode]);
-
-  useEffect(() => {
-    if (!isOpen || !appSysId) return;
-    setLoading(true);
-    const loadPage = taskMode
-      ? fetchRelatedTaskPage(appSysId, config, page)
-      : fetchRelatedCIPage(appSysId, config, page);
-    loadPage
-      .then(({ rows: pageRows, columns: pageCols, totalCount: count }) => {
-        setRows(pageRows);
-        setColumns(pageCols);
-        setTotalCount(count);
-      })
-      .catch(() => {
-        setRows([]);
-        setColumns(config.defaultColumns);
-      })
-      .finally(() => setLoading(false));
-  }, [isOpen, appSysId, page, config, taskMode]);
-
-  const pageSize = RELATED_CI_PAGE_SIZE;
-  const start = totalCount === 0 ? 0 : page * pageSize + 1;
-  const end = Math.min((page + 1) * pageSize, totalCount);
-  const showPagination = totalCount > pageSize;
-
-  function renderCell(
-    row: RelatedCIRow | RelatedTaskRow,
-    col: ViewField,
-    colIdx: number,
-  ) {
-    const val = row.values[col.element] || '—';
-
-    if (taskMode) {
-      const taskConfig = config as RelatedTaskConfig;
-      if (colIdx === 0 && val !== '—') {
-        const href = `/${taskConfig.taskTable}.do?sys_id=${row.sysId}`;
-        return (
-          <td key={col.element} className="px-3 py-1.5 max-w-[150px]">
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-[11px] text-blue-700 truncate block max-w-full hover:underline"
-              title={val}
-            >
-              {val}
-            </a>
-          </td>
-        );
-      }
-      return (
-        <td key={col.element} className="px-2 py-1.5 first:pl-3 max-w-[180px]">
-          {renderTaskCell(col.element, val)}
-        </td>
-      );
-    }
-
-    if (colIdx === 0) {
-      const ciRow = row as RelatedCIRow;
-      return (
-        <td key={col.element} className="px-3 py-1.5 max-w-[150px]">
-          {onViewCI ? (
-            <button
-              type="button"
-              onClick={() => onViewCI(buildCIItem(ciRow))}
-              className={`font-mono text-[11px] text-blue-700 truncate block max-w-full text-left hover:underline ${hoverRow ?? ''}`}
-              title={val}
-            >
-              {val}
-            </button>
-          ) : (
-            <span className="font-mono text-[11px] text-gray-700 truncate block">{val}</span>
-          )}
-        </td>
-      );
-    }
-    if (col.element === 'environment' && val !== '—') {
-      return (
-        <td key={col.element} className="px-2 py-1.5">
-          <EnvBadge env={val} />
-        </td>
-      );
-    }
-    return (
-      <td key={col.element} className="px-2 py-1.5 text-[11px] text-gray-600 truncate max-w-[120px]" title={val}>
-        {val}
-      </td>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <button onClick={onToggle}
-        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
-        <div className={`p-1.5 ${iconBg} rounded flex-shrink-0`}>
-          <Icon className={`w-4 h-4 ${iconColor}`} />
-        </div>
-        <span className="flex-1 text-xs text-gray-600 font-medium">{title}</span>
-        <span className={`text-xs font-semibold ${badgeBg} ${badgeText} border ${badgeBorder} px-2.5 py-0.5 rounded-full`}>
-          {totalCount}
-        </span>
-        <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      {isOpen && (
-        <div className="border-t border-gray-100">
-          {loading ? (
-            <div className="flex items-center justify-center py-8 text-gray-400 gap-2 text-xs">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-            </div>
-          ) : totalCount === 0 ? (
-            <p className="px-3 py-6 text-xs text-gray-400 italic text-center">{emptyMessage}</p>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      {columns.map(col => (
-                        <th key={col.element}
-                          className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide first:pl-3">
-                          {col.label}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {rows.map((row, i) => (
-                      <tr key={row.sysId} className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}>
-                        {columns.map((col, colIdx) => renderCell(row, col, colIdx))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {showPagination && (
-                <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-                  <span className="text-[11px] text-gray-400">
-                    Showing {start}–{end} of {totalCount}
-                  </span>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setPage(p => p - 1)}
-                      disabled={page === 0}
-                      className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                      aria-label="Previous page"
-                    >
-                      <ChevronLeft className="w-4 h-4 text-gray-600" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPage(p => p + 1)}
-                      disabled={(page + 1) * pageSize >= totalCount}
-                      className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                      aria-label="Next page"
-                    >
-                      <ChevronRight className="w-4 h-4 text-gray-600" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+type ExpandKey = 'servers' | 'databases' | 'netgear' | 'incidents' | 'changes';
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp }: ApplicationDetailsProps) {
@@ -387,7 +48,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     platform: true, infrastructure: true, business: true,
   });
   const [expanded, setExpanded] = useState<Record<ExpandKey, boolean>>({
-    servers: false, databases: false, incidents: false, changes: false,
+    servers: false, databases: false, netgear: false, incidents: false, changes: false,
   });
 
   // ── Overview panel: dynamic view fields ──────────────────────────────────
@@ -611,9 +272,9 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Infrastructure</p>
                     <div className="space-y-2">
 
-                      <RelatedCISection
+                      <RelatedListSection
                         config={SERVER_REL_CONFIG}
-                        appSysId={selectedApp?.sysId}
+                        recordSysId={selectedApp?.sysId}
                         isOpen={expanded.servers}
                         onToggle={() => toggleExpand('servers')}
                         onViewCI={onViewCI}
@@ -627,9 +288,9 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         hoverRow="cursor-pointer"
                       />
 
-                      <RelatedCISection
+                      <RelatedListSection
                         config={DATABASE_REL_CONFIG}
-                        appSysId={selectedApp?.sysId}
+                        recordSysId={selectedApp?.sysId}
                         isOpen={expanded.databases}
                         onToggle={() => toggleExpand('databases')}
                         onViewCI={onViewCI}
@@ -640,6 +301,22 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         badgeBg="bg-purple-50"
                         badgeText="text-purple-700"
                         badgeBorder="border-purple-200"
+                        hoverRow="cursor-pointer"
+                      />
+
+                      <RelatedListSection
+                        config={NETGEAR_REL_CONFIG}
+                        recordSysId={selectedApp?.sysId}
+                        isOpen={expanded.netgear}
+                        onToggle={() => toggleExpand('netgear')}
+                        onViewCI={onViewCI}
+                        title="Network gear hosting the application"
+                        Icon={Network}
+                        iconBg="bg-teal-100"
+                        iconColor="text-teal-600"
+                        badgeBg="bg-teal-50"
+                        badgeText="text-teal-700"
+                        badgeBorder="border-teal-200"
                         hoverRow="cursor-pointer"
                       />
 
@@ -659,9 +336,10 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Active Flags</p>
                     <div className="space-y-2">
 
-                      <RelatedCISection
+                      <RelatedListSection
                         config={INCIDENT_TASK_CONFIG}
-                        appSysId={selectedApp?.sysId}
+                        recordSysId={selectedApp?.sysId}
+                        variant="compact"
                         isOpen={expanded.incidents}
                         onToggle={() => toggleExpand('incidents')}
                         title="Active Incidents"
@@ -674,9 +352,10 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         emptyMessage="No active incidents linked to this application."
                       />
 
-                      <RelatedCISection
+                      <RelatedListSection
                         config={CHANGE_TASK_CONFIG}
-                        appSysId={selectedApp?.sysId}
+                        recordSysId={selectedApp?.sysId}
+                        variant="compact"
                         isOpen={expanded.changes}
                         onToggle={() => toggleExpand('changes')}
                         title="Change Requests"

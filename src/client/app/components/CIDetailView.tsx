@@ -3,21 +3,23 @@ import {
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Edit2, MoreHorizontal, ExternalLink, MapPin,
   AlertCircle, Calendar, Activity, Server, Database,
-  Network, Shield, Clock, User, Mail, Phone,
-  ArrowUpDown, CheckCircle2, Layers, Building2, Loader2,
+  Network, Shield, User,
+  ArrowUpDown, Layers, Loader2,
 } from 'lucide-react';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer,
-} from 'recharts';
+import TaskTrendChart from './TaskTrendChart';
+import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
 import { type AppItem } from '../data/appData';
 import { queryTable } from '../../api/servicenow';
 import {
-  loadFormLayout, str, raw, flattenSectionFields,
+  loadFormLayout, str, raw, flattenLayoutFields, fetchRecordFieldValues,
   type FormSectionLayout, type FormLayoutRow,
 } from '../utils/viewFields';
-import { CI_OVERVIEW_VIEW, resolveCiSearchParentTable } from '../utils/ciTables';
+import { CI_OVERVIEW_VIEW, CI_CONTACT_VIEW, resolveCiSearchParentTable } from '../utils/ciTables';
 import { readRecordUrlParams, isCmdbTableName } from '../utils/routing';
+import RelatedApplicationsPanel from './RelatedApplicationsPanel';
+import RelatedListSection from './RelatedListSection';
+import HealthResultsPanel from './HealthResultsPanel';
+import { INCIDENT_TASK_CONFIG, CHANGE_TASK_CONFIG, fetchRelatedTaskCount } from '../utils/relatedTasks';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface CIItem {
@@ -41,6 +43,7 @@ interface CIDetailViewProps {
   onBack: () => void;
   onSelectApp?: (app: AppItem) => void;
   fromApp?: AppItem | null;
+  hierarchyMode?: boolean;
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -60,84 +63,16 @@ const getDetail = (ci: CIItem) => ({
   disk: '2 TB',
 });
 
-// Contact mock
-const getContact = (ci: CIItem) => ({
-  owner:      ci.owner,
-  group:      ci.supportGroup,
-  email:      ci.type === 'Database' ? 'it-dba-support@clsa.com' : 'it-techops@clsa.com',
-  hotline:    '+852 2600 7456\n+91 20 6646 8317',
-  escalation: 'Sandeep Savalam',
-});
+// Contact section uses live form layout (CLSA CMDB Workspace Contact).
 
-// Related Applications mock
-type RelatedApp = AppItem & { role: string };
-const RELATED_APPS: RelatedApp[] = [
-  { id: '3', name: 'Trading Platform - PROD',  app: 'Trading System',  family: 'core', dept: 'Finance',             env: 'Production',     status: 'Operational', incidents: 1, changes: 0, criticality: 'Tier 1', servers: 32,  lastUpdated: '4 hours ago',  role: 'Primary Host'        },
-  { id: '8', name: 'Market Data Feed - PROD',  app: 'Trading System',  family: 'core', dept: 'Finance',             env: 'Production',     status: 'Operational', incidents: 0, changes: 1, criticality: 'Tier 1', servers: 18,  lastUpdated: '6 hours ago',  role: 'Secondary Host'      },
-  { id: '1', name: 'Payment Gateway - PROD',   app: 'Payment Portal',  family: 'core', dept: 'Fintech',             env: 'Production',     status: 'Operational', incidents: 1, changes: 0, criticality: 'Tier 1', servers: 14,  lastUpdated: '2 hours ago',  role: 'Upstream Consumer'   },
-  { id: '7', name: 'Risk Dashboard - PROD',    app: 'Risk Management', family: 'risk', dept: 'Risk',                env: 'Production',     status: 'Degraded',    incidents: 2, changes: 0, criticality: 'Tier 1', servers: 20,  lastUpdated: '30 mins ago',  role: 'Downstream Consumer' },
-  { id: '6', name: 'ES - Cobra HK (HUB)',      app: 'ES Cobra',        family: 'core', dept: 'Execution Services',  env: 'Production',     status: 'Operational', incidents: 3, changes: 5, criticality: 'Tier 1', servers: 142, lastUpdated: '1 hour ago',   role: 'Primary Host'        },
-];
-
-const incidentTrendData = [
-  { month: 'Nov', incidents: 3, changes: 2 },
-  { month: 'Dec', incidents: 5, changes: 4 },
-  { month: 'Jan', incidents: 2, changes: 3 },
-  { month: 'Feb', incidents: 4, changes: 5 },
-  { month: 'Mar', incidents: 1, changes: 2 },
-  { month: 'Apr', incidents: 3, changes: 6 },
-];
-
-const recentIncidents = [
-  { number: 'INC0012345', priority: 'P2 - High',   state: 'In Progress', short: 'CPU spike >95% sustained 30 min', opened:    '2026-02-10 08:12' },
-  { number: 'INC0012201', priority: 'P3 - Medium', state: 'Resolved',    short: 'Disk usage warning on /var',       opened:    '2026-01-28 14:55' },
-];
-
-const recentChanges = [
-  { number: 'CHG0008811', type: 'Standard', state: 'Scheduled', short: 'OS patching – KB5034441', scheduled: '2026-03-05 22:00' },
-  { number: 'CHG0008650', type: 'Normal',   state: 'Closed',    short: 'Disk expansion +200 GB',   scheduled: '2026-02-20 01:00' },
-];
-
-const healthChecks = [
-  { label: 'CI Completeness',   score: 92,  status: 'good'    },
-  { label: 'Ownership Defined', score: 100, status: 'good'    },
-  { label: 'Stale Data Risk',   score: 68,  status: 'warning' },
-  { label: 'Duplicate Check',   score: 100, status: 'good'    },
-];
+// Related Applications loaded live via RelatedApplicationsPanel.
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const priorityColor: Record<string, string> = {
-  'P1 - Critical': 'bg-red-100 text-red-700',
-  'P2 - High':     'bg-orange-100 text-orange-700',
-  'P3 - Medium':   'bg-yellow-100 text-yellow-700',
-};
-const stateColor: Record<string, string> = {
-  'In Progress': 'bg-purple-100 text-purple-700',
-  'Resolved':    'bg-green-100 text-green-700',
-  'Closed':      'bg-gray-100 text-gray-500',
-  'Scheduled':   'bg-blue-100 text-blue-700',
-  'Approved':    'bg-green-100 text-green-700',
-};
-const changeTypeColor: Record<string, string> = {
-  'Standard':  'bg-gray-100 text-gray-600',
-  'Normal':    'bg-blue-100 text-blue-700',
-  'Emergency': 'bg-red-100 text-red-700',
-};
-
-function EnvBadge({ env }: { env: string }) {
-  const cls =
-    env === 'Production'   ? 'bg-green-100 text-green-700'  :
-    env === 'DR'           ? 'bg-orange-100 text-orange-700' :
-    env.includes('Non')    ? 'bg-yellow-100 text-yellow-700' :
-                             'bg-gray-100 text-gray-600';
-  return <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cls}`}>{env}</span>;
-}
-
 function ReadonlyField({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-gray-900 break-words">{value || '—'}</p>
+      <p className="text-sm font-medium text-gray-900 break-words whitespace-pre-line">{value || '—'}</p>
     </div>
   );
 }
@@ -231,10 +166,16 @@ function FormOverviewBlock({
   sections,
   values,
   loading,
+  embedded = false,
+  emptyMessage = 'No overview fields configured.',
+  loadingMessage = 'Loading overview…',
 }: {
   sections: FormSectionLayout[];
   values: Record<string, string>;
   loading: boolean;
+  embedded?: boolean;
+  emptyMessage?: string;
+  loadingMessage?: string;
 }) {
   const renderRow = (row: FormLayoutRow, key: string) => {
     if (row.kind === 'full') {
@@ -262,21 +203,21 @@ function FormOverviewBlock({
 
   if (loading) {
     return (
-      <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-center py-8 text-gray-400 gap-2 text-sm">
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading overview…
+      <div className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} flex items-center justify-center py-8 text-gray-400 gap-2 text-sm`}>
+        <Loader2 className="w-4 h-4 animate-spin" /> {loadingMessage}
       </div>
     );
   }
   if (!sections.length) {
     return (
-      <p className="mt-4 pt-4 border-t border-gray-100 text-sm text-gray-400 italic">
-        No overview fields configured.
+      <p className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} text-sm text-gray-400 italic`}>
+        {emptyMessage}
       </p>
     );
   }
 
   return (
-    <div className="mt-4 pt-4 border-t border-gray-100 space-y-0">
+    <div className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} space-y-0`}>
       {sections.map((sec, idx) => (
         <CollapsibleFormSection key={idx} caption={sec.caption} isFirst={idx === 0}>
           <div className="grid grid-cols-2 gap-y-4">
@@ -314,22 +255,31 @@ function Section({ title, icon, defaultOpen = true, children }: {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function CIDetailView({ ci, onBack, onSelectApp, fromApp }: CIDetailViewProps) {
+export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarchyMode = true }: CIDetailViewProps) {
   const detail  = getDetail(ci);
-  const contact = getContact(ci);
   const isServer = ci.type === 'Server';
-  const [activeTab, setActiveTab] = useState<'incidents' | 'changes'>('incidents');
+  const [taskTab, setTaskTab] = useState<'incidents' | 'changes'>('incidents');
+  const [incidentCount, setIncidentCount] = useState(0);
+  const [changeCount, setChangeCount] = useState(0);
+  const [trendData, setTrendData] = useState<TrendMonthPoint[]>([]);
+  const [trendLoading, setTrendLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
   const [displayName, setDisplayName] = useState(ci.name);
   const [formSections, setFormSections] = useState<FormSectionLayout[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [overviewLoading, setOverviewLoading] = useState(true);
+  const [contactSections, setContactSections] = useState<FormSectionLayout[]>([]);
+  const [contactValues, setContactValues] = useState<Record<string, string>>({});
+  const [contactLoading, setContactLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setOverviewLoading(true);
+    setContactLoading(true);
     setFormSections([]);
     setFieldValues({});
+    setContactSections([]);
+    setContactValues({});
     setDisplayName(ci.name);
 
     resolveRecordContext(ci)
@@ -338,52 +288,89 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp }: CIDet
         if (!ctx.sysId) {
           setFormSections([]);
           setFieldValues({});
+          setContactSections([]);
+          setContactValues({});
           return;
         }
 
         setDisplayName(ctx.name);
 
-        const layout = await loadFormLayout(
-          ctx.recordTable,
-          CI_OVERVIEW_VIEW,
-          resolveCiSearchParentTable,
-        );
+        const [overviewLayout, contactLayout] = await Promise.all([
+          loadFormLayout(ctx.recordTable, CI_OVERVIEW_VIEW, resolveCiSearchParentTable),
+          loadFormLayout(ctx.recordTable, CI_CONTACT_VIEW, resolveCiSearchParentTable),
+        ]);
         if (cancelled) return;
 
-        setFormSections(layout.sections);
-        const elements = layout.sections.flatMap(flattenSectionFields);
-        if (!elements.length) return;
+        setFormSections(overviewLayout.sections);
+        setContactSections(contactLayout.sections);
 
-        const uniqueFields = [...new Set(['name', ...elements])];
-        const { result } = await queryTable<Record<string, unknown>>({
-          table: ctx.recordTable,
-          query: `sys_id=${ctx.sysId}`,
-          fields: uniqueFields,
-          displayValue: true,
-          limit: 1,
-        });
+        const overviewElements = flattenLayoutFields(overviewLayout.sections);
+        const contactElements = flattenLayoutFields(contactLayout.sections);
+        const allElements = [...new Set(['name', ...overviewElements, ...contactElements])];
+        if (allElements.length <= 1 && !overviewElements.length && !contactElements.length) return;
+
+        const vals = await fetchRecordFieldValues(ctx.recordTable, ctx.sysId, allElements);
         if (cancelled) return;
 
-        const rec = result?.[0] ?? {};
-        setDisplayName(str(rec.name) || ctx.name);
-        const vals: Record<string, string> = {};
-        for (const el of elements) {
-          vals[el] = str(rec[el]);
-        }
-        setFieldValues(vals);
+        setDisplayName(vals.name || ctx.name);
+
+        const overviewVals: Record<string, string> = {};
+        for (const el of overviewElements) overviewVals[el] = vals[el] ?? '';
+
+        const contactVals: Record<string, string> = {};
+        for (const el of contactElements) contactVals[el] = vals[el] ?? '';
+
+        setFieldValues(overviewVals);
+        setContactValues(contactVals);
       })
       .catch(() => {
         if (!cancelled) {
           setFormSections([]);
           setFieldValues({});
+          setContactSections([]);
+          setContactValues({});
         }
       })
       .finally(() => {
-        if (!cancelled) setOverviewLoading(false);
+        if (!cancelled) {
+          setOverviewLoading(false);
+          setContactLoading(false);
+        }
       });
 
     return () => { cancelled = true; };
   }, [ci.id, ci.table, ci.class, ci.name]);
+
+  useEffect(() => {
+    if (!ci.id) {
+      setIncidentCount(0);
+      setChangeCount(0);
+      return;
+    }
+    fetchRelatedTaskCount(ci.id, INCIDENT_TASK_CONFIG).then(setIncidentCount).catch(() => setIncidentCount(0));
+    fetchRelatedTaskCount(ci.id, CHANGE_TASK_CONFIG).then(setChangeCount).catch(() => setChangeCount(0));
+  }, [ci.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTrendLoading(true);
+    fetchCITaskTrend(ci.id)
+      .then(data => { if (!cancelled) setTrendData(data); })
+      .catch(() => {
+        if (!cancelled) {
+          setTrendData(getLast6MonthBuckets().map(b => ({
+            month: b.label,
+            monthKey: b.monthKey,
+            incidents: 0,
+            changes: 0,
+            incidentListUrl: `/incident_list.do`,
+            changeListUrl: `/change_request_list.do`,
+          })));
+        }
+      })
+      .finally(() => { if (!cancelled) setTrendLoading(false); });
+    return () => { cancelled = true; };
+  }, [ci.id]);
 
   return (
     <div className="p-6 space-y-4">
@@ -460,132 +447,24 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp }: CIDet
       {/* ── Contact Information ── */}
       <Section title="Contact Information" icon={<User className="w-4 h-4 text-blue-500" />}>
         <div className="p-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg flex-shrink-0">
-                <User className="w-4 h-4 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">TechOps Owner</p>
-                <p className="text-sm font-medium text-gray-900">{contact.owner}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-indigo-100 rounded-lg flex-shrink-0">
-                <Building2 className="w-4 h-4 text-indigo-600" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Support Group</p>
-                <p className="text-sm font-medium text-gray-900">{contact.group}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-green-100 rounded-lg flex-shrink-0">
-                <Mail className="w-4 h-4 text-green-600" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Email</p>
-                <a href={`mailto:${contact.email}`} className="text-sm font-medium text-blue-600 hover:underline">
-                  {contact.email}
-                </a>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-amber-100 rounded-lg flex-shrink-0">
-                <Phone className="w-4 h-4 text-amber-600" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Hotline</p>
-                <p className="text-sm font-medium text-gray-900 whitespace-pre-line">{contact.hotline}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-rose-100 rounded-lg flex-shrink-0">
-                <Shield className="w-4 h-4 text-rose-600" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Escalation Contact</p>
-                <p className="text-sm font-medium text-gray-900">{contact.escalation}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-gray-100 rounded-lg flex-shrink-0">
-                <Clock className="w-4 h-4 text-gray-500" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Last Modified</p>
-                <p className="text-sm font-medium text-gray-900">{ci.lastModified}</p>
-              </div>
-            </div>
-
-          </div>
+          <FormOverviewBlock
+            embedded
+            sections={contactSections}
+            values={contactValues}
+            loading={contactLoading}
+            emptyMessage="No contact fields configured."
+            loadingMessage="Loading contact information…"
+          />
         </div>
       </Section>
 
       {/* ── Related Applications ── */}
       <Section title="Related Applications" icon={<Layers className="w-4 h-4 text-blue-500" />}>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                {['Application', 'IT Department', 'Environment', 'Role', 'Incidents', 'Changes', ''].map(col => (
-                  <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {RELATED_APPS.map((app) => (
-                <tr key={app.id} className="hover:bg-blue-50/40 transition-colors group">
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => onSelectApp?.(app)}
-                      className="text-sm font-medium text-blue-700 hover:underline text-left"
-                    >
-                      {app.name}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{app.dept}</td>
-                  <td className="px-4 py-3"><EnvBadge env={app.env} /></td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">
-                      {app.role}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {app.incidents > 0
-                      ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
-                          <AlertCircle className="w-3 h-3" />{app.incidents}
-                        </span>
-                      : <span className="text-xs text-gray-300">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    {app.changes > 0
-                      ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                          <Calendar className="w-3 h-3" />{app.changes}
-                        </span>
-                      : <span className="text-xs text-gray-300">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => onSelectApp?.(app)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
-                    >
-                      Open <ExternalLink className="w-3 h-3" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <RelatedApplicationsPanel
+          ciSysId={ci.id}
+          hierarchyMode={hierarchyMode}
+          onSelectApp={onSelectApp}
+        />
       </Section>
 
       {/* ── Incidents & Changes ── */}
@@ -593,53 +472,57 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp }: CIDet
         <div className="p-5">
           <div className="flex gap-2 mb-4">
             <button
-              onClick={() => setActiveTab('incidents')}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${activeTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              type="button"
+              onClick={() => setTaskTab('incidents')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
             >
               <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
-              Incidents ({recentIncidents.length})
+              Incidents ({incidentCount})
             </button>
             <button
-              onClick={() => setActiveTab('changes')}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${activeTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              type="button"
+              onClick={() => setTaskTab('changes')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
             >
               <Calendar className="w-3.5 h-3.5 inline mr-1" />
-              Changes ({recentChanges.length})
+              Changes ({changeCount})
             </button>
           </div>
 
-          {activeTab === 'incidents' ? (
-            <div className="space-y-3">
-              {recentIncidents.map((inc, i) => (
-                <div key={i} className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <span className="text-sm font-semibold text-blue-700 hover:underline cursor-pointer">{inc.number}</span>
-                    <div className="flex gap-1.5">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[inc.priority] ?? 'bg-gray-100 text-gray-600'}`}>{inc.priority}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stateColor[inc.state]  ?? 'bg-gray-100 text-gray-600'}`}>{inc.state}</span>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-800 mb-1.5">{inc.short}</p>
-                  <p className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" /> Opened: {inc.opened}</p>
-                </div>
-              ))}
-            </div>
+          {taskTab === 'incidents' ? (
+            <RelatedListSection
+              embedded
+              config={INCIDENT_TASK_CONFIG}
+              recordSysId={ci.id}
+              variant="cards"
+              isOpen
+              onToggle={() => {}}
+              title="Active Incidents"
+              Icon={AlertCircle}
+              iconBg="bg-red-100"
+              iconColor="text-red-600"
+              badgeBg="bg-red-50"
+              badgeText="text-red-700"
+              badgeBorder="border-red-200"
+              emptyMessage="No active incidents linked to this CI."
+            />
           ) : (
-            <div className="space-y-3">
-              {recentChanges.map((chg, i) => (
-                <div key={i} className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <span className="text-sm font-semibold text-blue-700 hover:underline cursor-pointer">{chg.number}</span>
-                    <div className="flex gap-1.5">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${changeTypeColor[chg.type] ?? 'bg-gray-100 text-gray-600'}`}>{chg.type}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stateColor[chg.state]    ?? 'bg-gray-100 text-gray-600'}`}>{chg.state}</span>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-800 mb-1.5">{chg.short}</p>
-                  <p className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" /> Scheduled: {chg.scheduled}</p>
-                </div>
-              ))}
-            </div>
+            <RelatedListSection
+              embedded
+              config={CHANGE_TASK_CONFIG}
+              recordSysId={ci.id}
+              variant="cards"
+              isOpen
+              onToggle={() => {}}
+              title="Change Requests"
+              Icon={Calendar}
+              iconBg="bg-amber-100"
+              iconColor="text-amber-600"
+              badgeBg="bg-amber-50"
+              badgeText="text-amber-700"
+              badgeBorder="border-amber-200"
+              emptyMessage="No approved change requests linked to this CI."
+            />
           )}
         </div>
       </Section>
@@ -647,43 +530,27 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp }: CIDet
       {/* ── Trend Chart ── */}
       <Section title="Incident & Change Trend (Last 6 Months)" icon={<Activity className="w-4 h-4 text-blue-500" />}>
         <div className="p-5">
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={incidentTrendData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="incidents" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} name="Incidents" />
-              <Line type="monotone" dataKey="changes"   stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} name="Changes"   />
-            </LineChart>
-          </ResponsiveContainer>
+          {trendLoading ? (
+            <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
+              <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
+            </div>
+          ) : trendData.length === 0 ? (
+            <p className="text-sm text-gray-400 italic text-center py-16">No trend data available.</p>
+          ) : (
+            <>
+              <TaskTrendChart data={trendData} />
+              <p className="text-xs text-gray-400 text-center mt-3">
+                Click a data point to open the filtered list in ServiceNow.
+              </p>
+            </>
+          )}
         </div>
       </Section>
 
       {/* ── CMDB Health ── */}
       <Section title="CMDB Health Metrics" icon={<Shield className="w-4 h-4 text-blue-500" />} defaultOpen={false}>
-        <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
-          {healthChecks.map(h => (
-            <div key={h.label} className="flex flex-col gap-1">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">{h.label}</span>
-                <span className={`font-semibold ${h.status === 'good' ? 'text-green-600' : 'text-yellow-600'}`}>{h.score}%</span>
-              </div>
-              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${h.status === 'good' ? 'bg-green-500' : 'bg-yellow-500'}`}
-                  style={{ width: `${h.score}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-400 flex items-center gap-1">
-                {h.status === 'good'
-                  ? <CheckCircle2 className="w-3 h-3 text-green-500" />
-                  : <AlertCircle  className="w-3 h-3 text-yellow-500" />}
-                {h.status === 'good' ? 'OK' : 'Needs attention'}
-              </p>
-            </div>
-          ))}
+        <div className="p-5">
+          <HealthResultsPanel ciSysId={ci.id} />
         </div>
       </Section>
 

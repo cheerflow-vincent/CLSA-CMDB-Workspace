@@ -12,6 +12,7 @@ export const CI_SEARCH_BASE_TABLES = [
 export const CI_ALL_TABLE = 'cmdb_ci';
 
 export const CI_OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
+export const CI_CONTACT_VIEW = 'CLSA CMDB Workspace Contact';
 
 /**
  * Map a record table to the CI-search parent used for view/layout fallbacks.

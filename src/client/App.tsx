@@ -361,6 +361,7 @@ export function App() {
                 onBack={handleBack}
                 onSelectApp={handleSelectApp}
                 fromApp={ciSource === 'app-details' ? selectedApp : null}
+                hierarchyMode={hierarchyMode}
               />
             )}
             {currentView === 'dashboard' && <DashboardView />}

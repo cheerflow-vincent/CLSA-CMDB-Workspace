@@ -51,6 +51,19 @@ export const DATABASE_REL_CONFIG: RelatedCIConfig = {
   ],
 };
 
+export const NETGEAR_REL_CONFIG: RelatedCIConfig = {
+  relType: 'Runs on::Runs',
+  baseClass: 'cmdb_ci_netgear',
+  ciTable: 'cmdb_ci_netgear',
+  listTitle: LIST_VIEW_TITLE,
+  defaultColumns: [
+    { element: 'name',        label: 'Name'        },
+    { element: 'environment', label: 'Environment' },
+    { element: 'model_id',    label: 'Model'       },
+    { element: 'location',    label: 'Location'    },
+  ],
+};
+
 function buildRelQuery(appSysId: string, config: RelatedCIConfig): string {
   return `type.name=${config.relType}^parent.sys_id=${appSysId}^child.sys_class_nameINSTANCEOF${config.baseClass}`;
 }
