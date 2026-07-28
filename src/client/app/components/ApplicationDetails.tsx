@@ -21,7 +21,8 @@ import {
   CHANGE_TASK_CONFIG,
 } from '../utils/relatedTasks';
 import RelatedListSection from './RelatedListSection';
-import { queryTable } from '../../api/servicenow';
+import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { filterFieldsByReadableKeys, isAccessDenied } from '../utils/acl';
 
 const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
 const OVERVIEW_DEFAULT_LIMIT = 10;
@@ -55,6 +56,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [overviewFields, setOverviewFields] = useState<ViewField[]>([]);
   const [overviewValues, setOverviewValues] = useState<Record<string, string>>({});
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewAccess, setOverviewAccess] = useState<TableAccess>('ok');
 
   useEffect(() => {
     const sysId = selectedApp?.sysId;
@@ -67,18 +69,26 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
     loadViewFields(table, OVERVIEW_VIEW, OVERVIEW_DEFAULT_LIMIT)
       .then(async fields => {
-        setOverviewFields(fields);
-        // fetch the actual field values for this record
-        const { result } = await queryTable<Record<string, unknown>>({
+        const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
           table,
           query:  `sys_id=${sysId}`,
           fields: fields.map(f => f.element),
           displayValue: true,
           limit: 1,
         });
+        setOverviewAccess(access);
+        if (access === 'denied') {
+          setOverviewFields([]);
+          setOverviewValues({});
+          return;
+        }
         const rec = result?.[0] ?? {};
+        const readableFields = filterFieldsByReadableKeys(fields, Object.fromEntries(
+          fields.filter(f => f.element in rec).map(f => [f.element, str(rec[f.element])]),
+        ));
+        setOverviewFields(readableFields);
         const vals: Record<string, string> = {};
-        fields.forEach(f => { vals[f.element] = str(rec[f.element]); });
+        readableFields.forEach(f => { vals[f.element] = str(rec[f.element]); });
         setOverviewValues(vals);
       })
       .catch(() => {})
@@ -245,6 +255,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 <div className="p-4 space-y-5">
 
                   {/* ── Overview ── */}
+                  {!isAccessDenied(overviewAccess) && (
                   <section>
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Overview</p>
                     {overviewLoading ? (
@@ -266,6 +277,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       </div>
                     )}
                   </section>
+                  )}
 
                   {/* ── Infrastructure ── */}
                   <section>

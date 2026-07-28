@@ -1,4 +1,4 @@
-import { queryTable } from '../../api/servicenow';
+import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 import { raw } from './viewFields';
 
 export interface TrendMonthBucket {
@@ -76,16 +76,17 @@ async function fetchOpenedTasksForCi(
   ciSysId: string,
   taskClass: 'incident' | 'change_request',
   rangeStart: Date,
-): Promise<Map<string, string[]>> {
+): Promise<{ byMonth: Map<string, string[]>; access: TableAccess }> {
   const byMonth = new Map<string, string[]>();
   const seen = new Set<string>();
   const rangeStartStr = formatSNDateTimeStart(rangeStart);
+  let access: TableAccess = 'ok';
 
   let offset = 0;
   const limit = 500;
 
   while (true) {
-    const { result, totalCount } = await queryTable<Record<string, unknown>>({
+    const { result, totalCount, access: pageAccess } = await queryTableWithAccess<Record<string, unknown>>({
       table: 'task_ci',
       query: `ci_item.sys_id=${ciSysId}^task.sys_class_name=${taskClass}^task.opened_at>=${rangeStartStr}^ORDERBYtask.opened_at`,
       fields: ['task.sys_id', 'task.opened_at'],
@@ -93,6 +94,11 @@ async function fetchOpenedTasksForCi(
       offset,
       displayValue: false,
     });
+
+    if (pageAccess === 'denied') {
+      return { byMonth, access: 'denied' };
+    }
+    if (pageAccess === 'error') access = 'error';
 
     for (const row of result ?? []) {
       const taskId = raw(row['task.sys_id']);
@@ -113,31 +119,46 @@ async function fetchOpenedTasksForCi(
     if (!result?.length || offset >= totalCount) break;
   }
 
-  return byMonth;
+  return { byMonth, access };
 }
 
-export async function fetchCITaskTrend(ciSysId: string): Promise<TrendMonthPoint[]> {
+export interface CITaskTrendResult {
+  points: TrendMonthPoint[];
+  access: TableAccess;
+}
+
+export async function fetchCITaskTrend(ciSysId: string): Promise<CITaskTrendResult> {
   const buckets = getLast6MonthBuckets();
   if (!ciSysId) {
-    return buckets.map(b => ({
-      month: b.label,
-      monthKey: b.monthKey,
-      incidents: 0,
-      changes: 0,
-      incidentListUrl: buildTaskListUrl('incident', [], b),
-      changeListUrl: buildTaskListUrl('change_request', [], b),
-    }));
+    return {
+      points: buckets.map(b => ({
+        month: b.label,
+        monthKey: b.monthKey,
+        incidents: 0,
+        changes: 0,
+        incidentListUrl: buildTaskListUrl('incident', [], b),
+        changeListUrl: buildTaskListUrl('change_request', [], b),
+      })),
+      access: 'ok',
+    };
   }
 
   const rangeStart = buckets[0].start;
-  const [incidentByMonth, changeByMonth] = await Promise.all([
+  const [incidentResult, changeResult] = await Promise.all([
     fetchOpenedTasksForCi(ciSysId, 'incident', rangeStart),
     fetchOpenedTasksForCi(ciSysId, 'change_request', rangeStart),
   ]);
 
-  return buckets.map(bucket => {
-    const incIds = incidentByMonth.get(bucket.monthKey) ?? [];
-    const chgIds = changeByMonth.get(bucket.monthKey) ?? [];
+  const access =
+    incidentResult.access === 'denied' || changeResult.access === 'denied'
+      ? 'denied'
+      : incidentResult.access === 'error' || changeResult.access === 'error'
+        ? 'error'
+        : 'ok';
+
+  const points = buckets.map(bucket => {
+    const incIds = incidentResult.byMonth.get(bucket.monthKey) ?? [];
+    const chgIds = changeResult.byMonth.get(bucket.monthKey) ?? [];
     return {
       month: bucket.label,
       monthKey: bucket.monthKey,
@@ -147,4 +168,6 @@ export async function fetchCITaskTrend(ciSysId: string): Promise<TrendMonthPoint
       changeListUrl: buildTaskListUrl('change_request', chgIds, bucket),
     };
   });
+
+  return { points, access };
 }

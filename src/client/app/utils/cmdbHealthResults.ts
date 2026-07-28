@@ -1,4 +1,5 @@
-import { queryTable } from '../../api/servicenow';
+import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import { LIST_VIEW_TITLE } from './relatedCIs';
 
@@ -20,6 +21,7 @@ export interface HealthResultsPage {
   rows: HealthResultRow[];
   columns: ViewField[];
   totalCount: number;
+  access: TableAccess;
 }
 
 function buildHealthQuery(ciSysId: string): string {
@@ -34,12 +36,12 @@ export async function fetchCmdbHealthResults(ciSysId: string): Promise<HealthRes
   );
 
   if (!ciSysId) {
-    return { rows: [], columns, totalCount: 0 };
+    return { rows: [], columns, totalCount: 0, access: 'ok' };
   }
 
   const fields = [...new Set(['sys_id', ...columns.map(c => c.element)])];
 
-  const { result = [], totalCount } = await queryTable<Record<string, unknown>>({
+  const { result = [], totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
     table: CMDB_HEALTH_TABLE,
     query: buildHealthQuery(ciSysId),
     fields,
@@ -47,16 +49,24 @@ export async function fetchCmdbHealthResults(ciSysId: string): Promise<HealthRes
     displayValue: true,
   });
 
+  if (access === 'denied') {
+    return { rows: [], columns, totalCount: 0, access };
+  }
+
+  const readableColumns = filterColumnsByRecords(columns, result);
+
   const rows: HealthResultRow[] = result.map(rec => {
     const sysId = raw(rec.sys_id);
     const values: Record<string, string> = {};
-    for (const col of columns) {
-      values[col.element] = str(rec[col.element]);
+    for (const col of readableColumns) {
+      if (col.element in rec) {
+        values[col.element] = str(rec[col.element]);
+      }
     }
     return { sysId, values };
   }).filter(r => r.sysId);
 
-  return { rows, columns, totalCount };
+  return { rows, columns: readableColumns, totalCount, access };
 }
 
 export function healthRecordUrl(sysId: string): string {

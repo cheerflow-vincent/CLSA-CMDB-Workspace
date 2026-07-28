@@ -9,7 +9,8 @@ import {
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
 import { type AppItem } from '../data/appData';
-import { queryTable } from '../../api/servicenow';
+import { queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { filterFormSections, isAccessDenied } from '../utils/acl';
 import {
   loadFormLayout, str, raw, flattenLayoutFields, fetchRecordFieldValues,
   type FormSectionLayout, type FormLayoutRow,
@@ -179,21 +180,25 @@ function FormOverviewBlock({
 }) {
   const renderRow = (row: FormLayoutRow, key: string) => {
     if (row.kind === 'full') {
+      if (!(row.field.element in values)) return null;
       return (
         <div key={key} className="col-span-2">
           <ReadonlyField label={row.field.label} value={values[row.field.element] ?? ''} />
         </div>
       );
     }
+    const left = row.left.filter(f => f.element in values);
+    const right = row.right.filter(f => f.element in values);
+    if (!left.length && !right.length) return null;
     return (
       <div key={key} className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
         <div className="space-y-4">
-          {row.left.map(f => (
+          {left.map(f => (
             <ReadonlyField key={f.element} label={f.label} value={values[f.element] ?? ''} />
           ))}
         </div>
         <div className="space-y-4">
-          {row.right.map(f => (
+          {right.map(f => (
             <ReadonlyField key={f.element} label={f.label} value={values[f.element] ?? ''} />
           ))}
         </div>
@@ -208,7 +213,8 @@ function FormOverviewBlock({
       </div>
     );
   }
-  if (!sections.length) {
+  const visibleSections = filterFormSections(sections, values);
+  if (!visibleSections.length) {
     return (
       <p className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} text-sm text-gray-400 italic`}>
         {emptyMessage}
@@ -218,7 +224,7 @@ function FormOverviewBlock({
 
   return (
     <div className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} space-y-0`}>
-      {sections.map((sec, idx) => (
+      {visibleSections.map((sec, idx) => (
         <CollapsibleFormSection key={idx} caption={sec.caption} isFirst={idx === 0}>
           <div className="grid grid-cols-2 gap-y-4">
             {sec.rows.map((row, rowIdx) => renderRow(row, `${idx}-${rowIdx}`))}
@@ -271,6 +277,12 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
   const [contactSections, setContactSections] = useState<FormSectionLayout[]>([]);
   const [contactValues, setContactValues] = useState<Record<string, string>>({});
   const [contactLoading, setContactLoading] = useState(true);
+  const [recordAccess, setRecordAccess] = useState<TableAccess>('ok');
+  const [incidentAccess, setIncidentAccess] = useState<TableAccess>('ok');
+  const [changeAccess, setChangeAccess] = useState<TableAccess>('ok');
+  const [trendAccess, setTrendAccess] = useState<TableAccess>('ok');
+  const [healthAccess, setHealthAccess] = useState<TableAccess>('ok');
+  const [relatedAppsAccess, setRelatedAppsAccess] = useState<TableAccess>('ok');
 
   useEffect(() => {
     let cancelled = false;
@@ -309,16 +321,23 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
         const allElements = [...new Set(['name', ...overviewElements, ...contactElements])];
         if (allElements.length <= 1 && !overviewElements.length && !contactElements.length) return;
 
-        const vals = await fetchRecordFieldValues(ctx.recordTable, ctx.sysId, allElements);
+        const { values: vals, access: recordFetchAccess } = await fetchRecordFieldValues(
+          ctx.recordTable, ctx.sysId, allElements,
+        );
         if (cancelled) return;
 
+        setRecordAccess(recordFetchAccess);
         setDisplayName(vals.name || ctx.name);
 
         const overviewVals: Record<string, string> = {};
-        for (const el of overviewElements) overviewVals[el] = vals[el] ?? '';
+        for (const el of overviewElements) {
+          if (el in vals) overviewVals[el] = vals[el];
+        }
 
         const contactVals: Record<string, string> = {};
-        for (const el of contactElements) contactVals[el] = vals[el] ?? '';
+        for (const el of contactElements) {
+          if (el in vals) contactVals[el] = vals[el];
+        }
 
         setFieldValues(overviewVals);
         setContactValues(contactVals);
@@ -347,15 +366,34 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
       setChangeCount(0);
       return;
     }
-    fetchRelatedTaskCount(ci.id, INCIDENT_TASK_CONFIG).then(setIncidentCount).catch(() => setIncidentCount(0));
-    fetchRelatedTaskCount(ci.id, CHANGE_TASK_CONFIG).then(setChangeCount).catch(() => setChangeCount(0));
+    fetchRelatedTaskCount(ci.id, INCIDENT_TASK_CONFIG)
+      .then(r => { setIncidentCount(r.totalCount); setIncidentAccess(r.access); })
+      .catch(() => { setIncidentCount(0); setIncidentAccess('error'); });
+    fetchRelatedTaskCount(ci.id, CHANGE_TASK_CONFIG)
+      .then(r => { setChangeCount(r.totalCount); setChangeAccess(r.access); })
+      .catch(() => { setChangeCount(0); setChangeAccess('error'); });
   }, [ci.id]);
+
+  useEffect(() => {
+    if (isAccessDenied(incidentAccess) && taskTab === 'incidents' && !isAccessDenied(changeAccess)) {
+      setTaskTab('changes');
+    } else if (isAccessDenied(changeAccess) && taskTab === 'changes' && !isAccessDenied(incidentAccess)) {
+      setTaskTab('incidents');
+    }
+  }, [incidentAccess, changeAccess, taskTab]);
+
+  const showTaskSection = !isAccessDenied(incidentAccess) || !isAccessDenied(changeAccess);
 
   useEffect(() => {
     let cancelled = false;
     setTrendLoading(true);
     fetchCITaskTrend(ci.id)
-      .then(data => { if (!cancelled) setTrendData(data); })
+      .then(({ points, access }) => {
+        if (!cancelled) {
+          setTrendData(points);
+          setTrendAccess(access);
+        }
+      })
       .catch(() => {
         if (!cancelled) {
           setTrendData(getLast6MonthBuckets().map(b => ({
@@ -366,6 +404,7 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
             incidentListUrl: `/incident_list.do`,
             changeListUrl: `/change_request_list.do`,
           })));
+          setTrendAccess('error');
         }
       })
       .finally(() => { if (!cancelled) setTrendLoading(false); });
@@ -437,14 +476,17 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
           </div>
         </div>
 
+      {!isAccessDenied(recordAccess) && (
         <FormOverviewBlock
           sections={formSections}
           values={fieldValues}
           loading={overviewLoading}
         />
+      )}
       </div>
 
       {/* ── Contact Information ── */}
+      {!isAccessDenied(recordAccess) && (contactLoading || filterFormSections(contactSections, contactValues).length > 0) && (
       <Section title="Contact Information" icon={<User className="w-4 h-4 text-blue-500" />}>
         <div className="p-5">
           <FormOverviewBlock
@@ -457,20 +499,26 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
           />
         </div>
       </Section>
+      )}
 
       {/* ── Related Applications ── */}
+      {!isAccessDenied(relatedAppsAccess) && (
       <Section title="Related Applications" icon={<Layers className="w-4 h-4 text-blue-500" />}>
         <RelatedApplicationsPanel
           ciSysId={ci.id}
           hierarchyMode={hierarchyMode}
           onSelectApp={onSelectApp}
+          onAccessResolved={setRelatedAppsAccess}
         />
       </Section>
+      )}
 
       {/* ── Incidents & Changes ── */}
+      {showTaskSection && (
       <Section title="Related Incidents & Changes" icon={<AlertCircle className="w-4 h-4 text-blue-500" />}>
         <div className="p-5">
           <div className="flex gap-2 mb-4">
+            {!isAccessDenied(incidentAccess) && (
             <button
               type="button"
               onClick={() => setTaskTab('incidents')}
@@ -479,6 +527,8 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
               <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
               Incidents ({incidentCount})
             </button>
+            )}
+            {!isAccessDenied(changeAccess) && (
             <button
               type="button"
               onClick={() => setTaskTab('changes')}
@@ -487,9 +537,10 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
               <Calendar className="w-3.5 h-3.5 inline mr-1" />
               Changes ({changeCount})
             </button>
+            )}
           </div>
 
-          {taskTab === 'incidents' ? (
+          {taskTab === 'incidents' && !isAccessDenied(incidentAccess) ? (
             <RelatedListSection
               embedded
               config={INCIDENT_TASK_CONFIG}
@@ -526,8 +577,10 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
           )}
         </div>
       </Section>
+      )}
 
       {/* ── Trend Chart ── */}
+      {!isAccessDenied(trendAccess) && (
       <Section title="Incident & Change Trend (Last 6 Months)" icon={<Activity className="w-4 h-4 text-blue-500" />}>
         <div className="p-5">
           {trendLoading ? (
@@ -546,13 +599,16 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
           )}
         </div>
       </Section>
+      )}
 
       {/* ── CMDB Health ── */}
+      {!isAccessDenied(healthAccess) && (
       <Section title="CMDB Health Metrics" icon={<Shield className="w-4 h-4 text-blue-500" />} defaultOpen={false}>
         <div className="p-5">
-          <HealthResultsPanel ciSysId={ci.id} />
+          <HealthResultsPanel ciSysId={ci.id} onAccessResolved={setHealthAccess} />
         </div>
       </Section>
+      )}
 
       {/* ── Edit modal ── */}
       {showEditModal && (

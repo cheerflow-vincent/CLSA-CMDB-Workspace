@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AlertCircle, CheckCircle2, ExternalLink, Loader2, Shield } from 'lucide-react';
+import type { TableAccess } from '../../api/servicenow';
+import { isAccessDenied } from '../utils/acl';
 import type { ViewField } from '../utils/viewFields';
 import {
   fetchCmdbHealthResults,
@@ -17,6 +19,7 @@ import {
 } from '../utils/cmdbHealthResults';
 
 function val(row: HealthResultRow, key: string): string {
+  if (!(key in row.values)) return '';
   const v = row.values[key];
   return v && v !== '—' ? v : '';
 }
@@ -46,6 +49,7 @@ function BodyField({
   row: HealthResultRow;
   tone: 'good' | 'warning' | 'bad' | 'neutral';
 }) {
+  if (!(col.element in row.values)) return null;
   const value = val(row, col.element);
   if (!value) return null;
 
@@ -147,24 +151,33 @@ function HealthResultCard({
   );
 }
 
-export default function HealthResultsPanel({ ciSysId }: { ciSysId: string }) {
+export default function HealthResultsPanel({
+  ciSysId,
+  onAccessResolved,
+}: {
+  ciSysId: string;
+  onAccessResolved?: (access: TableAccess) => void;
+}) {
   const [rows, setRows] = useState<HealthResultRow[]>([]);
   const [columns, setColumns] = useState<ViewField[]>([]);
   const [loading, setLoading] = useState(true);
+  const [access, setAccess] = useState<TableAccess>('ok');
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     fetchCmdbHealthResults(ciSysId)
-      .then(({ rows: pageRows, columns: pageCols }) => {
+      .then(({ rows: pageRows, columns: pageCols, access: acc }) => {
         if (cancelled) return;
         setRows(pageRows);
         setColumns(pageCols);
+        setAccess(acc);
       })
       .catch(() => {
         if (!cancelled) {
           setRows([]);
           setColumns([]);
+          setAccess('error');
         }
       })
       .finally(() => {
@@ -172,6 +185,14 @@ export default function HealthResultsPanel({ ciSysId }: { ciSysId: string }) {
       });
     return () => { cancelled = true; };
   }, [ciSysId]);
+
+  useEffect(() => {
+    onAccessResolved?.(access);
+  }, [access, onAccessResolved]);
+
+  if (isAccessDenied(access)) {
+    return null;
+  }
 
   if (loading) {
     return (

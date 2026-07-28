@@ -83,28 +83,65 @@ interface TableQueryParams {
   displayValue?: boolean | 'all'
 }
 
-export async function queryTable<T>({
-  table,
-  query = '',
-  fields = [],
-  limit = 50,
-  offset = 0,
-  orderBy = '',
-  displayValue = false,
-}: TableQueryParams): Promise<{ result: T[]; totalCount: number }> {
-  const params: Record<string, string | number> = {
+export type TableAccess = 'ok' | 'denied' | 'error'
+
+export interface TableQueryResult<T> {
+  result: T[]
+  totalCount: number
+  access: TableAccess
+}
+
+function isAxiosForbidden(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('response' in err)) return false
+  const status = (err as { response?: { status?: number } }).response?.status
+  return status === 403
+}
+
+async function executeTableQuery<T>(params: TableQueryParams): Promise<TableQueryResult<T>> {
+  const {
+    table,
+    query = '',
+    fields = [],
+    limit = 50,
+    offset = 0,
+    orderBy = '',
+    displayValue = false,
+  } = params
+
+  const reqParams: Record<string, string | number> = {
     sysparm_limit: limit,
     sysparm_offset: offset,
   }
-  if (query) params.sysparm_query = query
-  if (fields.length) params.sysparm_fields = fields.join(',')
-  if (orderBy) params.sysparm_orderby = orderBy
-  if (displayValue === 'all') params.sysparm_display_value = 'all'
-  else if (displayValue) params.sysparm_display_value = 'true'
+  if (query) reqParams.sysparm_query = query
+  if (fields.length) reqParams.sysparm_fields = fields.join(',')
+  if (orderBy) reqParams.sysparm_orderby = orderBy
+  if (displayValue === 'all') reqParams.sysparm_display_value = 'all'
+  else if (displayValue) reqParams.sysparm_display_value = 'true'
 
-  const r = await axios.get(`/api/now/table/${table}`, { params })
-  const totalCount = parseInt(r.headers['x-total-count'] ?? '0', 10)
-  return { result: r.data.result, totalCount }
+  try {
+    const r = await axios.get(`/api/now/table/${table}`, { params: reqParams })
+    const totalCount = parseInt(r.headers['x-total-count'] ?? '0', 10)
+    return { result: r.data.result ?? [], totalCount, access: 'ok' }
+  } catch (err) {
+    if (isAxiosForbidden(err)) {
+      return { result: [], totalCount: 0, access: 'denied' }
+    }
+    return { result: [], totalCount: 0, access: 'error' }
+  }
+}
+
+/** Table API query — throws on non-403 errors (legacy callers). */
+export async function queryTable<T>(params: TableQueryParams): Promise<{ result: T[]; totalCount: number }> {
+  const { result, totalCount, access } = await executeTableQuery<T>(params)
+  if (access === 'error') {
+    throw new Error(`Table API query failed for ${params.table}`)
+  }
+  return { result, totalCount }
+}
+
+/** Table API query with explicit ACL access state (403 → access: denied). */
+export async function queryTableWithAccess<T>(params: TableQueryParams): Promise<TableQueryResult<T>> {
+  return executeTableQuery<T>(params)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

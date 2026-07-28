@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import FlagDetailPanel, { type FlagType, type IncidentRecord, type ChangeRecord } from './FlagDetailPanel';
 import AppSearchHeader from './AppSearchHeader';
-import { queryTable } from '../../api/servicenow';
+import { queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { filterColumnsByProbe, isAccessDenied } from '../utils/acl';
 import { type ViewField, str, raw, loadViewFields as loadViewFieldsUtil } from '../utils/viewFields';
 import {
   mockApplications, appIncidents, appChanges, appFamilies,
@@ -170,37 +171,37 @@ function assembleThreeLevelHierarchy(
  * No instance detail data fetched.
  */
 async function buildThreeLevelMapping(): Promise<ThreeLevelMapping | null> {
-  const { result: bApps = [] } = await queryTable<{ sys_id: string; name: string; short_description: string }>({
+  const { result: bApps = [], access } = await queryTableWithAccess<{ sys_id: string; name: string; short_description: string }>({
     table:   'cmdb_ci_business_app',
     fields:  ['sys_id', 'name', 'short_description'],
     limit:   500,
     orderBy: 'name',
   });
-  if (!bApps.length) return null;
+  if (access === 'denied' || !bApps.length) return null;
 
   // business_app → service (Consumes::Consumed by) — chunked to avoid 414
   const bAppIds = bApps.map(a => a.sys_id);
-  const consumesRows = await chunkedIN<{ parent: unknown; child: unknown }>(
+  const consumesRows = (await chunkedIN<{ parent: unknown; child: unknown }>(
     'cmdb_rel_ci', 'parent.sys_id', bAppIds,
     'type.name=Consumes::Consumed by', ['parent', 'child'], 5000,
-  );
+  )).rows;
 
   const serviceIds = [...new Set(consumesRows.map(r => refId(r.child)).filter(Boolean))];
   if (!serviceIds.length) return null;
 
   // Service name/description — chunked
-  const svcRows = await chunkedIN<{ sys_id: string; name: string; short_description: string }>(
+  const svcRows = (await chunkedIN<{ sys_id: string; name: string; short_description: string }>(
     'cmdb_ci_service', 'sys_id', serviceIds, '',
     ['sys_id', 'name', 'short_description'], 500,
-  );
+  )).rows;
   const svcMap = new Map<string, { name: string; short_description: string }>();
   for (const s of svcRows) svcMap.set(s.sys_id, s);
 
   // service → instance (Contains::Contained by) — chunked
-  const containsRows = await chunkedIN<{ parent: unknown; child: unknown }>(
+  const containsRows = (await chunkedIN<{ parent: unknown; child: unknown }>(
     'cmdb_rel_ci', 'parent.sys_id', serviceIds,
     'type.name=Contains::Contained by', ['parent', 'child'], 5000,
-  );
+  )).rows;
 
   const bAppToSvcs = new Map<string, string[]>();
   for (const r of consumesRows) {
@@ -234,15 +235,13 @@ async function loadThreeLevelInstanceDetails(mapping: ThreeLevelMapping): Promis
   const CORE         = ['sys_id', 'name', 'sys_class_name', 'operational_status', 'environment'];
   const FILTER_EXTRA = ['department', 'u_tier'];
 
-  const coreInsts = await chunkedIN<Record<string, unknown>>(
+  const coreInsts = (await chunkedIN<Record<string, unknown>>(
     'cmdb_ci_service_auto', 'sys_id', instanceIds, '', CORE, 500, { displayValue: 'all' },
-  );
+  )).rows;
   const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
 
-  const [viewFieldsByTable, incRows, chgRows] = await Promise.all([
+  const [viewFieldsByTable, incResult, chgResult] = await Promise.all([
     Promise.all(tableNames.map(t => loadViewFields(t).then(vf => ({ table: t, vf })))),
-    // Query task_ci (affected CI) for incidents; use ci_item.sys_id (dot-walk)
-    // so the raw UUID is returned even when displayValue=true
     chunkedIN<{
       'ci_item.sys_id': unknown;
       'task.number': unknown; 'task.short_description': unknown;
@@ -254,7 +253,6 @@ async function loadThreeLevelInstanceDetails(mapping: ThreeLevelMapping): Promis
       ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.priority', 'task.state', 'task.opened_at', 'task.assigned_to'],
       500, { displayValue: true },
     ),
-    // Query task_ci for scheduled change requests linked to these instances
     chunkedIN<{
       'ci_item.sys_id': unknown;
       'task.number': unknown; 'task.short_description': unknown;
@@ -267,19 +265,25 @@ async function loadThreeLevelInstanceDetails(mapping: ThreeLevelMapping): Promis
       500, { displayValue: true },
     ),
   ]);
+  const incRows = incResult.access === 'denied' ? [] : incResult.rows;
+  const chgRows = chgResult.access === 'denied' ? [] : chgResult.rows;
 
   const viewFieldMap = new Map(viewFieldsByTable.map(({ table, vf }) => [table, vf]));
   const allViewElems = [...new Set(viewFieldsByTable.flatMap(({ vf }) => vf.map(f => f.element)))];
   const fetchFields  = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
 
-  const fullInsts = await chunkedIN<Record<string, unknown>>(
+  const fullInsts = (await chunkedIN<Record<string, unknown>>(
     'cmdb_ci_service_auto', 'sys_id', instanceIds, '', fetchFields, 500, { displayValue: 'all' },
-  );
+  )).rows;
 
   for (const i of fullInsts) {
     const tableName = raw(i.sys_class_name);
+    const layoutFields = viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS;
+    const readableFields = filterColumnsByProbe(layoutFields, i);
     const fieldValues: Record<string, string> = {};
-    for (const field of fetchFields) fieldValues[field] = str(i[field]);
+    for (const field of fetchFields) {
+      if (field in i) fieldValues[field] = str(i[field]);
+    }
     instMap.set(raw(i.sys_id) || str(i.sys_id), {
       sys_id:             raw(i.sys_id) || str(i.sys_id),
       name:               str(i.name),
@@ -287,7 +291,7 @@ async function loadThreeLevelInstanceDetails(mapping: ThreeLevelMapping): Promis
       operational_status: str(i.operational_status),
       environment:        str(i.environment),
       fieldValues,
-      viewFields:         viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS,
+      viewFields:         readableFields,
       incidentRecords: [], changeRecords: [],
       incidents: 0, changes: 0,
     });
@@ -354,18 +358,22 @@ async function chunkedIN<T>(
   fields: string[],
   limitPerChunk: number,
   options?: { displayValue?: boolean | 'all' },
-): Promise<T[]> {
+): Promise<{ rows: T[]; access: TableAccess }> {
+  if (!ids.length) return { rows: [], access: 'ok' };
   const all: T[] = [];
+  let access: TableAccess = 'ok';
   for (let i = 0; i < ids.length; i += CHUNK) {
     const slice = ids.slice(i, i + CHUNK).join(',');
     const q = extraQuery ? `${inField}IN${slice}^${extraQuery}` : `${inField}IN${slice}`;
-    const { result = [] } = await queryTable<T>({
+    const result = await queryTableWithAccess<T>({
       table, query: q, fields, limit: limitPerChunk,
       ...(options?.displayValue ? { displayValue: options.displayValue } : {}),
     });
-    all.push(...result);
+    if (result.access === 'denied') return { rows: [], access: 'denied' };
+    if (result.access === 'error') access = 'error';
+    all.push(...(result.result ?? []));
   }
-  return all;
+  return { rows: all, access };
 }
 
 interface TwoLevelMapping {
@@ -379,7 +387,7 @@ interface TwoLevelMapping {
  * app-family → instance-id mapping. No instance detail data is fetched.
  */
 async function buildTwoLevelMapping(): Promise<TwoLevelMapping | null> {
-  const { result: hop1Rels = [] } = await queryTable<{
+  const { result: hop1Rels = [], access: hop1Access } = await queryTableWithAccess<{
     parent: unknown; 'parent.name': unknown; 'parent.short_description': unknown; child: unknown;
   }>({
     table:  'cmdb_rel_ci',
@@ -387,15 +395,15 @@ async function buildTwoLevelMapping(): Promise<TwoLevelMapping | null> {
     fields: ['parent', 'parent.name', 'parent.short_description', 'child'],
     limit:  50000,
   });
-  if (!hop1Rels.length) return null;
+  if (hop1Access === 'denied' || !hop1Rels.length) return null;
 
-  const { result: hop2Rels = [] } = await queryTable<{ parent: unknown; child: unknown }>({
+  const { result: hop2Rels = [], access: hop2Access } = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
     table:  'cmdb_rel_ci',
     query:  'child.u_service_type=instance^type.name=Connects to::Connected by',
     fields: ['parent', 'child'],
     limit:  50000,
   });
-  if (!hop2Rels.length) return null;
+  if (hop2Access === 'denied' || !hop2Rels.length) return null;
 
   const hop1Map       = new Map<string, string[]>();
   const appFamilyMeta = new Map<string, { name: string; short_description: string }>();
@@ -443,15 +451,13 @@ async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<Li
   const FILTER_EXTRA = ['department', 'u_tier'];
   const { appFamilyMeta, appToInstances, instanceSvcIds } = mapping;
 
-  const coreInsts = await chunkedIN<Record<string, unknown>>(
+  const coreInsts = (await chunkedIN<Record<string, unknown>>(
     SVC_TABLE, 'sys_id', instanceSvcIds, '', CORE, 500, { displayValue: 'all' },
-  );
+  )).rows;
   const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
 
-  const [viewFieldsByTable, incRows, chgRows] = await Promise.all([
+  const [viewFieldsByTable, incResult, chgResult] = await Promise.all([
     Promise.all(tableNames.map(t => loadViewFields(t).then(vf => ({ table: t, vf })))),
-    // Query task_ci (affected CI) for incidents; use ci_item.sys_id (dot-walk)
-    // so the raw UUID is returned even when displayValue=true
     chunkedIN<{
       'ci_item.sys_id': unknown;
       'task.number': unknown; 'task.short_description': unknown;
@@ -463,7 +469,6 @@ async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<Li
       ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.priority', 'task.state', 'task.opened_at', 'task.assigned_to'],
       500, { displayValue: true },
     ),
-    // Query task_ci for scheduled change requests linked to these instances
     chunkedIN<{
       'ci_item.sys_id': unknown;
       'task.number': unknown; 'task.short_description': unknown;
@@ -476,20 +481,26 @@ async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<Li
       500, { displayValue: true },
     ),
   ]);
+  const incRows = incResult.access === 'denied' ? [] : incResult.rows;
+  const chgRows = chgResult.access === 'denied' ? [] : chgResult.rows;
 
   const viewFieldMap = new Map(viewFieldsByTable.map(({ table, vf }) => [table, vf]));
   const allViewElems = [...new Set(viewFieldsByTable.flatMap(({ vf }) => vf.map(f => f.element)))];
   const fetchFields  = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
 
-  const fullInsts = await chunkedIN<Record<string, unknown>>(
+  const fullInsts = (await chunkedIN<Record<string, unknown>>(
     SVC_TABLE, 'sys_id', instanceSvcIds, '', fetchFields, 500, { displayValue: 'all' },
-  );
+  )).rows;
 
   const instMap = new Map<string, LiveInstance>();
   for (const i of fullInsts) {
     const tableName = raw(i.sys_class_name);
+    const layoutFields = viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS;
+    const readableFields = filterColumnsByProbe(layoutFields, i);
     const fieldValues: Record<string, string> = {};
-    for (const field of fetchFields) fieldValues[field] = str(i[field]);
+    for (const field of fetchFields) {
+      if (field in i) fieldValues[field] = str(i[field]);
+    }
     instMap.set(raw(i.sys_id) || str(i.sys_id), {
       sys_id:             raw(i.sys_id) || str(i.sys_id),
       name:               str(i.name),
@@ -497,7 +508,7 @@ async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<Li
       operational_status: str(i.operational_status),
       environment:        str(i.environment),
       fieldValues,
-      viewFields:         viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS,
+      viewFields:         readableFields,
       incidentRecords: [], changeRecords: [],
       incidents: 0, changes: 0,
     });
@@ -705,7 +716,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
   svc: LiveService;
   viewMode: 'grid' | 'list';
   onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, records: IncidentRecord[] | ChangeRecord[]) => void;
+  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
   instancesLoading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -763,8 +774,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
                     sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
-                    safe(inst.name) || inst.sys_id, ft,
-                    ft === 'incident' ? inst.incidentRecords : inst.changeRecords,
+                    safe(inst.name) || inst.sys_id, ft, inst.sys_id,
                   )}
                 />
               ))}
@@ -785,8 +795,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
                     sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
-                    inst.name, ft,
-                    ft === 'incident' ? inst.incidentRecords : inst.changeRecords,
+                    inst.name, ft, inst.sys_id,
                   )}
                 />
               ))}
@@ -806,7 +815,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
   appSvc: LiveAppSvc;
   viewMode: 'grid' | 'list';
   onSelectApp: (a: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, records: IncidentRecord[] | ChangeRecord[]) => void;
+  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -869,8 +878,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                     sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
-                    safe(inst.name) || inst.sys_id, ft,
-                    ft === 'incident' ? inst.incidentRecords : inst.changeRecords,
+                    safe(inst.name) || inst.sys_id, ft, inst.sys_id,
                   )}
                 />
               ))}
@@ -891,8 +899,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                     sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
                   })}
                   onFlagClick={ft => onFlagClick(
-                    safe(inst.name) || inst.sys_id, ft,
-                    ft === 'incident' ? inst.incidentRecords : inst.changeRecords,
+                    safe(inst.name) || inst.sys_id, ft, inst.sys_id,
                   )}
                 />
               ))}
@@ -909,7 +916,7 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick }: {
   app: LiveCoreApp;
   viewMode: 'grid' | 'list';
   onSelectApp: (a: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, records: IncidentRecord[] | ChangeRecord[]) => void;
+  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1136,7 +1143,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [livePanel, setLivePanel] = useState<{
     title: string;
     flagType: FlagType;
-    records: IncidentRecord[] | ChangeRecord[];
+    recordSysId: string;
   } | null>(null);
 
   // ── Live filter options ────────────────────────────────────────────────────
@@ -1208,40 +1215,60 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   // ── Live stats — runs after hierarchyMode is known ─────────────────────────
   const [statsLoading, setStatsLoading] = useState(true);
   const [liveStats, setLiveStats] = useState({ total: 0, operational: 0, incidents: 0, changes: 0 });
+  const [statsAccess, setStatsAccess] = useState<Record<'total' | 'operational' | 'incidents' | 'changes', TableAccess>>({
+    total: 'ok', operational: 'ok', incidents: 'ok', changes: 'ok',
+  });
 
   useEffect(() => {
     if (hierarchyMode === null) return; // wait until mode is resolved
 
     const count = (table: string, query?: string) =>
-      queryTable({ table, query, fields: ['sys_id'], limit: 1 })
-        .then(({ totalCount }) => totalCount)
-        .catch(() => 0);
+      queryTableWithAccess({ table, query, fields: ['sys_id'], limit: 1 })
+        .then(({ totalCount, access }) => ({ totalCount, access }));
 
     if (hierarchyMode) {
-      // 3-level: instances live in cmdb_ci_service_auto (and child tables)
-      // Use task_ci (affected CI) for accurate incident/change counts via dot-walking
       Promise.all([
         count('cmdb_ci_service_auto'),
         count('cmdb_ci_service_auto', 'operational_status=1'),
         count('task_ci', 'ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto^task.sys_class_name=incident^task.active=true'),
         count('task_ci', 'ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto^task.sys_class_name=change_request^task.state=-2'),
       ])
-        .then(([total, operational, incidents, changes]) =>
-          setLiveStats({ total, operational, incidents, changes })
-        )
+        .then(([totalR, operationalR, incidentsR, changesR]) => {
+          setLiveStats({
+            total: totalR.access === 'denied' ? 0 : totalR.totalCount,
+            operational: operationalR.access === 'denied' ? 0 : operationalR.totalCount,
+            incidents: incidentsR.access === 'denied' ? 0 : incidentsR.totalCount,
+            changes: changesR.access === 'denied' ? 0 : changesR.totalCount,
+          });
+          setStatsAccess({
+            total: totalR.access,
+            operational: operationalR.access,
+            incidents: incidentsR.access,
+            changes: changesR.access,
+          });
+        })
         .finally(() => setStatsLoading(false));
     } else {
-      // 2-level: instances are cmdb_ci_service where u_service_type=instance
-      // "Operational" = operational_status=1; use task_ci for incident/change counts
       Promise.all([
         count('cmdb_ci_service', 'u_service_type=instance'),
         count('cmdb_ci_service', 'u_service_type=instance^operational_status=1'),
         count('task_ci', 'ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance^task.sys_class_name=incident^task.active=true'),
         count('task_ci', 'ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance^task.sys_class_name=change_request^task.state=-2'),
       ])
-        .then(([total, operational, incidents, changes]) =>
-          setLiveStats({ total, operational, incidents, changes })
-        )
+        .then(([totalR, operationalR, incidentsR, changesR]) => {
+          setLiveStats({
+            total: totalR.access === 'denied' ? 0 : totalR.totalCount,
+            operational: operationalR.access === 'denied' ? 0 : operationalR.totalCount,
+            incidents: incidentsR.access === 'denied' ? 0 : incidentsR.totalCount,
+            changes: changesR.access === 'denied' ? 0 : changesR.totalCount,
+          });
+          setStatsAccess({
+            total: totalR.access,
+            operational: operationalR.access,
+            incidents: incidentsR.access,
+            changes: changesR.access,
+          });
+        })
         .finally(() => setStatsLoading(false));
     }
   }, [hierarchyMode]);
@@ -1473,13 +1500,13 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
           {/* Stats row */}
           <div className="grid grid-cols-4 gap-0 border-b border-gray-200 bg-white">
-            {[
-              { label: 'Total Instances',  value: liveStats.total,       icon: <Layers       className="w-5 h-5 text-blue-500"  /> },
-              { label: 'Operational',      value: liveStats.operational,  icon: <CheckCircle2 className="w-5 h-5 text-green-500" /> },
-              { label: 'Active Incidents', value: liveStats.incidents,    icon: <AlertCircle  className="w-5 h-5 text-red-500"   /> },
-              { label: 'Upcoming Changes', value: liveStats.changes,      icon: <Calendar     className="w-5 h-5 text-yellow-500"/> },
-            ].map((s, i) => (
-              <div key={i} className={`px-5 py-4 flex items-center gap-4 ${i < 3 ? 'border-r border-gray-200' : ''}`}>
+            {([
+              { key: 'total' as const,       label: 'Total Instances',  value: liveStats.total,       icon: <Layers       className="w-5 h-5 text-blue-500"  /> },
+              { key: 'operational' as const, label: 'Operational',      value: liveStats.operational,  icon: <CheckCircle2 className="w-5 h-5 text-green-500" /> },
+              { key: 'incidents' as const,   label: 'Active Incidents', value: liveStats.incidents,    icon: <AlertCircle  className="w-5 h-5 text-red-500"   /> },
+              { key: 'changes' as const,     label: 'Upcoming Changes', value: liveStats.changes,      icon: <Calendar     className="w-5 h-5 text-yellow-500"/> },
+            ]).filter(s => !isAccessDenied(statsAccess[s.key])).map((s, i, arr) => (
+              <div key={s.key} className={`px-5 py-4 flex items-center gap-4 ${i < arr.length - 1 ? 'border-r border-gray-200' : ''}`}>
                 <div className="p-2 bg-gray-50 rounded-lg">{s.icon}</div>
                 <div>
                   {statsLoading
@@ -1561,7 +1588,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   app={app}
                   viewMode={viewMode}
                   onSelectApp={onSelectApp}
-                  onFlagClick={(title, ft, records) => setLivePanel({ title, flagType: ft, records })}
+                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
                 />
               ))}
 
@@ -1578,7 +1605,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   appSvc={appSvc}
                   viewMode={viewMode}
                   onSelectApp={onSelectApp}
-                  onFlagClick={(title, ft, records) => setLivePanel({ title, flagType: ft, records })}
+                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
                 />
               ))}
             </div>
@@ -1603,7 +1630,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
           title={livePanel.title}
           subtitle="Application Instance"
           flagType={livePanel.flagType}
-          records={livePanel.records}
+          recordSysId={livePanel.recordSysId}
           onClose={() => setLivePanel(null)}
         />
       )}

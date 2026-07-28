@@ -1,4 +1,5 @@
-import { queryTable } from '../../api/servicenow';
+import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import { LIST_VIEW_TITLE, RELATED_CI_PAGE_SIZE } from './relatedCIs';
 
@@ -24,6 +25,7 @@ export interface RelatedTaskPage {
   rows: RelatedTaskRow[];
   columns: ViewField[];
   totalCount: number;
+  access: TableAccess;
 }
 
 export const INCIDENT_TASK_CONFIG: RelatedTaskConfig = {
@@ -61,15 +63,26 @@ function buildTaskQuery(appSysId: string, config: RelatedTaskConfig): string {
 export async function fetchRelatedTaskCount(
   appSysId: string,
   config: RelatedTaskConfig,
-): Promise<number> {
-  if (!appSysId) return 0;
-  const { totalCount } = await queryTable({
+): Promise<{ totalCount: number; access: TableAccess }> {
+  if (!appSysId) return { totalCount: 0, access: 'ok' };
+  const { totalCount, access } = await queryTableWithAccess({
     table: 'task_ci',
     query: buildTaskQuery(appSysId, config),
     fields: ['sys_id'],
     limit: 1,
   });
-  return totalCount;
+  return { totalCount, access };
+}
+
+export async function fetchRelatedTasksForRecord(
+  recordSysId: string,
+  config: RelatedTaskConfig,
+): Promise<RelatedTaskPage> {
+  const { totalCount, access } = await fetchRelatedTaskCount(recordSysId, config);
+  if (access === 'denied' || !totalCount) {
+    return { rows: [], columns: [], totalCount: 0, access };
+  }
+  return fetchRelatedTaskPage(recordSysId, config, 0, Math.min(totalCount, 100));
 }
 
 export async function fetchRelatedTaskPage(
@@ -78,19 +91,19 @@ export async function fetchRelatedTaskPage(
   page: number,
   pageSize = RELATED_CI_PAGE_SIZE,
 ): Promise<RelatedTaskPage> {
-  const columns = await loadListFields(
+  const layoutColumns = await loadListFields(
     config.taskTable,
     config.listTitle,
     config.defaultColumns,
   );
 
   if (!appSysId) {
-    return { rows: [], columns, totalCount: 0 };
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'ok' };
   }
 
-  const taskFields = [...new Set(['task.sys_id', ...columns.map(c => `task.${c.element}`)])];
+  const taskFields = [...new Set(['task.sys_id', ...layoutColumns.map(c => `task.${c.element}`)])];
 
-  const { result: taskRows = [], totalCount } = await queryTable<Record<string, unknown>>({
+  const { result: taskRows = [], totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
     table: 'task_ci',
     query: `${buildTaskQuery(appSysId, config)}^ORDERBYtask.number`,
     fields: taskFields,
@@ -98,6 +111,12 @@ export async function fetchRelatedTaskPage(
     offset: page * pageSize,
     displayValue: true,
   });
+
+  if (access === 'denied') {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access };
+  }
+
+  const columns = filterColumnsByRecords(layoutColumns, taskRows, 'task.');
 
   const seen = new Set<string>();
   const rows: RelatedTaskRow[] = [];
@@ -109,10 +128,12 @@ export async function fetchRelatedTaskPage(
 
     const values: Record<string, string> = {};
     for (const col of columns) {
-      values[col.element] = str(r[`task.${col.element}`]);
+      if (col.element in r || `task.${col.element}` in r) {
+        values[col.element] = str(r[`task.${col.element}`]);
+      }
     }
     rows.push({ sysId, values });
   }
 
-  return { rows, columns, totalCount };
+  return { rows, columns, totalCount, access };
 }

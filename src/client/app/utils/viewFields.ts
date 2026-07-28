@@ -1,4 +1,4 @@
-import { queryTable } from '../../api/servicenow';
+import { queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 
 /** One field configured in a form view */
 export interface ViewField { element: string; label: string }
@@ -285,21 +285,26 @@ export async function fetchRecordFieldValues(
   table: string,
   sysId: string,
   elements: string[],
-): Promise<Record<string, string>> {
-  if (!elements.length) return {};
-  const { result } = await queryTable<Record<string, unknown>>({
+): Promise<{ values: Record<string, string>; access: TableAccess }> {
+  if (!elements.length) return { values: {}, access: 'ok' };
+  const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
     table,
     query: `sys_id=${sysId}`,
     fields: elements,
     displayValue: true,
     limit: 1,
   });
+  if (access === 'denied') {
+    return { values: {}, access: 'denied' };
+  }
   const rec = result?.[0] ?? {};
   const vals: Record<string, string> = {};
   for (const el of elements) {
-    vals[el] = str(rec[el]);
+    if (el in rec) {
+      vals[el] = str(rec[el]);
+    }
   }
-  return vals;
+  return { values: vals, access: result.length ? 'ok' : access };
 }
 
 /**

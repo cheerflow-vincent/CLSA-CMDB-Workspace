@@ -9,6 +9,7 @@ import {
   loadRelatedApplicationsForCi,
   type LiveInstance, type LiveService, type LiveCoreApp, type LiveAppSvc,
 } from '../utils/applicationHierarchy';
+import type { TableAccess } from '../../api/servicenow';
 import FlagDetailPanel, { type FlagType, type IncidentRecord, type ChangeRecord } from './FlagDetailPanel';
 
 const SVC_TABLE = 'cmdb_ci_service';
@@ -176,7 +177,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick }: {
   svc: LiveService;
   viewMode: 'grid' | 'list';
   onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, records: IncidentRecord[] | ChangeRecord[]) => void;
+  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -200,7 +201,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick }: {
                   inst={inst}
                   svcName={svc.name}
                   onViewDetails={() => onSelectApp(instanceToAppItem(inst, svc.name))}
-                  onFlagClick={ft => onFlagClick(inst.name, ft, ft === 'incident' ? inst.incidentRecords : inst.changeRecords)}
+                  onFlagClick={ft => onFlagClick(inst.name, ft, inst.sys_id)}
                 />
               ))}
             </div>
@@ -211,7 +212,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick }: {
                   key={inst.sys_id}
                   inst={inst}
                   onViewDetails={() => onSelectApp(instanceToAppItem(inst, svc.name))}
-                  onFlagClick={ft => onFlagClick(inst.name, ft, ft === 'incident' ? inst.incidentRecords : inst.changeRecords)}
+                  onFlagClick={ft => onFlagClick(inst.name, ft, inst.sys_id)}
                 />
               ))}
             </div>
@@ -226,7 +227,7 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick }: {
   app: LiveCoreApp;
   viewMode: 'grid' | 'list';
   onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, records: IncidentRecord[] | ChangeRecord[]) => void;
+  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -260,7 +261,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
   appSvc: LiveAppSvc;
   viewMode: 'grid' | 'list';
   onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, records: IncidentRecord[] | ChangeRecord[]) => void;
+  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -289,7 +290,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                   inst={inst}
                   svcName={appSvc.name}
                   onViewDetails={() => onSelectApp(instanceToAppItem(inst, appSvc.name))}
-                  onFlagClick={ft => onFlagClick(inst.name, ft, ft === 'incident' ? inst.incidentRecords : inst.changeRecords)}
+                  onFlagClick={ft => onFlagClick(inst.name, ft, inst.sys_id)}
                 />
               ))}
             </div>
@@ -300,7 +301,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                   key={inst.sys_id}
                   inst={inst}
                   onViewDetails={() => onSelectApp(instanceToAppItem(inst, appSvc.name))}
-                  onFlagClick={ft => onFlagClick(inst.name, ft, ft === 'incident' ? inst.incidentRecords : inst.changeRecords)}
+                  onFlagClick={ft => onFlagClick(inst.name, ft, inst.sys_id)}
                 />
               ))}
             </div>
@@ -315,10 +316,12 @@ export default function RelatedApplicationsPanel({
   ciSysId,
   hierarchyMode,
   onSelectApp,
+  onAccessResolved,
 }: {
   ciSysId: string;
   hierarchyMode: boolean;
   onSelectApp?: (app: AppItem) => void;
+  onAccessResolved?: (access: TableAccess) => void;
 }) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [loading, setLoading] = useState(true);
@@ -327,7 +330,7 @@ export default function RelatedApplicationsPanel({
   const [panel, setPanel] = useState<{
     title: string;
     flagType: FlagType;
-    records: IncidentRecord[] | ChangeRecord[];
+    recordSysId: string;
   } | null>(null);
 
   useEffect(() => {
@@ -336,11 +339,13 @@ export default function RelatedApplicationsPanel({
     loadRelatedApplicationsForCi(ciSysId, hierarchyMode)
       .then(result => {
         if (cancelled) return;
+        onAccessResolved?.(result.access);
         setThreeLevel(result.threeLevel);
         setTwoLevel(result.twoLevel);
       })
       .catch(() => {
         if (!cancelled) {
+          onAccessResolved?.('error');
           setThreeLevel([]);
           setTwoLevel([]);
         }
@@ -349,7 +354,7 @@ export default function RelatedApplicationsPanel({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [ciSysId, hierarchyMode]);
+  }, [ciSysId, hierarchyMode, onAccessResolved]);
 
   const hasData = hierarchyMode ? threeLevel.length > 0 : twoLevel.length > 0;
   const handleSelect = onSelectApp ?? (() => {});
@@ -385,7 +390,7 @@ export default function RelatedApplicationsPanel({
           app={app}
           viewMode={viewMode}
           onSelectApp={handleSelect}
-          onFlagClick={(title, ft, records) => setPanel({ title, flagType: ft, records })}
+          onFlagClick={(title, ft, recordSysId) => setPanel({ title, flagType: ft, recordSysId })}
         />
       ))}
 
@@ -395,7 +400,7 @@ export default function RelatedApplicationsPanel({
           appSvc={appSvc}
           viewMode={viewMode}
           onSelectApp={handleSelect}
-          onFlagClick={(title, ft, records) => setPanel({ title, flagType: ft, records })}
+          onFlagClick={(title, ft, recordSysId) => setPanel({ title, flagType: ft, recordSysId })}
         />
       ))}
 
@@ -403,7 +408,7 @@ export default function RelatedApplicationsPanel({
         <FlagDetailPanel
           title={panel.title}
           flagType={panel.flagType}
-          records={panel.records}
+          recordSysId={panel.recordSysId}
           onClose={() => setPanel(null)}
         />
       )}

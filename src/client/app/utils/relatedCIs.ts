@@ -1,4 +1,5 @@
-import { queryTable } from '../../api/servicenow';
+import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 
 export const LIST_VIEW_TITLE = 'CLSA CMDB Workspace Overview';
@@ -23,6 +24,7 @@ export interface RelatedCIPage {
   rows: RelatedCIRow[];
   columns: ViewField[];
   totalCount: number;
+  access: TableAccess;
 }
 
 export const SERVER_REL_CONFIG: RelatedCIConfig = {
@@ -71,15 +73,15 @@ function buildRelQuery(appSysId: string, config: RelatedCIConfig): string {
 export async function fetchRelatedCICount(
   appSysId: string,
   config: RelatedCIConfig,
-): Promise<number> {
-  if (!appSysId) return 0;
-  const { totalCount } = await queryTable({
+): Promise<{ totalCount: number; access: TableAccess }> {
+  if (!appSysId) return { totalCount: 0, access: 'ok' };
+  const { totalCount, access } = await queryTableWithAccess({
     table: 'cmdb_rel_ci',
     query: buildRelQuery(appSysId, config),
     fields: ['sys_id'],
     limit: 1,
   });
-  return totalCount;
+  return { totalCount, access };
 }
 
 export async function fetchRelatedCIPage(
@@ -88,17 +90,17 @@ export async function fetchRelatedCIPage(
   page: number,
   pageSize = RELATED_CI_PAGE_SIZE,
 ): Promise<RelatedCIPage> {
-  const columns = await loadListFields(
+  const layoutColumns = await loadListFields(
     config.baseClass,
     config.listTitle,
     config.defaultColumns,
   );
 
   if (!appSysId) {
-    return { rows: [], columns, totalCount: 0 };
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'ok' };
   }
 
-  const { result: relRows = [], totalCount } = await queryTable<Record<string, unknown>>({
+  const { result: relRows = [], totalCount, access: relAccess } = await queryTableWithAccess<Record<string, unknown>>({
     table: 'cmdb_rel_ci',
     query: `${buildRelQuery(appSysId, config)}^ORDERBYchild.name`,
     fields: ['child.sys_id', 'child.name', 'child.sys_class_name'],
@@ -106,6 +108,10 @@ export async function fetchRelatedCIPage(
     offset: page * pageSize,
     displayValue: 'all',
   });
+
+  if (relAccess === 'denied') {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: relAccess };
+  }
 
   const seen = new Set<string>();
   const childIds: string[] = [];
@@ -120,17 +126,25 @@ export async function fetchRelatedCIPage(
   }
 
   if (!childIds.length) {
-    return { rows: [], columns, totalCount };
+    return { rows: [], columns: layoutColumns, totalCount, access: relAccess };
   }
 
-  const fields = [...new Set(['sys_id', 'name', 'sys_class_name', ...columns.map(c => c.element)])];
-  const { result: ciRows = [] } = await queryTable<Record<string, unknown>>({
+  const fields = [...new Set(['sys_id', 'name', 'sys_class_name', ...layoutColumns.map(c => c.element)])];
+  const { result: ciRows = [], access: ciAccess } = await queryTableWithAccess<Record<string, unknown>>({
     table: config.ciTable,
     query: `sys_idIN${childIds.join(',')}`,
     fields,
     limit: childIds.length + 5,
     displayValue: true,
   });
+
+  if (ciAccess === 'denied') {
+    return { rows: [], columns: layoutColumns, totalCount, access: 'denied' };
+  }
+
+  const access: TableAccess = relAccess === 'error' || ciAccess === 'error' ? 'error' : 'ok';
+
+  const columns = filterColumnsByRecords(layoutColumns, ciRows);
 
   const ciById = new Map(ciRows.map(r => [raw(r.sys_id), r]));
 
@@ -141,11 +155,13 @@ export async function fetchRelatedCIPage(
       : (classById.get(id) || config.baseClass);
     const values: Record<string, string> = {};
     for (const col of columns) {
-      values[col.element] = rec ? str(rec[col.element]) : '';
+      if (rec && col.element in rec) {
+        values[col.element] = str(rec[col.element]);
+      }
     }
-    if (!values.name && rec) values.name = str(rec.name);
+    if (!values.name && rec && 'name' in rec) values.name = str(rec.name);
     return { sysId: id, sysClass, values };
   });
 
-  return { rows, columns, totalCount };
+  return { rows, columns, totalCount, access };
 }

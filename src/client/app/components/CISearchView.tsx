@@ -6,8 +6,9 @@ import {
   Download, FileText, ExternalLink, Loader2
 } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
-import { queryTable, getCIFilter, getSysProperties, APP_SCOPE } from '../../api/servicenow';
+import { queryTable, queryTableWithAccess, getCIFilter, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
 import { loadListFields, raw, str, type ViewField } from '../utils/viewFields';
+import { filterColumnsByRecords, isAccessDenied } from '../utils/acl';
 
 const PROP_CI_SEARCH_FIELDS = `${APP_SCOPE}.ci.search.filter.table.field`;
 const DEFAULT_SEARCH_FIELDS = ['name'];
@@ -129,9 +130,10 @@ interface TabData {
   rows: SearchRow[];
   totalCount: number;
   loading: boolean;
+  access: TableAccess;
 }
 
-const EMPTY_TAB_DATA: TabData = { columns: [], rows: [], totalCount: 0, loading: false };
+const EMPTY_TAB_DATA: TabData = { columns: [], rows: [], totalCount: 0, loading: false, access: 'ok' };
 
 function formatClassLabel(cls: string): string {
   return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -155,7 +157,7 @@ function mapApiRow(
   const table = resolveCiTable(rec, cfg?.table ?? 'cmdb_ci');
   const values: Record<string, string> = {};
   for (const col of columns) {
-    values[col.element] = str(rec[col.element]);
+    if (col.element in rec) values[col.element] = str(rec[col.element]);
   }
   if (!values.name) values.name = str(rec.name);
   return {
@@ -190,8 +192,8 @@ async function fetchTabPage(
   columns: ViewField[],
   page: number,
   pageSize: number,
-): Promise<{ rows: SearchRow[]; totalCount: number }> {
-  const { result, totalCount } = await queryTable<Record<string, unknown>>({
+): Promise<{ rows: SearchRow[]; totalCount: number; access: TableAccess; columns: ViewField[] }> {
+  const { result, totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
     table: cfg.table,
     query: `${snQuery}^ORDERBYname`,
     fields: apiFieldsForColumns(columns),
@@ -199,9 +201,16 @@ async function fetchTabPage(
     offset: page * pageSize,
     displayValue: true,
   });
+  if (access === 'denied') {
+    return { rows: [], totalCount: 0, access, columns: [] };
+  }
+  const records = result ?? [];
+  const readableColumns = filterColumnsByRecords(columns, records);
   return {
-    rows: (result ?? []).map(r => mapApiRow(r, columns, cfg)),
+    rows: records.map(r => mapApiRow(r, readableColumns, cfg)),
     totalCount,
+    access,
+    columns: readableColumns,
   };
 }
 
@@ -210,29 +219,38 @@ async function fetchTabAll(
   snQuery: string,
   columns: ViewField[],
   totalCount: number,
-): Promise<SearchRow[]> {
-  if (!totalCount) return [];
+): Promise<{ rows: SearchRow[]; access: TableAccess }> {
+  if (!totalCount) return { rows: [], access: 'ok' };
   const limit = Math.min(totalCount, 10000);
-  const { result } = await queryTable<Record<string, unknown>>({
+  const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
     table: cfg.table,
     query: `${snQuery}^ORDERBYname`,
     fields: apiFieldsForColumns(columns),
     limit,
     displayValue: true,
   });
-  return (result ?? []).map(r => mapApiRow(r, columns, cfg));
+  if (access === 'denied') return { rows: [], access };
+  const records = result ?? [];
+  const readableColumns = filterColumnsByRecords(columns, records);
+  return {
+    rows: records.map(r => mapApiRow(r, readableColumns, cfg)),
+    access,
+  };
 }
 
 async function fetchAllForExport(
   snQuery: string,
   columns: ViewField[],
   tabCounts: Record<SpecificTab, number>,
+  tabAccess: Record<SpecificTab, TableAccess>,
 ): Promise<SearchRow[]> {
   const parts = await Promise.all(
     V2_TABS.map(async cfg => {
+      if (isAccessDenied(tabAccess[cfg.tab])) return [] as SearchRow[];
       const count = tabCounts[cfg.tab];
       if (!count) return [] as SearchRow[];
-      return fetchTabAll(cfg, snQuery, columns, count);
+      const { rows } = await fetchTabAll(cfg, snQuery, columns, count);
+      return rows;
     }),
   );
   return parts
@@ -245,20 +263,27 @@ async function fetchAllForExport(
 async function fetchAllMerged(
   snQuery: string,
   columns: ViewField[],
-): Promise<{ rows: SearchRow[]; totalCount: number }> {
+): Promise<{ rows: SearchRow[]; totalCount: number; tabAccess: Record<SpecificTab, TableAccess> }> {
   const apiFields = apiFieldsForColumns(columns);
+  const tabAccess = {} as Record<SpecificTab, TableAccess>;
   const parts = await Promise.all(
     V2_TABS.map(async cfg => {
-      const { result, totalCount } = await queryTable<Record<string, unknown>>({
+      const { result, totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
         table: cfg.table,
         query: `${snQuery}^ORDERBYname`,
         fields: apiFields,
         limit: MERGE_CAP,
         displayValue: true,
       });
+      tabAccess[cfg.tab] = access;
+      if (access === 'denied') {
+        return { totalCount: 0, rows: [] as SearchRow[] };
+      }
+      const records = result ?? [];
+      const readableColumns = filterColumnsByRecords(columns, records);
       return {
         totalCount,
-        rows: (result ?? []).map(r => mapApiRow(r, columns, cfg)),
+        rows: records.map(r => mapApiRow(r, readableColumns, cfg)),
       };
     }),
   );
@@ -268,19 +293,21 @@ async function fetchAllMerged(
     .sort((a, b) =>
       (a.values.name || '').localeCompare(b.values.name || '', undefined, { sensitivity: 'base' }),
     );
-  return { rows, totalCount };
+  return { rows, totalCount, tabAccess };
 }
 
 type PillCounts = { servers: number | null; switches: number | null; databases: number | null; circuits: number | null };
+type PillAccess = Record<keyof PillCounts, TableAccess>;
 const EMPTY_COUNTS: PillCounts = { servers: null, switches: null, databases: null, circuits: null };
+const EMPTY_PILL_ACCESS: PillAccess = { servers: 'ok', switches: 'ok', databases: 'ok', circuits: 'ok' };
 
 type PillDef = { tab: Tab; label: string; count: number | null; icon: JSX.Element; accent: string; iconBg: string };
-const buildPills = (c: PillCounts): PillDef[] => [
-  { tab: 'servers',   label: 'Servers',   count: c.servers,   icon: <Server       className="w-5 h-5 text-blue-600"   />, accent: 'border-blue-500   bg-blue-50',   iconBg: 'bg-blue-100'   },
-  { tab: 'switches',  label: 'Network Gear', count: c.switches,  icon: <Network      className="w-5 h-5 text-green-600"  />, accent: 'border-green-500  bg-green-50',  iconBg: 'bg-green-100'  },
-  { tab: 'databases', label: 'Databases', count: c.databases, icon: <Database     className="w-5 h-5 text-purple-600" />, accent: 'border-purple-500 bg-purple-50', iconBg: 'bg-purple-100' },
-  { tab: 'circuits',  label: 'Circuits',  count: c.circuits,  icon: <CircuitBoard className="w-5 h-5 text-orange-600" />, accent: 'border-orange-500 bg-orange-50', iconBg: 'bg-orange-100' },
-];
+const buildPills = (c: PillCounts, access: PillAccess): PillDef[] => ([
+  { tab: 'servers' as Tab,   label: 'Servers',   count: c.servers,   icon: <Server       className="w-5 h-5 text-blue-600"   />, accent: 'border-blue-500   bg-blue-50',   iconBg: 'bg-blue-100'   },
+  { tab: 'switches' as Tab,  label: 'Network Gear', count: c.switches,  icon: <Network      className="w-5 h-5 text-green-600"  />, accent: 'border-green-500  bg-green-50',  iconBg: 'bg-green-100'  },
+  { tab: 'databases' as Tab, label: 'Databases', count: c.databases, icon: <Database     className="w-5 h-5 text-purple-600" />, accent: 'border-purple-500 bg-purple-50', iconBg: 'bg-purple-100' },
+  { tab: 'circuits' as Tab,  label: 'Circuits',  count: c.circuits,  icon: <CircuitBoard className="w-5 h-5 text-orange-600" />, accent: 'border-orange-500 bg-orange-50', iconBg: 'bg-orange-100' },
+] as PillDef[]).filter(p => !isAccessDenied(access[p.tab as keyof PillCounts]));
 const filterOptions: Record<string, string[]> = {
   Environment:        ['Production', 'Non-production', 'DR'],
   Location:           ['HKD', 'HKG', 'MUM', 'SHG', 'SNG', 'Global'],
@@ -542,6 +569,7 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
   const [panel, setPanel] = useState<PanelInfo | null>(null);
   const [pillCounts, setPillCounts] = useState<PillCounts>(EMPTY_COUNTS);
+  const [pillAccess, setPillAccess] = useState<PillAccess>(EMPTY_PILL_ACCESS);
   const [tabData, setTabData] = useState<Record<SpecificTab, TabData>>({
     servers: { ...EMPTY_TAB_DATA },
     switches: { ...EMPTY_TAB_DATA },
@@ -598,8 +626,11 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
       ['cmdb_ci_circuit',     'circuits'],
     ];
     entries.forEach(([table, key]) =>
-      queryTable<object>({ table, query: ciFilter, limit: 1 })
-        .then(({ totalCount }) => setPillCounts(p => ({ ...p, [key]: totalCount })))
+      queryTableWithAccess<object>({ table, query: ciFilter, limit: 1 })
+        .then(({ totalCount, access }) => {
+          setPillCounts(p => ({ ...p, [key]: access === 'denied' ? null : totalCount }));
+          setPillAccess(p => ({ ...p, [key]: access }));
+        })
         .catch(() => {}),
     );
   }, [ciFilter]);
@@ -613,25 +644,25 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
     let cancelled = false;
     Promise.all(
       V2_TABS.map(async cfg => {
-        const { totalCount } = await queryTable({
+        const { totalCount, access } = await queryTableWithAccess({
           table: cfg.table,
           query: snQuery,
           fields: ['sys_id'],
           limit: 1,
         });
-        return [cfg.tab, totalCount] as const;
+        return [cfg.tab, totalCount, access] as const;
       }),
     )
       .then(counts => {
         if (cancelled) return;
         setTabData(prev => {
           const next = { ...prev };
-          for (const [tab, totalCount] of counts) {
-            next[tab] = { ...next[tab], totalCount };
+          for (const [tab, totalCount, access] of counts) {
+            next[tab] = { ...next[tab], totalCount: access === 'denied' ? 0 : totalCount, access };
           }
           return next;
         });
-        setAllTotalCount(counts.reduce((s, [, c]) => s + c, 0));
+        setAllTotalCount(counts.reduce((s, [, c, access]) => s + (access === 'denied' ? 0 : c), 0));
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -652,6 +683,13 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
         if (cancelled || !result) return;
         setAllMergedRows(result.rows);
         setAllTotalCount(result.totalCount);
+        setTabData(prev => {
+          const next = { ...prev };
+          for (const cfg of V2_TABS) {
+            next[cfg.tab] = { ...next[cfg.tab], access: result.tabAccess[cfg.tab] };
+          }
+          return next;
+        });
       })
       .catch(() => {
         if (!cancelled) {
@@ -678,17 +716,18 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
     getColumns(cfg.table, cfg.defaultColumns)
       .then(cols => {
         if (cancelled) return null;
-        return fetchTabPage(cfg, snQuery, cols, page, pageSize).then(res => ({ cols, ...res }));
+        return fetchTabPage(cfg, snQuery, cols, page, pageSize).then(res => res);
       })
       .then(result => {
         if (cancelled || !result) return;
         setTabData(prev => ({
           ...prev,
           [activeTab]: {
-            columns: result.cols,
+            columns: result.columns,
             rows: result.rows,
             totalCount: result.totalCount,
             loading: false,
+            access: result.access,
           },
         }));
       })
@@ -771,20 +810,29 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
     circuits:  tabData.circuits.totalCount,
   }), [tabData]);
 
+  const tabAccess = useMemo((): Record<SpecificTab, TableAccess> => ({
+    servers:   tabData.servers.access,
+    switches:  tabData.switches.access,
+    databases: tabData.databases.access,
+    circuits:  tabData.circuits.access,
+  }), [tabData]);
+
   const handleExportRows = useCallback(async (): Promise<SearchRow[]> => {
     if (!snQuery) return [];
     if (activeTab === 'all') {
-      return fetchAllForExport(snQuery, columns, tabCounts);
+      return fetchAllForExport(snQuery, columns, tabCounts, tabAccess);
     }
     const cfg = V2_TABS.find(t => t.tab === activeTab);
-    if (!cfg) return [];
-    return fetchTabAll(cfg, snQuery, columns, tabData[activeTab].totalCount);
-  }, [snQuery, activeTab, columns, tabCounts, tabData]);
+    if (!cfg || isAccessDenied(tabData[activeTab].access)) return [];
+    const { rows } = await fetchTabAll(cfg, snQuery, columns, tabData[activeTab].totalCount);
+    return rows;
+  }, [snQuery, activeTab, columns, tabCounts, tabAccess, tabData]);
 
   const activeFilterCount = [pending.environment, pending.location, pending.businessService, pending.supportGroup]
     .reduce((n, arr) => n + arr.length, 0);
 
   function renderCell(row: SearchRow, col: ViewField, colIdx: number) {
+    if (!(col.element in row.values)) return null;
     const val = row.values[col.element] || '—';
 
     if (colIdx === 0) {
@@ -836,7 +884,7 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
 
       {/* CI Count Pills */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {buildPills(pillCounts).map(({ tab, label, count, icon, accent, iconBg }) => {
+        {buildPills(pillCounts, pillAccess).map(({ tab, label, count, icon, accent, iconBg }) => {
           const isActive = activeTab === tab;
           return (
             <button key={tab} onClick={() => setActiveTab(tab)}
@@ -915,7 +963,10 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
         {/* Tabs */}
         <div className="border-b border-gray-200 px-6">
           <div className="flex gap-6 overflow-x-auto">
-            {(['all', 'servers', 'switches', 'databases', 'circuits'] as Tab[]).map(tab => (
+            {(['all', 'servers', 'switches', 'databases', 'circuits'] as Tab[]).filter(tab => {
+              if (tab === 'all') return true;
+              return !isAccessDenied(tabData[tab].access) && !isAccessDenied(pillAccess[tab as keyof PillCounts]);
+            }).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 className={`py-3 whitespace-nowrap border-b-2 transition-colors text-sm ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                 {tabLabels[tab]}

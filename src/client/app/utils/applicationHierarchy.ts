@@ -1,4 +1,5 @@
-import { queryTable } from '../../api/servicenow';
+import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { filterColumnsByProbe } from './acl';
 import { loadViewFields, str, raw, type ViewField } from './viewFields';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
 
@@ -61,6 +62,7 @@ export interface LiveAppSvc {
 export interface RelatedApplicationsResult {
   threeLevel: LiveCoreApp[];
   twoLevel: LiveAppSvc[];
+  access: TableAccess;
 }
 
 function refId(f: unknown): string {
@@ -78,43 +80,52 @@ async function chunkedIN<T>(
   fields: string[],
   limitPerChunk: number,
   options?: { displayValue?: boolean | 'all' },
-): Promise<T[]> {
+): Promise<{ rows: T[]; access: TableAccess }> {
+  if (!ids.length) return { rows: [], access: 'ok' };
   const all: T[] = [];
+  let access: TableAccess = 'ok';
   for (let i = 0; i < ids.length; i += CHUNK) {
     const slice = ids.slice(i, i + CHUNK).join(',');
     const q = extraQuery ? `${inField}IN${slice}^${extraQuery}` : `${inField}IN${slice}`;
-    const { result = [] } = await queryTable<T>({
+    const result = await queryTableWithAccess<T>({
       table,
       query: q,
       fields,
       limit: limitPerChunk,
       ...(options?.displayValue ? { displayValue: options.displayValue } : {}),
     });
-    all.push(...result);
+    if (result.access === 'denied') return { rows: [], access: 'denied' };
+    if (result.access === 'error') access = 'error';
+    all.push(...(result.result ?? []));
   }
-  return all;
+  return { rows: all, access };
 }
 
 /** Parent app instances linked to a CI (reverse of app-detail related lists). */
-export async function fetchRelatedAppInstanceIds(ciSysId: string): Promise<string[]> {
-  if (!ciSysId) return [];
+export async function fetchRelatedAppInstanceIds(
+  ciSysId: string,
+): Promise<{ ids: string[]; access: TableAccess }> {
+  if (!ciSysId) return { ids: [], access: 'ok' };
 
   const seen = new Set<string>();
+  let access: TableAccess = 'ok';
   for (const relType of APP_REL_TYPES) {
-    const { result = [] } = await queryTable<{ parent: unknown }>({
+    const { result = [], access: chunkAccess } = await queryTableWithAccess<{ parent: unknown }>({
       table: 'cmdb_rel_ci',
       query: `type.name=${relType}^child.sys_id=${ciSysId}^parent.sys_class_nameINSTANCEOF${SVC_TABLE}`,
       fields: ['parent'],
       limit: 500,
       displayValue: false,
     });
+    if (chunkAccess === 'denied') return { ids: [], access: 'denied' };
+    if (chunkAccess === 'error') access = 'error';
     for (const r of result) {
       const id = refId(r.parent);
       if (id) seen.add(id);
     }
   }
 
-  return [...seen];
+  return { ids: [...seen], access };
 }
 
 async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, LiveInstance>> {
@@ -124,12 +135,12 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
   const CORE = ['sys_id', 'name', 'sys_class_name', 'operational_status', 'environment'];
   const FILTER_EXTRA = ['department', 'u_tier'];
 
-  const coreInsts = await chunkedIN<Record<string, unknown>>(
+  const coreInsts = (await chunkedIN<Record<string, unknown>>(
     'cmdb_ci', 'sys_id', instanceIds, '', CORE, 500, { displayValue: 'all' },
-  );
+  )).rows;
   const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
 
-  const [viewFieldsByTable, incRows, chgRows] = await Promise.all([
+  const [viewFieldsByTable, incResult, chgResult] = await Promise.all([
     Promise.all(tableNames.map(t => loadViewFields(t, VIEW_TITLE, 5, DEFAULT_VIEW_FIELDS).then(vf => ({ table: t, vf })))),
     chunkedIN<Record<string, unknown>>(
       'task_ci', 'ci_item', instanceIds,
@@ -144,19 +155,25 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
       500, { displayValue: true },
     ),
   ]);
+  const incRows = incResult.access === 'denied' ? [] : incResult.rows;
+  const chgRows = chgResult.access === 'denied' ? [] : chgResult.rows;
 
   const viewFieldMap = new Map(viewFieldsByTable.map(({ table, vf }) => [table, vf]));
   const allViewElems = [...new Set(viewFieldsByTable.flatMap(({ vf }) => vf.map(f => f.element)))];
   const fetchFields = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
 
-  const fullInsts = await chunkedIN<Record<string, unknown>>(
+  const fullInsts = (await chunkedIN<Record<string, unknown>>(
     'cmdb_ci', 'sys_id', instanceIds, '', fetchFields, 500, { displayValue: 'all' },
-  );
+  )).rows;
 
   for (const i of fullInsts) {
     const tableName = raw(i.sys_class_name);
+    const layoutFields = viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS;
+    const readableFields = filterColumnsByProbe(layoutFields, i);
     const fieldValues: Record<string, string> = {};
-    for (const field of fetchFields) fieldValues[field] = str(i[field]);
+    for (const field of fetchFields) {
+      if (field in i) fieldValues[field] = str(i[field]);
+    }
     instMap.set(raw(i.sys_id) || str(i.sys_id), {
       sys_id: raw(i.sys_id) || str(i.sys_id),
       name: str(i.name),
@@ -164,7 +181,7 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
       operational_status: str(i.operational_status),
       environment: str(i.environment),
       fieldValues,
-      viewFields: viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS,
+      viewFields: readableFields,
       incidentRecords: [],
       changeRecords: [],
       incidents: 0,
@@ -212,12 +229,12 @@ async function buildThreeLevelHierarchy(
 ): Promise<LiveCoreApp[]> {
   if (!instanceIds.length) return [];
 
-  const containsRows = await chunkedIN<Record<string, unknown>>(
+  const containsRows = (await chunkedIN<Record<string, unknown>>(
     'cmdb_rel_ci', 'child.sys_id', instanceIds,
     'type.name=Contains::Contained by',
     ['parent', 'child', 'parent.name', 'parent.short_description'],
     5000,
-  );
+  )).rows;
 
   const instToSvc = new Map<string, { id: string; name: string; desc: string }>();
   const svcToInsts = new Map<string, LiveInstance[]>();
@@ -236,12 +253,12 @@ async function buildThreeLevelHierarchy(
 
   const svcIds = [...svcToInsts.keys()].filter(id => id !== 'unknown');
   const consumesRows = svcIds.length
-    ? await chunkedIN<Record<string, unknown>>(
+    ? (await chunkedIN<Record<string, unknown>>(
       'cmdb_rel_ci', 'child.sys_id', svcIds,
       'type.name=Consumes::Consumed by',
       ['parent', 'child', 'parent.name', 'parent.short_description'],
       5000,
-    )
+    )).rows
     : [];
 
   const svcToApp = new Map<string, { id: string; name: string; desc: string }>();
@@ -294,12 +311,12 @@ async function buildTwoLevelHierarchy(
 ): Promise<LiveAppSvc[]> {
   if (!instanceIds.length) return [];
 
-  const hop2Rows = await chunkedIN<Record<string, unknown>>(
+  const hop2Rows = (await chunkedIN<Record<string, unknown>>(
     'cmdb_rel_ci', 'child.sys_id', instanceIds,
     'child.u_service_type=instance^type.name=Connects to::Connected by',
     ['parent', 'child'],
     5000,
-  );
+  )).rows;
 
   const instToMid = new Map<string, string>();
   for (const r of hop2Rows) {
@@ -310,12 +327,12 @@ async function buildTwoLevelHierarchy(
 
   const midIds = [...new Set(instToMid.values())];
   const hop1Rows = midIds.length
-    ? await chunkedIN<Record<string, unknown>>(
+    ? (await chunkedIN<Record<string, unknown>>(
       'cmdb_rel_ci', 'child.sys_id', midIds,
       'parent.u_service_type=service^type.name=Connects to::Connected by',
       ['parent', 'child', 'parent.name', 'parent.short_description'],
       5000,
-    )
+    )).rows
     : [];
 
   const midToApp = new Map<string, { id: string; name: string; desc: string }>();
@@ -362,18 +379,21 @@ export async function loadRelatedApplicationsForCi(
   ciSysId: string,
   hierarchyMode: boolean,
 ): Promise<RelatedApplicationsResult> {
-  const instanceIds = await fetchRelatedAppInstanceIds(ciSysId);
+  const { ids: instanceIds, access: relAccess } = await fetchRelatedAppInstanceIds(ciSysId);
+  if (relAccess === 'denied') {
+    return { threeLevel: [], twoLevel: [], access: 'denied' };
+  }
   if (!instanceIds.length) {
-    return { threeLevel: [], twoLevel: [] };
+    return { threeLevel: [], twoLevel: [], access: relAccess };
   }
 
   const instMap = await loadLiveInstances(instanceIds);
 
   if (hierarchyMode) {
     const threeLevel = await buildThreeLevelHierarchy(instanceIds, instMap);
-    return { threeLevel, twoLevel: [] };
+    return { threeLevel, twoLevel: [], access: relAccess };
   }
 
   const twoLevel = await buildTwoLevelHierarchy(instanceIds, instMap);
-  return { threeLevel: [], twoLevel };
+  return { threeLevel: [], twoLevel, access: relAccess };
 }
