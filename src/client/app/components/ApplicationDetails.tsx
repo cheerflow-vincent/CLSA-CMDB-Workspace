@@ -7,6 +7,7 @@ import RelationshipDiagram, { DIR_COLOR, SVC_STYLE } from './RelationshipDiagram
 import type { DiagramFilters } from './RelationshipDiagram';
 import RelationshipTable from './RelationshipTable';
 import EditRelationshipModal from './EditRelationshipModal';
+import RecordEditDialog from './recordEdit/RecordEditDialog';
 import AppSearchHeader from './AppSearchHeader';
 import { type AppItem } from '../data/appData';
 import type { CIItem } from './CIDetailView';
@@ -21,11 +22,39 @@ import {
   CHANGE_TASK_CONFIG,
 } from '../utils/relatedTasks';
 import RelatedListSection from './RelatedListSection';
-import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
-import { filterFieldsByReadableKeys, isAccessDenied } from '../utils/acl';
+import { queryTableWithAccess, fetchFieldAccess, type TableAccess } from '../../api/servicenow';
+import { filterFieldsByReadableKeys, isAccessDenied, canEditRecord } from '../utils/acl';
 
 const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
 const OVERVIEW_DEFAULT_LIMIT = 10;
+
+async function loadOverviewPanel(
+  sysId: string,
+  table: string,
+): Promise<{
+  fields: ViewField[];
+  values: Record<string, string>;
+  access: TableAccess;
+}> {
+  const fields = await loadViewFields(table, OVERVIEW_VIEW, OVERVIEW_DEFAULT_LIMIT);
+  const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
+    table,
+    query: `sys_id=${sysId}`,
+    fields: fields.map(f => f.element),
+    displayValue: true,
+    limit: 1,
+  });
+  if (access === 'denied') {
+    return { fields: [], values: {}, access };
+  }
+  const rec = result?.[0] ?? {};
+  const readableFields = filterFieldsByReadableKeys(fields, Object.fromEntries(
+    fields.filter(f => f.element in rec).map(f => [f.element, str(rec[f.element])]),
+  ));
+  const vals: Record<string, string> = {};
+  readableFields.forEach(f => { vals[f.element] = str(rec[f.element]); });
+  return { fields: readableFields, values: vals, access };
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ApplicationDetailsProps {
@@ -43,6 +72,9 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showRecordEditModal, setShowRecordEditModal] = useState(false);
+  const [canWriteRecord, setCanWriteRecord] = useState(false);
+  const [overviewRefresh, setOverviewRefresh] = useState(0);
   const [nodeSearch, setNodeSearch] = useState('');
   const [filters, setFilters] = useState<DiagramFilters>({
     upstream: true, downstream: true, bidirectional: true,
@@ -66,34 +98,21 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     setOverviewLoading(true);
     setOverviewFields([]);
     setOverviewValues({});
+    setCanWriteRecord(false);
 
-    loadViewFields(table, OVERVIEW_VIEW, OVERVIEW_DEFAULT_LIMIT)
-      .then(async fields => {
-        const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
-          table,
-          query:  `sys_id=${sysId}`,
-          fields: fields.map(f => f.element),
-          displayValue: true,
-          limit: 1,
-        });
+    loadOverviewPanel(sysId, table)
+      .then(({ fields, values, access }) => {
         setOverviewAccess(access);
-        if (access === 'denied') {
-          setOverviewFields([]);
-          setOverviewValues({});
-          return;
-        }
-        const rec = result?.[0] ?? {};
-        const readableFields = filterFieldsByReadableKeys(fields, Object.fromEntries(
-          fields.filter(f => f.element in rec).map(f => [f.element, str(rec[f.element])]),
-        ));
-        setOverviewFields(readableFields);
-        const vals: Record<string, string> = {};
-        readableFields.forEach(f => { vals[f.element] = str(rec[f.element]); });
-        setOverviewValues(vals);
+        setOverviewFields(fields);
+        setOverviewValues(values);
       })
       .catch(() => {})
       .finally(() => setOverviewLoading(false));
-  }, [selectedApp?.sysId, selectedApp?.table]);
+
+    fetchFieldAccess(table, sysId, ['name'])
+      .then(access => setCanWriteRecord(canEditRecord(access)))
+      .catch(() => setCanWriteRecord(false));
+  }, [selectedApp?.sysId, selectedApp?.table, overviewRefresh]);
 
   const toggleFilter = (key: keyof DiagramFilters) =>
     setFilters(f => ({ ...f, [key]: !f[key] }));
@@ -110,6 +129,8 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
         currentApp={selectedApp ?? undefined}
         onSelectApp={onSelectApp}
         onBackToHome={onBack}
+        canEditRecord={canWriteRecord}
+        onEditRecord={() => setShowRecordEditModal(true)}
       />
 
       {/* ── Main content: fills remaining viewport height ── */}
@@ -287,6 +308,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <RelatedListSection
                         config={SERVER_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        responsiveLayout={false}
                         isOpen={expanded.servers}
                         onToggle={() => toggleExpand('servers')}
                         onViewCI={onViewCI}
@@ -303,6 +325,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <RelatedListSection
                         config={DATABASE_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        responsiveLayout={false}
                         isOpen={expanded.databases}
                         onToggle={() => toggleExpand('databases')}
                         onViewCI={onViewCI}
@@ -319,6 +342,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <RelatedListSection
                         config={NETGEAR_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        responsiveLayout={false}
                         isOpen={expanded.netgear}
                         onToggle={() => toggleExpand('netgear')}
                         onViewCI={onViewCI}
@@ -352,6 +376,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         config={INCIDENT_TASK_CONFIG}
                         recordSysId={selectedApp?.sysId}
                         variant="compact"
+                        responsiveLayout={false}
                         isOpen={expanded.incidents}
                         onToggle={() => toggleExpand('incidents')}
                         title="Active Incidents"
@@ -368,6 +393,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         config={CHANGE_TASK_CONFIG}
                         recordSysId={selectedApp?.sysId}
                         variant="compact"
+                        responsiveLayout={false}
                         isOpen={expanded.changes}
                         onToggle={() => toggleExpand('changes')}
                         title="Change Requests"
@@ -398,6 +424,16 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
       </div>
 
       {showEditModal && <EditRelationshipModal onClose={() => setShowEditModal(false)} />}
+      {showRecordEditModal && selectedApp?.sysId && (
+        <RecordEditDialog
+          title="Edit Application"
+          table={selectedApp.table ?? 'cmdb_ci_service'}
+          sysId={selectedApp.sysId}
+          recordName={selectedApp.name}
+          onClose={() => setShowRecordEditModal(false)}
+          onSaved={() => setOverviewRefresh(n => n + 1)}
+        />
+      )}
     </div>
   );
 }

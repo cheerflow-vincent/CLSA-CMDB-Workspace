@@ -29,3 +29,88 @@
 .clsa-portal .react-flow {
   height: 100%;
 }
+
+/* ── Container-query responsive field layouts ─────────────────────────────── */
+
+@layer components {
+  .detail-pane {
+    container-type: inline-size;
+    container-name: detail-pane;
+  }
+
+  .card-stack {
+    container-type: inline-size;
+    container-name: card;
+  }
+
+  .rf-field-row {
+    @apply flex flex-col gap-0.5 text-xs mb-2 last:mb-0;
+  }
+
+  .rf-field-row__label {
+    @apply text-gray-400 shrink-0;
+  }
+
+  .rf-field-row__value {
+    @apply text-gray-700 break-words whitespace-pre-line min-w-0;
+  }
+
+  .rf-field-row--badge {
+    @apply items-start gap-1;
+  }
+
+  .rf-field-grid {
+    @apply flex flex-col gap-0.5 text-xs mb-2 last:mb-0;
+  }
+
+  .cards-grid-responsive {
+    @apply grid grid-cols-1 gap-4;
+  }
+
+  .form-split-row {
+    @apply col-span-2 grid grid-cols-1 gap-y-4;
+  }
+
+  @container card (min-width: 300px) {
+    .rf-field-row--badge {
+      @apply flex-row items-center justify-between gap-3;
+    }
+
+    .rf-field-grid {
+      @apply grid grid-cols-2 gap-x-4 gap-y-1;
+    }
+  }
+
+  @container card (min-width: 420px) {
+    .rf-field-row--inline {
+      @apply flex-row items-start gap-2;
+    }
+
+    .rf-field-row--inline .rf-field-row__label {
+      @apply w-28;
+    }
+  }
+
+  @container detail-pane (min-width: 520px) {
+    .form-split-row {
+      @apply grid-cols-2 gap-x-6;
+    }
+  }
+
+  @container detail-pane (min-width: 560px) {
+    .cards-grid-responsive {
+      @apply grid-cols-2;
+    }
+  }
+
+  @container detail-pane (min-width: 900px) {
+    .cards-grid-responsive {
+      @apply grid-cols-3;
+    }
+  }
+
+  /* Edit modal — always use two-column split rows (modal is max-w-5xl) */
+  .record-edit-form .form-split-row {
+    @apply grid-cols-2 gap-x-6;
+  }
+}

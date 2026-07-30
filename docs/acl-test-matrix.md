@@ -38,6 +38,7 @@ Create restricted roles in **System Security → ACL** and assign to dedicated t
 | | Hierarchy cards (`cmdb_ci_business_app`, `cmdb_rel_ci`, …) | Visible | Entire hierarchy empty/hidden | Instance card fields filtered |
 | | Instance INC/CHG badges (`task_ci`) | Visible if data | Badges absent (count 0) | N/A |
 | **App Detail** | Overview panel (app record table) | Visible | Section hidden | Only readable overview fields |
+| | **Edit modal** (Edit button + `CLSA CMDB Workspace Edit`) | Edit visible; fields editable per ACL | Edit button hidden | Readable fields shown; write-denied fields read-only; read-denied fields hidden |
 | | Related servers (`cmdb_rel_ci` + CI table) | Visible | Accordion hidden | List columns filtered |
 | | Related databases | Visible | Accordion hidden | List columns filtered |
 | | Related netgear | Visible | Accordion hidden | List columns filtered |
@@ -60,6 +61,9 @@ Create restricted roles in **System Security → ACL** and assign to dedicated t
 
 - [ ] App Home loads hierarchy with instance cards and stats
 - [ ] App Detail overview shows all configured overview fields
+- [ ] App Detail Edit button visible for users with table write; hidden without table write
+- [ ] App Detail Edit modal respects field read/write ACL (hidden vs read-only vs editable)
+- [ ] App Detail save refreshes Overview panel
 - [ ] App Detail related CI accordions expand with data
 - [ ] CI Search pills show counts; search returns paginated results
 - [ ] CI Detail overview/contact forms show layout fields
@@ -71,14 +75,16 @@ Create restricted roles in **System Security → ACL** and assign to dedicated t
 - [ ] Deny `task_ci` read — INC/CR sections and trend hidden on CI Detail; incident stat hidden on App Home
 - [ ] Deny `cmdb_health_result` read — health section hidden on CI Detail
 - [ ] Deny `cmdb_rel_ci` read — related applications hidden on CI Detail; App Detail infrastructure lists hidden
+- [ ] Deny table write on app CI table — App Detail Edit button hidden; Overview still read-only
+- [ ] Deny field write on a field in Edit layout (e.g. `owned_by`) — field visible but disabled in Edit modal
+- [ ] Deny field read on a field — field absent from Edit modal and Overview
 
 ---
 
-## API layer notes
+## Edit modal API (Phase 2 — implemented)
 
-- All data queries use `queryTableWithAccess()` where ACL-aware behavior is required.
-- **403** → `access: 'denied'`
-- Other errors → `access: 'error'` (empty state, section remains unless explicitly hidden)
-- Legacy `queryTable()` retained for metadata (`sys_ui_*`, `sys_properties`) where broader read is expected.
-
-Phase 2 (deferred): server ACL probe API for edit-mode `canWrite` checks.
+- **Endpoint:** `GET /api/x_citi4_clsa_cmd_0/portal/field_access?table=&sys_id=&fields=`
+- **Auth:** Session cookie from UI page (`authentication` + `authorization` enabled)
+- **Response:** `{ canWriteRecord, fields: { [element]: { read, write, internal_type, reference?, max_length?, choices? } } }`
+- **Save:** `PATCH /api/now/table/{table}/{sys_id}` with changed writable fields only
+- **403** on field_access → treat as no write access (Edit button hidden)

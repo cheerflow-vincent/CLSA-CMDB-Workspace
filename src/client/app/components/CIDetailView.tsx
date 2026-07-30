@@ -9,8 +9,9 @@ import {
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
 import { type AppItem } from '../data/appData';
-import { queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
-import { filterFormSections, isAccessDenied } from '../utils/acl';
+import { queryTable, fetchFieldAccess, type TableAccess } from '../../api/servicenow';
+import { filterFormSections, isAccessDenied, canEditRecord } from '../utils/acl';
+import RecordEditDialog from './recordEdit/RecordEditDialog';
 import {
   loadFormLayout, str, raw, flattenLayoutFields, fetchRecordFieldValues,
   type FormSectionLayout, type FormLayoutRow,
@@ -21,6 +22,7 @@ import RelatedApplicationsPanel from './RelatedApplicationsPanel';
 import RelatedListSection from './RelatedListSection';
 import HealthResultsPanel from './HealthResultsPanel';
 import { INCIDENT_TASK_CONFIG, CHANGE_TASK_CONFIG, fetchRelatedTaskCount } from '../utils/relatedTasks';
+import CollapsibleFormSection from './formLayout/CollapsibleFormSection';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface CIItem {
@@ -45,6 +47,7 @@ interface CIDetailViewProps {
   onSelectApp?: (app: AppItem) => void;
   fromApp?: AppItem | null;
   hierarchyMode?: boolean;
+  sidebarCollapsed?: boolean;
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -121,48 +124,6 @@ async function resolveRecordContext(
   return { sysId, recordTable: tableHint, name: ci.name };
 }
 
-function CollapsibleFormSection({
-  caption,
-  defaultOpen = true,
-  isFirst,
-  children,
-}: {
-  caption: string | null;
-  defaultOpen?: boolean;
-  isFirst?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  if (!caption) {
-    return (
-      <div className={isFirst ? '' : 'pt-4 border-t border-gray-100'}>
-        {children}
-      </div>
-    );
-  }
-
-  return (
-    <div className={isFirst ? '' : 'pt-4 border-t border-gray-100'}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-        className="w-full flex items-center justify-between gap-3 mb-3 py-1 hover:bg-gray-50 rounded transition-colors"
-      >
-        <div className="flex items-center gap-2 text-base font-semibold text-gray-800">
-          <span className="w-1 h-4 bg-blue-600 rounded-full shrink-0" />
-          {caption}
-        </div>
-        {open
-          ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
-          : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />}
-      </button>
-      {open && children}
-    </div>
-  );
-}
-
 function FormOverviewBlock({
   sections,
   values,
@@ -191,7 +152,7 @@ function FormOverviewBlock({
     const right = row.right.filter(f => f.element in values);
     if (!left.length && !right.length) return null;
     return (
-      <div key={key} className="col-span-2 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+      <div key={key} className="form-split-row">
         <div className="space-y-4">
           {left.map(f => (
             <ReadonlyField key={f.element} label={f.label} value={values[f.element] ?? ''} />
@@ -261,7 +222,14 @@ function Section({ title, icon, defaultOpen = true, children }: {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarchyMode = true }: CIDetailViewProps) {
+export default function CIDetailView({
+  ci,
+  onBack,
+  onSelectApp,
+  fromApp,
+  hierarchyMode = true,
+  sidebarCollapsed = false,
+}: CIDetailViewProps) {
   const detail  = getDetail(ci);
   const isServer = ci.type === 'Server';
   const [taskTab, setTaskTab] = useState<'incidents' | 'changes'>('incidents');
@@ -269,7 +237,11 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
   const [changeCount, setChangeCount] = useState(0);
   const [trendData, setTrendData] = useState<TrendMonthPoint[]>([]);
   const [trendLoading, setTrendLoading] = useState(true);
-  const [showEditModal, setShowEditModal] = useState(false);
+  const [showRecordEditModal, setShowRecordEditModal] = useState(false);
+  const [canWriteRecord, setCanWriteRecord] = useState(false);
+  const [recordSysId, setRecordSysId] = useState('');
+  const [recordTable, setRecordTable] = useState('');
+  const [detailRefresh, setDetailRefresh] = useState(0);
   const [displayName, setDisplayName] = useState(ci.name);
   const [formSections, setFormSections] = useState<FormSectionLayout[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -293,6 +265,9 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
     setContactSections([]);
     setContactValues({});
     setDisplayName(ci.name);
+    setCanWriteRecord(false);
+    setRecordSysId('');
+    setRecordTable('');
 
     resolveRecordContext(ci)
       .then(async ctx => {
@@ -305,7 +280,13 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
           return;
         }
 
+        setRecordSysId(ctx.sysId);
+        setRecordTable(ctx.recordTable);
         setDisplayName(ctx.name);
+
+        fetchFieldAccess(ctx.recordTable, ctx.sysId, ['name'])
+          .then(access => { if (!cancelled) setCanWriteRecord(canEditRecord(access)); })
+          .catch(() => { if (!cancelled) setCanWriteRecord(false); });
 
         const [overviewLayout, contactLayout] = await Promise.all([
           loadFormLayout(ctx.recordTable, CI_OVERVIEW_VIEW, resolveCiSearchParentTable),
@@ -358,7 +339,7 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
       });
 
     return () => { cancelled = true; };
-  }, [ci.id, ci.table, ci.class, ci.name]);
+  }, [ci.id, ci.table, ci.class, ci.name, detailRefresh]);
 
   useEffect(() => {
     if (!ci.id) {
@@ -411,8 +392,139 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
     return () => { cancelled = true; };
   }, [ci.id]);
 
+  const showOverviewSection =
+    !isAccessDenied(recordAccess)
+    && (overviewLoading || filterFormSections(formSections, fieldValues).length > 0);
+
+  const showContactSection =
+    !isAccessDenied(recordAccess)
+    && (contactLoading || filterFormSections(contactSections, contactValues).length > 0);
+
+  const trendSection = !isAccessDenied(trendAccess) && (
+    <Section title="Incident & Change Trend (Last 6 Months)" icon={<Activity className="w-4 h-4 text-blue-500" />}>
+      <div className="p-5">
+        {trendLoading ? (
+          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
+            <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
+          </div>
+        ) : trendData.length === 0 ? (
+          <p className="text-sm text-gray-400 italic text-center py-16">No trend data available.</p>
+        ) : (
+          <>
+            <TaskTrendChart data={trendData} />
+            <p className="text-xs text-gray-400 text-center mt-3">
+              Click a data point to open the filtered list in ServiceNow.
+            </p>
+          </>
+        )}
+      </div>
+    </Section>
+  );
+
+  const tasksSection = showTaskSection && (
+    <Section title="Related Incidents & Changes" icon={<AlertCircle className="w-4 h-4 text-blue-500" />}>
+      <div className="p-5">
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {!isAccessDenied(incidentAccess) && (
+            <button
+              type="button"
+              onClick={() => setTaskTab('incidents')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
+            >
+              <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
+              Incidents ({incidentCount})
+            </button>
+          )}
+          {!isAccessDenied(changeAccess) && (
+            <button
+              type="button"
+              onClick={() => setTaskTab('changes')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
+            >
+              <Calendar className="w-3.5 h-3.5 inline mr-1" />
+              Changes ({changeCount})
+            </button>
+          )}
+        </div>
+
+        {taskTab === 'incidents' && !isAccessDenied(incidentAccess) ? (
+          <RelatedListSection
+            embedded
+            config={INCIDENT_TASK_CONFIG}
+            recordSysId={ci.id}
+            variant="cards"
+            isOpen
+            onToggle={() => {}}
+            title="Active Incidents"
+            Icon={AlertCircle}
+            iconBg="bg-red-100"
+            iconColor="text-red-600"
+            badgeBg="bg-red-50"
+            badgeText="text-red-700"
+            badgeBorder="border-red-200"
+            emptyMessage="No active incidents linked to this CI."
+          />
+        ) : (
+          <RelatedListSection
+            embedded
+            config={CHANGE_TASK_CONFIG}
+            recordSysId={ci.id}
+            variant="cards"
+            isOpen
+            onToggle={() => {}}
+            title="Change Requests"
+            Icon={Calendar}
+            iconBg="bg-amber-100"
+            iconColor="text-amber-600"
+            badgeBg="bg-amber-50"
+            badgeText="text-amber-700"
+            badgeBorder="border-amber-200"
+            emptyMessage="No approved change requests linked to this CI."
+          />
+        )}
+      </div>
+    </Section>
+  );
+
+  const relatedAppsSection = !isAccessDenied(relatedAppsAccess) && (
+    <Section title="Related Applications" icon={<Layers className="w-4 h-4 text-blue-500" />}>
+      <RelatedApplicationsPanel
+        ciSysId={ci.id}
+        hierarchyMode={hierarchyMode}
+        onSelectApp={onSelectApp}
+        onAccessResolved={setRelatedAppsAccess}
+      />
+    </Section>
+  );
+
+  const healthSection = !isAccessDenied(healthAccess) && (
+    <Section title="CMDB Health Metrics" icon={<Shield className="w-4 h-4 text-blue-500" />} defaultOpen={false}>
+      <div className="p-5">
+        <HealthResultsPanel ciSysId={ci.id} onAccessResolved={setHealthAccess} />
+      </div>
+    </Section>
+  );
+
+  const hasLeftColumn = showOverviewSection || showContactSection;
+  const bodyLayoutClass = !hasLeftColumn
+    ? ''
+    : sidebarCollapsed
+      ? 'lg:flex-row lg:items-start'
+      : 'xl:flex-row xl:items-start';
+  const bodyGapClass = !hasLeftColumn
+    ? ''
+    : sidebarCollapsed
+      ? 'lg:gap-6'
+      : 'xl:gap-6';
+  const leftColClass = !hasLeftColumn
+    ? ''
+    : sidebarCollapsed
+      ? 'lg:w-[38%] lg:max-w-xl lg:shrink-0 lg:sticky lg:top-4 lg:self-start'
+      : 'xl:w-[38%] xl:max-w-xl xl:shrink-0 xl:sticky xl:top-4 xl:self-start';
+  const headerCountChipClass = sidebarCollapsed ? 'hidden lg:inline-flex' : 'hidden xl:inline-flex';
+
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 sm:p-6 space-y-4">
 
       {/* ── Breadcrumb ── */}
       <div className="flex items-center gap-1.5 text-sm text-gray-500 flex-wrap">
@@ -431,27 +543,39 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
         <span className="text-gray-900 font-medium">{displayName}</span>
       </div>
 
-      {/* ── CI Header card ── */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-xl font-semibold text-gray-900">{displayName}</h1>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-              {detail.status}
-            </span>
-            {ci.hasIncident && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs">
-                <AlertCircle className="w-3 h-3" /> Active Incident
+      {/* ── CI Header (identity + actions only) ── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-gray-900 mb-2">{displayName}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                {detail.status}
               </span>
-            )}
-            {ci.hasChange && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-xs">
-                <Calendar className="w-3 h-3" /> Upcoming Change
-              </span>
-            )}
+              {ci.hasIncident && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs">
+                  <AlertCircle className="w-3 h-3" /> Active Incident
+                </span>
+              )}
+              {ci.hasChange && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-xs">
+                  <Calendar className="w-3 h-3" /> Upcoming Change
+                </span>
+              )}
+              {showTaskSection && !isAccessDenied(incidentAccess) && incidentCount > 0 && (
+                <span className={`${headerCountChipClass} items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 text-xs border border-red-200`}>
+                  <AlertCircle className="w-3 h-3" /> {incidentCount} incident{incidentCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              {showTaskSection && !isAccessDenied(changeAccess) && changeCount > 0 && (
+                <span className={`${headerCountChipClass} items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-700 text-xs border border-yellow-200`}>
+                  <Calendar className="w-3 h-3" /> {changeCount} change{changeCount !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
             {isServer && (
               <button className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-50 transition-colors">
                 <Activity className="w-4 h-4" /> Grafana
@@ -466,178 +590,76 @@ export default function CIDetailView({ ci, onBack, onSelectApp, fromApp, hierarc
             >
               <ExternalLink className="w-4 h-4" /> Open in ServiceNow
             </a>
-            <button onClick={() => setShowEditModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors">
-              <Edit2 className="w-4 h-4" /> Edit
-            </button>
-            <button className="p-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500">
+            {canWriteRecord && (
+              <button
+                type="button"
+                onClick={() => setShowRecordEditModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+              >
+                <Edit2 className="w-4 h-4" /> Edit
+              </button>
+            )}
+            <button type="button" className="p-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500">
               <MoreHorizontal className="w-4 h-4" />
             </button>
           </div>
         </div>
-
-      {!isAccessDenied(recordAccess) && (
-        <FormOverviewBlock
-          sections={formSections}
-          values={fieldValues}
-          loading={overviewLoading}
-        />
-      )}
       </div>
 
-      {/* ── Contact Information ── */}
-      {!isAccessDenied(recordAccess) && (contactLoading || filterFormSections(contactSections, contactValues).length > 0) && (
-      <Section title="Contact Information" icon={<User className="w-4 h-4 text-blue-500" />}>
-        <div className="p-5">
-          <FormOverviewBlock
-            embedded
-            sections={contactSections}
-            values={contactValues}
-            loading={contactLoading}
-            emptyMessage="No contact fields configured."
-            loadingMessage="Loading contact information…"
-          />
-        </div>
-      </Section>
-      )}
+      {/* ── Two-column body (stacked until viewport fits sidebar + panes) ── */}
+      <div className={`flex flex-col gap-4 ${bodyGapClass} ${bodyLayoutClass}`}>
+        {hasLeftColumn && (
+        <div className={`detail-pane space-y-4 ${leftColClass}`}>
+          {showOverviewSection && (
+            <Section title="Record Overview" icon={<Server className="w-4 h-4 text-blue-500" />}>
+              <div className="p-5">
+                <FormOverviewBlock
+                  embedded
+                  sections={formSections}
+                  values={fieldValues}
+                  loading={overviewLoading}
+                  emptyMessage="No overview fields configured."
+                  loadingMessage="Loading overview…"
+                />
+              </div>
+            </Section>
+          )}
 
-      {/* ── Related Applications ── */}
-      {!isAccessDenied(relatedAppsAccess) && (
-      <Section title="Related Applications" icon={<Layers className="w-4 h-4 text-blue-500" />}>
-        <RelatedApplicationsPanel
-          ciSysId={ci.id}
-          hierarchyMode={hierarchyMode}
-          onSelectApp={onSelectApp}
-          onAccessResolved={setRelatedAppsAccess}
+          {showContactSection && (
+            <Section title="Contact Information" icon={<User className="w-4 h-4 text-blue-500" />}>
+              <div className="p-5">
+                <FormOverviewBlock
+                  embedded
+                  sections={contactSections}
+                  values={contactValues}
+                  loading={contactLoading}
+                  emptyMessage="No contact fields configured."
+                  loadingMessage="Loading contact information…"
+                />
+              </div>
+            </Section>
+          )}
+        </div>
+        )}
+
+        {/* Operational & related */}
+        <div className="detail-pane flex-1 min-w-0 space-y-4">
+          {trendSection}
+          {tasksSection}
+          {relatedAppsSection}
+          {healthSection}
+        </div>
+      </div>
+
+      {showRecordEditModal && recordSysId && recordTable && (
+        <RecordEditDialog
+          title="Edit CI"
+          table={recordTable}
+          sysId={recordSysId}
+          recordName={displayName}
+          onClose={() => setShowRecordEditModal(false)}
+          onSaved={() => setDetailRefresh(n => n + 1)}
         />
-      </Section>
-      )}
-
-      {/* ── Incidents & Changes ── */}
-      {showTaskSection && (
-      <Section title="Related Incidents & Changes" icon={<AlertCircle className="w-4 h-4 text-blue-500" />}>
-        <div className="p-5">
-          <div className="flex gap-2 mb-4">
-            {!isAccessDenied(incidentAccess) && (
-            <button
-              type="button"
-              onClick={() => setTaskTab('incidents')}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
-            >
-              <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
-              Incidents ({incidentCount})
-            </button>
-            )}
-            {!isAccessDenied(changeAccess) && (
-            <button
-              type="button"
-              onClick={() => setTaskTab('changes')}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
-            >
-              <Calendar className="w-3.5 h-3.5 inline mr-1" />
-              Changes ({changeCount})
-            </button>
-            )}
-          </div>
-
-          {taskTab === 'incidents' && !isAccessDenied(incidentAccess) ? (
-            <RelatedListSection
-              embedded
-              config={INCIDENT_TASK_CONFIG}
-              recordSysId={ci.id}
-              variant="cards"
-              isOpen
-              onToggle={() => {}}
-              title="Active Incidents"
-              Icon={AlertCircle}
-              iconBg="bg-red-100"
-              iconColor="text-red-600"
-              badgeBg="bg-red-50"
-              badgeText="text-red-700"
-              badgeBorder="border-red-200"
-              emptyMessage="No active incidents linked to this CI."
-            />
-          ) : (
-            <RelatedListSection
-              embedded
-              config={CHANGE_TASK_CONFIG}
-              recordSysId={ci.id}
-              variant="cards"
-              isOpen
-              onToggle={() => {}}
-              title="Change Requests"
-              Icon={Calendar}
-              iconBg="bg-amber-100"
-              iconColor="text-amber-600"
-              badgeBg="bg-amber-50"
-              badgeText="text-amber-700"
-              badgeBorder="border-amber-200"
-              emptyMessage="No approved change requests linked to this CI."
-            />
-          )}
-        </div>
-      </Section>
-      )}
-
-      {/* ── Trend Chart ── */}
-      {!isAccessDenied(trendAccess) && (
-      <Section title="Incident & Change Trend (Last 6 Months)" icon={<Activity className="w-4 h-4 text-blue-500" />}>
-        <div className="p-5">
-          {trendLoading ? (
-            <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
-              <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
-            </div>
-          ) : trendData.length === 0 ? (
-            <p className="text-sm text-gray-400 italic text-center py-16">No trend data available.</p>
-          ) : (
-            <>
-              <TaskTrendChart data={trendData} />
-              <p className="text-xs text-gray-400 text-center mt-3">
-                Click a data point to open the filtered list in ServiceNow.
-              </p>
-            </>
-          )}
-        </div>
-      </Section>
-      )}
-
-      {/* ── CMDB Health ── */}
-      {!isAccessDenied(healthAccess) && (
-      <Section title="CMDB Health Metrics" icon={<Shield className="w-4 h-4 text-blue-500" />} defaultOpen={false}>
-        <div className="p-5">
-          <HealthResultsPanel ciSysId={ci.id} onAccessResolved={setHealthAccess} />
-        </div>
-      </Section>
-      )}
-
-      {/* ── Edit modal ── */}
-      {showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">Edit CI</h2>
-            <p className="text-sm text-gray-500 mb-5">Update the attributes of <span className="font-medium">{ci.name}</span></p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Environment</label>
-                <select className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" defaultValue={ci.environment}>
-                  <option>Production</option><option>Non-production</option><option>DR</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Owner</label>
-                <input type="text" defaultValue={ci.owner} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Support Group</label>
-                <input type="text" defaultValue={ci.supportGroup} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm hover:bg-blue-800">Save Changes</button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

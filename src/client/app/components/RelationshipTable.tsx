@@ -4,6 +4,7 @@ import { queryTable } from '../../api/servicenow';
 import { type ViewField, str, loadViewFields as loadViewFieldsUtil } from '../utils/viewFields';
 import type { AppItem } from '../data/appData';
 import type { DiagramFilters } from './RelationshipDiagram';
+import { useNarrowContainer } from '../utils/useNarrowLayout';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Direction   = 'upstream' | 'downstream' | 'bidirectional';
@@ -197,12 +198,72 @@ function InstanceInfoCell({ detail }: { detail: CIDetail | undefined }) {
         const val = detail.fieldValues[f.element];
         if (!val) return null;
         return (
-          <div key={f.element} className="flex items-start gap-1 text-xs leading-snug">
-            <span className="text-gray-400 shrink-0 w-24 truncate">{f.label}</span>
-            <span className="text-gray-700 font-medium break-words min-w-0">{val}</span>
+          <div key={f.element} className="rf-field-row rf-field-row--inline">
+            <span className="rf-field-row__label">{f.label}</span>
+            <span className="rf-field-row__value font-medium">{val}</span>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function RelRowCard({
+  row,
+  detail,
+  onViewDetails,
+}: {
+  row: RelRow;
+  detail?: CIDetail;
+  onViewDetails: (row: RelRow) => void;
+}) {
+  const meta = DIR_META[row.direction];
+  const svcType = classToServiceType(row.sysClass);
+
+  return (
+    <div className="card-stack border border-gray-200 rounded-lg p-4 bg-white hover:shadow-sm transition-shadow">
+      <div className="mb-3">
+        <button
+          type="button"
+          onClick={() => onViewDetails(row)}
+          title="View application details"
+          className="text-sm font-semibold text-gray-800 hover:text-blue-700 hover:underline text-left break-words"
+        >
+          {row.name}
+        </button>
+        <a
+          href={`/${row.sysClass || 'cmdb_ci_service'}.do?sys_id=${row.sysId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-1"
+          title="Open in ServiceNow"
+        >
+          <ExternalLink className="w-3 h-3" />
+          Open in ServiceNow
+        </a>
+      </div>
+      <div className="border-t border-gray-100 pt-3 space-y-2">
+        <div className="rf-field-row rf-field-row--badge">
+          <span className="rf-field-row__label">Direction</span>
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${meta.badgeCls}`}>
+            {meta.icon}{meta.label}
+          </span>
+        </div>
+        <div className="rf-field-grid">
+          <span className="rf-field-row__label">Service Type</span>
+          <span className="rf-field-row__value">{SVC_LABEL[svcType]}</span>
+        </div>
+        <div className="rf-field-grid">
+          <span className="rf-field-row__label">CI Class</span>
+          <span className="rf-field-row__value">{tableLabel(row.sysClass)}</span>
+        </div>
+        {detail && (
+          <div className="pt-2 border-t border-gray-50">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">Instance Info</p>
+            <InstanceInfoCell detail={detail} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -213,6 +274,7 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
   const [detailMap,  setDetailMap]  = useState<Map<string, CIDetail>>(new Map());
   const [loading,    setLoading]    = useState(false);
   const [detLoading, setDetLoading] = useState(false);
+  const { ref: narrowRef, narrow } = useNarrowContainer(720);
 
   // Phase 1 — fetch relationship rows
   useEffect(() => {
@@ -275,7 +337,19 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
   );
 
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+    <div ref={narrowRef} className="detail-pane rounded-xl border border-gray-200 overflow-hidden bg-white">
+      {narrow ? (
+        <div className="p-4 cards-grid-responsive">
+          {filtered.map(row => (
+            <RelRowCard
+              key={row.sysId}
+              row={row}
+              detail={detailMap.get(row.sysId)}
+              onViewDetails={handleViewDetails}
+            />
+          ))}
+        </div>
+      ) : (
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">
@@ -346,6 +420,7 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
           })}
         </tbody>
       </table>
+      )}
     </div>
   );
 }

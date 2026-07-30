@@ -65,24 +65,24 @@ function TaskCardBodyField({
 
   if (col.element === 'priority') {
     return (
-      <div key={col.element} className="flex items-center justify-between gap-3 text-xs mb-2">
-        <span className="text-gray-400 shrink-0">{col.label}</span>
+      <div key={col.element} className="rf-field-row rf-field-row--badge">
+        <span className="rf-field-row__label">{col.label}</span>
         <PriorityBadge priority={value} />
       </div>
     );
   }
   if (col.element === 'state') {
     return (
-      <div key={col.element} className="flex items-center justify-between gap-3 text-xs mb-2">
-        <span className="text-gray-400 shrink-0">{col.label}</span>
+      <div key={col.element} className="rf-field-row rf-field-row--badge">
+        <span className="rf-field-row__label">{col.label}</span>
         <StateBadge state={value} />
       </div>
     );
   }
   if (col.element === 'type') {
     return (
-      <div key={col.element} className="flex items-center justify-between gap-3 text-xs mb-2">
-        <span className="text-gray-400 shrink-0">{col.label}</span>
+      <div key={col.element} className="rf-field-row rf-field-row--badge">
+        <span className="rf-field-row__label">{col.label}</span>
         <ChangeTypeBadge type={value} />
       </div>
     );
@@ -97,9 +97,9 @@ function TaskCardBodyField({
   }
 
   return (
-    <div key={col.element} className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-2 last:mb-0">
-      <span className="text-gray-400">{col.label}</span>
-      <span className="text-gray-700 break-words whitespace-pre-line">{value}</span>
+    <div key={col.element} className="rf-field-grid">
+      <span className="rf-field-row__label">{col.label}</span>
+      <span className="rf-field-row__value">{value}</span>
     </div>
   );
 }
@@ -120,7 +120,7 @@ export function TaskCard({
   const title = val(row, headerCol.element) || row.sysId;
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
+    <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
       <div className="mb-3">
         <a
           href={taskHref(config, row.sysId)}

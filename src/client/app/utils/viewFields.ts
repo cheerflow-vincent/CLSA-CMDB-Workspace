@@ -307,6 +307,52 @@ export async function fetchRecordFieldValues(
   return { values: vals, access: result.length ? 'ok' : access };
 }
 
+/** Reference / choice values retain { value, display_value } for edit controls. */
+export type EditFieldValue = string | { value: string; display_value: string };
+
+const SYS_ID_PATTERN = /^[a-f0-9]{32}$/i;
+
+function toEditFieldValue(v: unknown): EditFieldValue {
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const rawVal = o.value != null ? String(o.value) : '';
+    const dispVal = o.display_value != null ? String(o.display_value) : '';
+    if (dispVal) return { value: rawVal, display_value: dispVal };
+    if (rawVal && !SYS_ID_PATTERN.test(rawVal)) return { value: rawVal, display_value: rawVal };
+    return { value: rawVal, display_value: '' };
+  }
+  const s = String(v);
+  if (s && !SYS_ID_PATTERN.test(s)) return s;
+  return s;
+}
+
+/** Fetch raw + display values for editable fields (displayValue: all). */
+export async function fetchRecordFieldValuesForEdit(
+  table: string,
+  sysId: string,
+  elements: string[],
+): Promise<{ values: Record<string, EditFieldValue>; access: TableAccess }> {
+  if (!elements.length) return { values: {}, access: 'ok' };
+  const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
+    table,
+    query: `sys_id=${sysId}`,
+    fields: elements,
+    displayValue: 'all',
+    limit: 1,
+  });
+  if (access === 'denied') {
+    return { values: {}, access: 'denied' };
+  }
+  const rec = result?.[0] ?? {};
+  const vals: Record<string, EditFieldValue> = {};
+  for (const el of elements) {
+    if (!(el in rec)) continue;
+    vals[el] = toEditFieldValue(rec[el]);
+  }
+  return { values: vals, access: result.length ? 'ok' : access };
+}
+
 /**
  * Parse sys_ui_element stream into layout rows (ServiceNow form semantics).
  *

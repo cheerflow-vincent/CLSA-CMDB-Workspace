@@ -14,6 +14,14 @@ import {
   mockApplications, appIncidents, appChanges, appFamilies,
   type AppItem, type AppFamily,
 } from '../data/appData';
+import { useEffectiveGridList, useNarrowContainer } from '../utils/useNarrowLayout';
+import {
+  envAccent,
+  LiveInstanceCard,
+  LiveInstanceRow,
+  instanceToAppItem,
+  SVC_TABLE,
+} from './applicationInstanceViews';
 
 interface ApplicationHomeProps {
   onSelectApp: (app: AppItem) => void;
@@ -22,12 +30,6 @@ interface ApplicationHomeProps {
 interface FilterOption { label: string; value: string }
 
 // ─── Style helpers ────────────────────────────────────────────────────────────
-const envAccent: Record<string, string> = {
-  'Production':     'border-t-green-500',
-  'Non-Prod (UAT)': 'border-t-amber-400',
-  'Staging':        'border-t-blue-400',
-  'DR':             'border-t-purple-400',
-};
 const envBadge: Record<string, string> = {
   'Production':     'bg-green-100 text-green-700',
   'Non-Prod (UAT)': 'bg-amber-100 text-amber-700',
@@ -344,8 +346,6 @@ async function readHierarchyMode(): Promise<boolean> {
 }
 
 // ─── 2-level hierarchy loader ─────────────────────────────────────────────────
-/** Parent table for view-field fallback in 2-level mode (both levels are cmdb_ci_service) */
-const SVC_TABLE = 'cmdb_ci_service';
 
 // Helper: run the same query in safe-sized ID chunks to avoid HTTP 414 URI Too Long.
 // Each sys_id is 32 chars; 150 IDs ≈ 5 KB, well within any server limit.
@@ -558,158 +558,7 @@ async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<Li
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── Operational status → badge ───────────────────────────────────────────────
-// safe() mirrors str() but is used in render-time helpers
 const safe = str;
-
-function opStatusBadge(status: unknown) {
-  const s = safe(status).toLowerCase();
-  // "Operational" (3-level label) and "In Use" (2-level label) both map to operational_status=1
-  if ((s.includes('operational') && !s.includes('non')) || s === 'in use') {
-    return { cls: 'bg-green-100 text-green-700', icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
-  }
-  if (s.includes('repair') || s.includes('degraded') || s.includes('maintenance')) {
-    return { cls: 'bg-yellow-100 text-yellow-700', icon: <Clock className="w-3.5 h-3.5" /> };
-  }
-  return { cls: 'bg-red-100 text-red-700', icon: <AlertCircle className="w-3.5 h-3.5" /> };
-}
-
-// ─── Instance field row helper ────────────────────────────────────────────────
-function FieldRow({ label, value }: { label: string; value: string | undefined }) {
-  if (!value) return null;
-  return (
-    <div className="flex items-start gap-1 text-xs">
-      <span className="text-gray-400 shrink-0 w-28">{label}</span>
-      <span className="text-gray-700 font-medium break-words min-w-0">{value}</span>
-    </div>
-  );
-}
-
-// ─── Live Instance Card ───────────────────────────────────────────────────────
-function LiveInstanceCard({ inst, svcName, onViewDetails, onFlagClick }: {
-  inst: LiveInstance;
-  svcName: string;
-  onViewDetails: () => void;
-  onFlagClick: (ft: FlagType) => void;
-}) {
-  const badge = opStatusBadge(inst.operational_status);
-  const topCls = envAccent[inst.environment] ?? 'border-t-gray-300';
-  return (
-    <div className={`bg-white rounded-xl border border-gray-200 hover:shadow-md transition-all group border-t-4 ${topCls} flex flex-col`}>
-      <div className="p-5 flex-1">
-        <div className="mb-3">
-          <h3 className="text-sm font-semibold text-gray-900 leading-snug mb-0.5">{inst.name}</h3>
-          <p className="text-xs text-gray-400 truncate">{svcName}</p>
-        </div>
-
-        {/* Dynamic form-view fields (table-specific) */}
-        <div className="space-y-1.5 mb-4 border border-gray-100 rounded-lg p-3 bg-gray-50">
-          {inst.viewFields.map(f => (
-            <FieldRow key={f.element} label={f.label} value={inst.fieldValues[f.element]} />
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap mb-3">
-          <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${badge.cls}`}>
-            {badge.icon}{inst.operational_status || 'Unknown'}
-          </span>
-        </div>
-
-        {(inst.incidents > 0 || inst.changes > 0) && (
-          <div className="flex gap-2 flex-wrap">
-            {inst.incidents > 0 && (
-              <button onClick={() => onFlagClick('incident')}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 rounded text-xs border border-red-200 hover:bg-red-100 transition-colors">
-                <AlertCircle className="w-3.5 h-3.5" />{inst.incidents} Incident{inst.incidents > 1 ? 's' : ''}
-              </button>
-            )}
-            {inst.changes > 0 && (
-              <button onClick={() => onFlagClick('change')}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-50 text-yellow-700 rounded text-xs border border-yellow-200 hover:bg-yellow-100 transition-colors">
-                <Calendar className="w-3.5 h-3.5" />Upcoming Change
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50 rounded-b-xl gap-2">
-        <a
-          href={`/${inst.sys_class_name || 'cmdb_ci_service'}.do?sys_id=${inst.sys_id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
-        >
-          <ExternalLink className="w-3.5 h-3.5" /> ServiceNow
-        </a>
-        <button onClick={onViewDetails}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors group-hover:underline">
-          View Details <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Live Instance Row ────────────────────────────────────────────────────────
-function LiveInstanceRow({ inst, onViewDetails, onFlagClick }: {
-  inst: LiveInstance;
-  onViewDetails: () => void;
-  onFlagClick: (ft: FlagType) => void;
-}) {
-  const badge = opStatusBadge(inst.operational_status);
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 hover:shadow-sm transition-all px-5 py-3 flex items-center gap-5">
-      <div className={`w-1 h-12 rounded-full shrink-0 ${
-        inst.environment === 'Production' ? 'bg-green-500' :
-        inst.environment?.includes('UAT') ? 'bg-amber-400' : 'bg-blue-400'
-      }`} />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-gray-900 truncate mb-1">{inst.name}</p>
-        <div className={`grid gap-x-4 gap-y-0.5`} style={{ gridTemplateColumns: `repeat(${inst.viewFields.length}, minmax(0, 1fr))` }}>
-          {inst.viewFields.map(f => {
-            const val = inst.fieldValues[f.element];
-            return val ? (
-              <div key={f.element} className="flex flex-col min-w-0">
-                <span className="text-[10px] text-gray-400 truncate">{f.label}</span>
-                <span className="text-xs text-gray-700 truncate">{val}</span>
-              </div>
-            ) : null;
-          })}
-        </div>
-      </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${badge.cls}`}>
-          {badge.icon}{inst.operational_status || 'Unknown'}
-        </span>
-        {inst.incidents > 0 && (
-          <button onClick={() => onFlagClick('incident')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 rounded text-xs border border-red-200 hover:bg-red-100 transition-colors">
-            <AlertCircle className="w-3 h-3" />{inst.incidents}
-          </button>
-        )}
-        {inst.changes > 0 && (
-          <button onClick={() => onFlagClick('change')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-50 text-yellow-700 rounded text-xs border border-yellow-200 hover:bg-yellow-100 transition-colors">
-            <Calendar className="w-3 h-3" />CHG
-          </button>
-        )}
-        <a
-          href={`/${inst.sys_class_name || 'cmdb_ci_service'}.do?sys_id=${inst.sys_id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
-          title="Open in ServiceNow"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
-        <button onClick={onViewDetails}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium ml-1">
-          View Details <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ─── Live Service Group (2nd level) ──────────────────────────────────────────
 function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLoading }: {
@@ -1130,6 +979,8 @@ function FamilySection({ family, appGroups, viewMode, onSelectApp, onFlagClick }
 export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [cardSearch, setCardSearch]         = useState('');
   const [viewMode, setViewMode]             = useState<'grid' | 'list'>('grid');
+  const { ref: narrowRef, narrow } = useNarrowContainer();
+  const effectiveViewMode = useEffectiveGridList(viewMode, narrow);
   const [checkedEnv, setCheckedEnv]         = useState<string[]>([]);
   const [checkedStatus, setCheckedStatus]   = useState<string[]>([]);
   const [checkedBizUnit, setCheckedBizUnit] = useState<string[]>([]);
@@ -1548,7 +1399,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
             </div>
           </div>
 
-          <div className="p-6">
+          <div ref={narrowRef} className="detail-pane p-6">
 
             {/* ── Live Data Section ── */}
             <div className="mb-2">
@@ -1586,7 +1437,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 <LiveCoreAppSection
                   key={app.sys_id}
                   app={app}
-                  viewMode={viewMode}
+                  viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
                   onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
                 />
@@ -1603,7 +1454,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 <LiveAppSvcSection
                   key={appSvc.sys_id}
                   appSvc={appSvc}
-                  viewMode={viewMode}
+                  viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
                   onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
                 />

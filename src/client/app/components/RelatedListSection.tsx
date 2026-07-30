@@ -2,6 +2,7 @@ import { useState, useEffect, type ElementType } from 'react';
 import { ChevronLeft, ChevronRight, ChevronDown, Loader2, ExternalLink } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
 import { type ViewField } from '../utils/viewFields';
+import { useNarrowContainer, useResponsiveListVariant } from '../utils/useNarrowLayout';
 import {
   fetchRelatedCICount,
   fetchRelatedCIPage,
@@ -152,6 +153,66 @@ function buildCIItem(row: RelatedCIRow): CIItem {
   };
 }
 
+function RelatedCICard({
+  row,
+  columns,
+  onViewCI,
+  hoverRow,
+}: {
+  row: RelatedCIRow;
+  columns: ViewField[];
+  onViewCI?: (ci: CIItem) => void;
+  hoverRow?: string;
+}) {
+  if (!columns.length) return null;
+
+  const headerCol = columns[0];
+  const bodyCols = columns.slice(1);
+  const title = row.values[headerCol.element] || row.sysId;
+  const ciItem = buildCIItem(row);
+
+  return (
+    <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
+      <div className="mb-3">
+        {onViewCI ? (
+          <button
+            type="button"
+            onClick={() => onViewCI(ciItem)}
+            className={`text-sm font-semibold text-blue-700 hover:underline text-left break-words ${hoverRow ?? ''}`}
+          >
+            {title}
+          </button>
+        ) : (
+          <span className="text-sm font-semibold text-gray-900 break-words">{title}</span>
+        )}
+      </div>
+      {bodyCols.length > 0 && (
+        <div className="border-t border-gray-100 pt-3 space-y-1">
+          {bodyCols.map(col => {
+            if (!(col.element in row.values)) return null;
+            const value = row.values[col.element];
+            if (!value || value === '—') return null;
+            if (col.element === 'environment') {
+              return (
+                <div key={col.element} className="rf-field-row rf-field-row--badge">
+                  <span className="rf-field-row__label">{col.label}</span>
+                  <EnvBadge env={value} />
+                </div>
+              );
+            }
+            return (
+              <div key={col.element} className="rf-field-grid">
+                <span className="rf-field-row__label">{col.label}</span>
+                <span className="rf-field-row__value">{value}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function isTaskConfig(
   config: RelatedCIConfig | RelatedTaskConfig,
 ): config is RelatedTaskConfig {
@@ -221,6 +282,7 @@ export default function RelatedListSection({
   emptyMessage = 'No related records found.',
   variant = 'table',
   embedded = false,
+  responsiveLayout = true,
 }: {
   config: RelatedCIConfig | RelatedTaskConfig;
   recordSysId?: string;
@@ -238,6 +300,8 @@ export default function RelatedListSection({
   emptyMessage?: string;
   variant?: RelatedListVariant;
   embedded?: boolean;
+  /** When false, keep table/compact layout even in narrow containers (e.g. app detail sidebar). */
+  responsiveLayout?: boolean;
 }) {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
@@ -249,6 +313,10 @@ export default function RelatedListSection({
   const taskConfig = taskMode ? config : null;
   const isIncident = taskConfig?.taskClass === 'incident';
   const displayVariant = taskMode ? variant : 'table';
+  const { ref: narrowRef, narrow } = useNarrowContainer();
+  const resolvedVariant = responsiveLayout
+    ? useResponsiveListVariant(displayVariant, narrow, 'cards')
+    : displayVariant;
   const contentOpen = embedded || isOpen;
 
   useEffect(() => {
@@ -368,7 +436,7 @@ export default function RelatedListSection({
     if (!taskConfig) return null;
     const taskRows = rows as RelatedTaskRow[];
 
-    if (displayVariant === 'compact') {
+    if (resolvedVariant === 'compact') {
       return (
         <div className="divide-y divide-gray-50">
           {taskRows.map(row => (
@@ -383,9 +451,9 @@ export default function RelatedListSection({
       );
     }
 
-    if (displayVariant === 'cards') {
+    if (resolvedVariant === 'cards') {
       return (
-        <div className="p-4 grid gap-4 sm:grid-cols-2">
+        <div className="p-4 cards-grid-responsive">
           {taskRows.map(row => (
             <TaskCard
               key={row.sysId}
@@ -423,6 +491,50 @@ export default function RelatedListSection({
     );
   }
 
+  function renderCIList() {
+    const ciRows = rows as RelatedCIRow[];
+
+    if (resolvedVariant === 'cards') {
+      return (
+        <div className="p-4 cards-grid-responsive">
+          {ciRows.map(row => (
+            <RelatedCICard
+              key={row.sysId}
+              row={row}
+              columns={columns}
+              onViewCI={onViewCI}
+              hoverRow={hoverRow}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-100">
+              {columns.map(col => (
+                <th key={col.element}
+                  className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide first:pl-3">
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {ciRows.map((row, i) => (
+              <tr key={row.sysId} className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}>
+                {columns.map((col, colIdx) => renderCell(row, col, colIdx))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   const listBody = (
     <>
       {loading ? (
@@ -433,29 +545,7 @@ export default function RelatedListSection({
         <p className={`text-xs text-gray-400 italic text-center ${embedded ? 'py-10' : 'px-3 py-6'}`}>{emptyMessage}</p>
       ) : (
         <>
-          {taskMode ? renderTaskList() : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    {columns.map(col => (
-                      <th key={col.element}
-                        className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide first:pl-3">
-                        {col.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {rows.map((row, i) => (
-                    <tr key={row.sysId} className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}>
-                      {columns.map((col, colIdx) => renderCell(row, col, colIdx))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {taskMode ? renderTaskList() : renderCIList()}
 
           {showPagination && (
             <PaginationBar
@@ -478,11 +568,11 @@ export default function RelatedListSection({
   }
 
   if (embedded) {
-    return <div>{listBody}</div>;
+    return <div ref={narrowRef} className="detail-pane">{listBody}</div>;
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div ref={narrowRef} className="detail-pane bg-white rounded-lg border border-gray-200 overflow-hidden">
       <button type="button" onClick={onToggle}
         className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
         <div className={`p-1.5 ${iconBg} rounded flex-shrink-0`}>

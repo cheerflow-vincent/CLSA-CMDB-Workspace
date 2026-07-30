@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, X, ArrowRight, ChevronRight, Loader2, ExternalLink } from 'lucide-react';
+import { Search, X, ArrowRight, ChevronRight, Loader2, ExternalLink, Edit2 } from 'lucide-react';
 import { queryTable, getSysProperties, APP_SCOPE } from '../../api/servicenow';
 import { mockApplications, type AppItem } from '../data/appData';
 
@@ -10,6 +10,9 @@ interface AppSearchHeaderProps {
   mode: 'home' | 'detail';
   currentApp?: AppItem;
   onBackToHome?: () => void;
+  /** When set, shows Edit next to Open in ServiceNow (detail mode). */
+  canEditRecord?: boolean;
+  onEditRecord?: () => void;
 }
 
 interface Option {
@@ -96,7 +99,9 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackToHome }: AppSearchHeaderProps) {
+export default function AppSearchHeader({
+  onSelectApp, mode, currentApp, onBackToHome, canEditRecord, onEditRecord,
+}: AppSearchHeaderProps) {
   // true = 3-level hierarchy; false = 2-level hierarchy
   const [hierarchyMode, setHierarchyMode] = useState<boolean>(true);
 
@@ -232,14 +237,25 @@ export default function AppSearchHeader({ onSelectApp, mode, currentApp, onBackT
             </span>
           </nav>
           {currentApp?.sysId && (
-            <a
-              href={`/${currentApp.table || 'cmdb_ci_service'}.do?sys_id=${currentApp.sysId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 transition-colors"
-            >
-              <ExternalLink className="w-4 h-4" /> Open in ServiceNow
-            </a>
+            <div className="shrink-0 flex items-center gap-2">
+              {canEditRecord && onEditRecord && (
+                <button
+                  type="button"
+                  onClick={onEditRecord}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg text-sm hover:bg-blue-50 transition-colors"
+                >
+                  <Edit2 className="w-4 h-4" /> Edit
+                </button>
+              )}
+              <a
+                href={`/${currentApp.table || 'cmdb_ci_service'}.do?sys_id=${currentApp.sysId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" /> Open in ServiceNow
+              </a>
+            </div>
           )}
         </div>
       )}

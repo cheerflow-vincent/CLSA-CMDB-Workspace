@@ -1,4 +1,5 @@
 import type { TableAccess } from '../../api/servicenow';
+import type { FieldAccessEntry, FieldAccessResponse } from '../../api/servicenow';
 import type { ViewField, FormSectionLayout, FormLayoutRow } from './viewFields';
 
 export type { TableAccess };
@@ -75,6 +76,38 @@ export function filterFormSections(
           }
           const left = row.left.filter(f => f.element in values);
           const right = row.right.filter(f => f.element in values);
+          if (!left.length && !right.length) return null;
+          return { kind: 'columns', left, right };
+        })
+        .filter((row): row is FormLayoutRow => row !== null),
+    }))
+    .filter(sec => sec.rows.length > 0);
+}
+
+/** True when the REST field_access probe grants record-level write. */
+export function canEditRecord(access: FieldAccessResponse | null | undefined): boolean {
+  return access?.canWriteRecord === true;
+}
+
+/** Drop unreadable fields; keep readable but non-writable fields for read-only edit rows. */
+export function filterFormSectionsForEdit(
+  sections: FormSectionLayout[],
+  accessMap: Record<string, FieldAccessEntry>,
+  values?: Record<string, unknown>,
+): FormSectionLayout[] {
+  const readable = (el: string) =>
+    accessMap[el]?.read === true || (values != null && el in values);
+
+  return sections
+    .map(sec => ({
+      ...sec,
+      rows: sec.rows
+        .map((row): FormLayoutRow | null => {
+          if (row.kind === 'full') {
+            return readable(row.field.element) ? row : null;
+          }
+          const left = row.left.filter(f => readable(f.element));
+          const right = row.right.filter(f => readable(f.element));
           if (!left.length && !right.length) return null;
           return { kind: 'columns', left, right };
         })

@@ -9,6 +9,22 @@ declare global {
                         table: 'sys_module'
                         id: '6c04a20d6676451f84a69aaf721b78f8'
                     }
+                    'field-access-param-fields': {
+                        table: 'sys_ws_query_parameter'
+                        id: '4fcd676a067b4baab5f10115b5db1e5b'
+                    }
+                    'field-access-param-sys-id': {
+                        table: 'sys_ws_query_parameter'
+                        id: 'c430245e88ac4438a87c9b05f9f0f120'
+                    }
+                    'field-access-param-table': {
+                        table: 'sys_ws_query_parameter'
+                        id: '82ea99fec5e64848a9183e029e4c6fee'
+                    }
+                    'field-access-route': {
+                        table: 'sys_ws_operation'
+                        id: '0501f1a415b84bcf95657933e17ef0fe'
+                    }
                     'node_modules/@xyflow/react/dist/style.css': {
                         table: 'sys_ux_theme_asset'
                         id: '230518c067474df3915ea3148ed90e7f'
@@ -16,6 +32,10 @@ declare global {
                     package_json: {
                         table: 'sys_module'
                         id: '555d9b4bb51e4be4b47e7529d4b0a91a'
+                    }
+                    'portal-rest-api': {
+                        table: 'sys_ws_definition'
+                        id: '1127096dc55c4a5a98df6f7770ceb78b'
                     }
                     'tailwind.css': {
                         table: 'sys_ux_theme_asset'
@@ -88,6 +108,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '7851a1c263b64c6f83649f01312e587a'
+                        key: {
+                            web_service_operation: '0501f1a415b84bcf95657933e17ef0fe'
+                            web_service_query_parameter: '82ea99fec5e64848a9183e029e4c6fee'
+                        }
+                    },
+                    {
                         table: 'sn_glider_source_artifact_m2m'
                         id: '84d40fa54e25459c839f6c58c714ab32'
                         deleted: true
@@ -147,6 +175,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_ws_query_parameter_map'
+                        id: 'c254e1a494694e789e48aea3619e235d'
+                        key: {
+                            web_service_operation: '0501f1a415b84bcf95657933e17ef0fe'
+                            web_service_query_parameter: 'c430245e88ac4438a87c9b05f9f0f120'
+                        }
+                    },
+                    {
                         table: 'sn_glider_source_artifact_m2m'
                         id: 'c37c1d26dd214b4ba18f4891bf3c10b3'
                         deleted: true
@@ -169,6 +205,14 @@ declare global {
                         deleted: true
                         key: {
                             name: 'x_citi4_clsa_cmd_0/vendor-lucide-react--3e815e09'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: 'efb662b03c9e480c82e86e1eaeb99a12'
+                        key: {
+                            web_service_operation: '0501f1a415b84bcf95657933e17ef0fe'
+                            web_service_query_parameter: '4fcd676a067b4baab5f10115b5db1e5b'
                         }
                     },
                     {

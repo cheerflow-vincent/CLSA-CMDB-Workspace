@@ -77,8 +77,8 @@ function BodyField({
   if (isBadgeElement(col.element)) {
     const badgeTone = healthStatusTone(value);
     return (
-      <div key={col.element} className="flex items-center justify-between gap-3 text-xs mb-2">
-        <span className="text-gray-400 shrink-0">{col.label}</span>
+      <div key={col.element} className="rf-field-row rf-field-row--badge">
+        <span className="rf-field-row__label">{col.label}</span>
         <span className={`inline-flex text-[10px] font-medium px-2 py-0.5 rounded-full ${statusBadgeClass(badgeTone)}`}>
           {value}
         </span>
@@ -87,9 +87,9 @@ function BodyField({
   }
 
   return (
-    <div key={col.element} className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-2 last:mb-0">
-      <span className="text-gray-400">{col.label}</span>
-      <span className="text-gray-700 break-words whitespace-pre-line">{value}</span>
+    <div key={col.element} className="rf-field-grid">
+      <span className="rf-field-row__label">{col.label}</span>
+      <span className="rf-field-row__value">{value}</span>
     </div>
   );
 }
@@ -109,7 +109,7 @@ function HealthResultCard({
   const tone = resolveTone(row, columns);
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white flex flex-col">
+    <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white flex flex-col">
       <div className="mb-3">
         <a
           href={healthRecordUrl(row.sysId)}
@@ -212,7 +212,7 @@ export default function HealthResultsPanel({
 
   return (
     <div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="cards-grid-responsive">
         {rows.map(row => (
           <HealthResultCard key={row.sysId} row={row} columns={columns} />
         ))}

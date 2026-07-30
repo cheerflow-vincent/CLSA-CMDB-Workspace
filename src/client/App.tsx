@@ -362,6 +362,7 @@ export function App() {
                 onSelectApp={handleSelectApp}
                 fromApp={ciSource === 'app-details' ? selectedApp : null}
                 hierarchyMode={hierarchyMode}
+                sidebarCollapsed={sidebarCollapsed}
               />
             )}
             {currentView === 'dashboard' && <DashboardView />}

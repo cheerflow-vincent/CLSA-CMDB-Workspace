@@ -9,6 +9,7 @@ import type { CIItem } from './CIDetailView';
 import { queryTable, queryTableWithAccess, getCIFilter, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
 import { loadListFields, raw, str, type ViewField } from '../utils/viewFields';
 import { filterColumnsByRecords, isAccessDenied } from '../utils/acl';
+import { useNarrowContainer } from '../utils/useNarrowLayout';
 
 const PROP_CI_SEARCH_FIELDS = `${APP_SCOPE}.ci.search.filter.table.field`;
 const DEFAULT_SEARCH_FIELDS = ['name'];
@@ -561,6 +562,62 @@ function buildSnQuery(keyword: string, ciFilter: string, searchFields: string[])
   return `${likeGroup}^${ciFilter}`;
 }
 
+function SearchResultCard({
+  row,
+  columns,
+  onViewDetails,
+}: {
+  row: SearchRow;
+  columns: ViewField[];
+  onViewDetails: (ci: CIItem) => void;
+}) {
+  if (!columns.length) return null;
+
+  const headerCol = columns[0];
+  const bodyCols = columns.slice(1);
+  const title = row.values[headerCol.element] || row.sysId;
+
+  return (
+    <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
+      <div className="mb-3">
+        <button
+          type="button"
+          onClick={() => onViewDetails(buildCIItem(row))}
+          title="View CI details"
+          className="text-sm font-semibold text-gray-900 hover:text-blue-700 hover:underline text-left break-words"
+        >
+          {title}
+        </button>
+        <a
+          href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-1"
+          title="Open in ServiceNow"
+        >
+          <ExternalLink className="w-3 h-3" />
+          Open in ServiceNow
+        </a>
+      </div>
+      {bodyCols.length > 0 && (
+        <div className="border-t border-gray-100 pt-3 space-y-1">
+          {bodyCols.map(col => {
+            if (!(col.element in row.values)) return null;
+            const value = row.values[col.element];
+            if (!value || value === '—') return null;
+            return (
+              <div key={col.element} className="rf-field-grid">
+                <span className="rf-field-row__label">{col.label}</span>
+                <span className="rf-field-row__value">{value}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function CISearchView({ onViewDetails }: CISearchViewProps) {
   const [activeTab, setActiveTab] = useState<Tab>('all');
@@ -582,6 +639,7 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
   const [allLoading, setAllLoading] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const { ref: narrowRef, narrow } = useNarrowContainer(720);
   const [ciFilter, setCiFilter]     = useState<string | null>(null);
   const [searchFields, setSearchFields] = useState<string[]>(DEFAULT_SEARCH_FIELDS);
   const columnsCache = useRef<Map<string, ViewField[]>>(new Map());
@@ -958,8 +1016,8 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
         </p>
       </div>
 
-      {/* Tabs + Table */}
-      <div className="bg-white rounded-lg border border-gray-200">
+      {/* Tabs + Results */}
+      <div ref={narrowRef} className="detail-pane bg-white rounded-lg border border-gray-200">
         {/* Tabs */}
         <div className="border-b border-gray-200 px-6">
           <div className="flex gap-6 overflow-x-auto">
@@ -997,7 +1055,30 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
           />
         </div>
 
-        {/* Table */}
+        {/* Results */}
+        {narrow ? (
+          <div className="px-6 pb-4 cards-grid-responsive">
+            {loading ? (
+              <div className="col-span-full flex items-center justify-center gap-2 py-12 text-gray-400 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                Loading records…
+              </div>
+            ) : displayRows.length === 0 ? (
+              <p className="col-span-full text-center text-gray-400 text-sm py-12">
+                No records found. Try adjusting your filters and click Search.
+              </p>
+            ) : (
+              displayRows.map(row => (
+                <SearchResultCard
+                  key={row.sysId}
+                  row={row}
+                  columns={columns}
+                  onViewDetails={onViewDetails}
+                />
+              ))
+            )}
+          </div>
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-y border-gray-200">
@@ -1063,6 +1144,7 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
             </tbody>
           </table>
         </div>
+        )}
 
         {/* Pagination */}
         <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">

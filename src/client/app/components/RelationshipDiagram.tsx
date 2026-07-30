@@ -68,6 +68,7 @@ const COL_X_GAP      = 190;  // horizontal px between sub-columns (wider than NW
 const MIN_ROW_SPACING = 70;  // minimum px between node centres (keeps a visible gap at NH=54)
 const MAX_BI_PER_ROW  = 6;   // bidirectional nodes per horizontal row
 const BI_ROW_Y_GAP    = 85;  // vertical gap between bidir rows
+const BI_Y_OFFSET     = 220; // distance above center node for first bidir row
 
 const IMP_TYPE  = 'impacts::impacted by';
 const RDF_TYPE  = 'Receives data from::Sends data to';
@@ -391,7 +392,7 @@ function buildDiagram(
     const svcType     = classToServiceType(ci.sysClass);
     const maxLvls     = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth);
     const curLvl      = expandedLevels[ci.sysId] ?? 0;
-    const pos         = { x: biStartX + col * biSpacing, y: CY + 220 + row * BI_ROW_Y_GAP };
+    const pos         = { x: biStartX + col * biSpacing, y: CY - BI_Y_OFFSET - row * BI_ROW_Y_GAP };
     const l1Info      = { direction: ci.direction as Direction, svcType };
 
     placedIds.add(ci.sysId);
