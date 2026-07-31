@@ -1,3 +1,6 @@
 import '@servicenow/sdk/global'
 export * from './ui-pages/cmdb-portal.now'
 export * from './rest-apis/portal.now'
+export * from './tables/relationship-change.now'
+export * from './script-includes/relationship-change-handler.now'
+export * from './script-includes/relationship-approval-handler.now'

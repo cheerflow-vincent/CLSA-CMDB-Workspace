@@ -20,6 +20,8 @@ const MERGE_CAP = 500;
 
 interface CISearchViewProps {
   onViewDetails: (ci: CIItem) => void;
+  /** Pre-select a CI type card/tab (e.g. from sidebar inventory). */
+  initialTab?: Tab;
 }
 
 type Tab = 'all' | 'servers' | 'switches' | 'databases' | 'circuits';
@@ -619,8 +621,8 @@ function SearchResultCard({
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function CISearchView({ onViewDetails }: CISearchViewProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('all');
+export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISearchViewProps) {
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [pending, setPending]     = useState<PendingFilters>(emptyPending());
   const [applied, setApplied]     = useState<PendingFilters>(emptyPending());
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
@@ -643,6 +645,10 @@ export default function CISearchView({ onViewDetails }: CISearchViewProps) {
   const [ciFilter, setCiFilter]     = useState<string | null>(null);
   const [searchFields, setSearchFields] = useState<string[]>(DEFAULT_SEARCH_FIELDS);
   const columnsCache = useRef<Map<string, ViewField[]>>(new Map());
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   const getColumns = useCallback(async (table: string, defaults: ViewField[]) => {
     const cached = columnsCache.current.get(table);

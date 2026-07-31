@@ -1,20 +1,27 @@
 import { useState, useEffect } from 'react';
 import {
   Server, Database, CircuitBoard, Network, Layout,
-  Search, ChevronRight, ChevronLeft, Menu, Loader2,
-  FileSearch, Home, ArrowLeft,
+  Search, ChevronRight, ChevronLeft, Loader2,
+  FileSearch, Home, ArrowLeft, Clock,
 } from 'lucide-react';
 import CISearchView from './app/components/CISearchView';
 import ApplicationHome from './app/components/ApplicationHome';
 import ApplicationDetails from './app/components/ApplicationDetails';
+import RelationshipApprovalsView from './app/components/RelationshipApprovalsView';
 import CIDetailView, { type CIItem } from './app/components/CIDetailView';
 import GlobalSearchBar from './app/components/GlobalSearchBar';
 import { type AppItem } from './app/data/appData';
 import { queryTable, getSysProperties, APP_SCOPE } from './api/servicenow';
 import { str, raw } from './app/utils/viewFields';
 import { readRecordUrlParams, stampRecordHistory, isCmdbTableName } from './app/utils/routing';
+import {
+  CI_INVENTORY_TABS,
+  readCISearchTabFromUrl,
+  type CISearchTab,
+  type CISearchInventoryTab,
+} from './app/utils/ciSearchTabs';
 
-type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' | 'dashboard' | 'network-links' | 'not-found';
+type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' | 'not-found' | 'rel-approvals';
 
 // ── URL / routing helpers ─────────────────────────────────────────────────────
 
@@ -22,10 +29,12 @@ type View = 'loading' | 'ci-search' | 'app-home' | 'app-details' | 'ci-detail' |
 const VIEW_TO_PAGE: Partial<Record<View, string>> = {
   'app-home':  'app',
   'ci-search': 'ci',
+  'rel-approvals': 'rel-approvals',
 };
 const PAGE_TO_VIEW: Record<string, View> = {
   app: 'app-home',
   ci:  'ci-search',
+  'rel-approvals': 'rel-approvals',
 };
 
 const HIERARCHY_PROP = `${APP_SCOPE}.enable.new.app.hierarchy`;
@@ -53,15 +62,27 @@ function pushUrl(table: string, sysId: string, ciSource: 'ci-search' | 'app-deta
 }
 
 /** Navigate to a home/sidebar view — uses pushState so back button works. */
-function pushPageUrl(view: View) {
+function pushPageUrl(view: View, ciTab?: CISearchTab) {
   const url = new URL(window.location.href);
   url.searchParams.delete('table');
   url.searchParams.delete('sys_id');
   const page = VIEW_TO_PAGE[view];
   if (page) url.searchParams.set('page', page);
   else url.searchParams.delete('page');
-  window.history.pushState({ view }, '', url.toString());
+  if (view === 'ci-search' && ciTab && ciTab !== 'all') {
+    url.searchParams.set('tab', ciTab);
+  } else {
+    url.searchParams.delete('tab');
+  }
+  window.history.pushState({ view, ciTab: ciTab ?? 'all' }, '', url.toString());
 }
+
+const INVENTORY_ICONS: Record<CISearchInventoryTab, React.ElementType> = {
+  servers: Server,
+  switches: Network,
+  databases: Database,
+  circuits: CircuitBoard,
+};
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -79,6 +100,7 @@ export function App() {
   const [ciSource, setCISource]       = useState<'ci-search' | 'app-details'>('ci-search');
   const [notFoundCtx, setNotFoundCtx] = useState<{ table: string; sysId: string } | null>(null);
   // true = 3-level hierarchy (default); false = 2-level hierarchy
+  const [ciSearchTab, setCiSearchTab] = useState<CISearchTab>(() => readCISearchTabFromUrl());
   const [hierarchyMode, setHierarchyMode] = useState<boolean>(true);
 
   useEffect(() => {
@@ -162,7 +184,9 @@ export function App() {
     const params = readRecordUrlParams();
     if (!params) {
       const view = readPageParam() ?? 'ci-search';
-      window.history.replaceState({ view }, '', window.location.href);
+      const ciTab = view === 'ci-search' ? readCISearchTabFromUrl() : 'all';
+      setCiSearchTab(ciTab);
+      window.history.replaceState({ view, ciTab }, '', window.location.href);
       return;
     }
     stampRecordHistory(params.table, params.sysId, { ciSource: 'ci-search' });
@@ -187,7 +211,7 @@ export function App() {
   // ── Browser back / forward ────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: PopStateEvent) => {
-      type HistState = { table?: string; sysId?: string; ciSource?: string; view?: string } | null;
+      type HistState = { table?: string; sysId?: string; ciSource?: string; view?: string; ciTab?: CISearchTab } | null;
       const state = e.state as HistState;
 
       // After navigation the URL already reflects the target; use it first,
@@ -198,8 +222,12 @@ export function App() {
       const ciSrc   = (state?.ciSource ?? 'ci-search') as 'ci-search' | 'app-details';
 
       if (!table || !sysId) {
-        // No record params → check ?page=, then fall back to state.view
-        setCurrentView(readPageParam() ?? (state?.view as View) ?? 'ci-search');
+        const view = readPageParam() ?? (state?.view as View) ?? 'ci-search';
+        const ciTab = view === 'ci-search'
+          ? (state?.ciTab as CISearchTab | undefined) ?? readCISearchTabFromUrl()
+          : 'all';
+        setCiSearchTab(ciTab);
+        setCurrentView(view);
         return;
       }
 
@@ -233,17 +261,25 @@ export function App() {
 
   // Sidebar navigation pushes a new history entry so the back button works
   // and each home page gets its own URL (?page=app / ?page=ci).
-  const navTo = (view: View) => {
+  const navTo = (view: View, ciTab: CISearchTab = 'all') => {
+    if (view === 'ci-search') setCiSearchTab(ciTab);
     setCurrentView(view);
-    pushPageUrl(view);
+    pushPageUrl(view, ciTab);
   };
 
-  // ── Sidebar nav item ──────────────────────────────────────────────────────
-  const navItem = (view: View, label: string, Icon: React.ElementType) => {
-    const active = currentView === view;
+  const navToInventory = (tab: CISearchInventoryTab) => {
+    navTo('ci-search', tab);
+  };
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const navItem = (view: View, label: string, Icon: React.ElementType, ciTab: CISearchTab = 'all') => {
+    const active = currentView === view && (view !== 'ci-search' || ciSearchTab === ciTab);
     return (
       <button
-        onClick={() => navTo(view)}
+        type="button"
+        onClick={() => navTo(view, ciTab)}
+        title={label}
         className={`w-full flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors ${
           active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
         }`}
@@ -254,7 +290,24 @@ export function App() {
     );
   };
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const inventoryItem = (tab: CISearchInventoryTab, label: string) => {
+    const Icon = INVENTORY_ICONS[tab];
+    const active = currentView === 'ci-search' && ciSearchTab === tab;
+    return (
+      <button
+        key={tab}
+        type="button"
+        onClick={() => navToInventory(tab)}
+        title={label}
+        className={`w-full flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors ${
+          active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+        }`}
+      >
+        <Icon className="w-5 h-5 shrink-0" />
+        {!sidebarCollapsed && <span>{label}</span>}
+      </button>
+    );
+  };
 
   return (
     <div className="size-full flex flex-col bg-gray-50 h-screen overflow-hidden">
@@ -303,30 +356,15 @@ export function App() {
             </button>
           </div>
           <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-            {navItem('app-home',      'Application Mapping', Layout)}
-            {navItem('ci-search',     'CI Search',           Search)}
-            {navItem('dashboard',     'Dashboard',           Layout)}
-            {navItem('network-links', 'Network Links',       Network)}
-            {!sidebarCollapsed && (
-              <>
-                <div className="pt-4 pb-2">
-                  <span className="text-xs font-semibold text-gray-500 uppercase px-3">Inventory</span>
-                </div>
-                {[
-                  ['Appliances',      Menu],
-                  ['Circuits',        CircuitBoard],
-                  ['Databases',       Database],
-                  ['Network Devices', Network],
-                  ['Servers',         Server],
-                ].map(([label, Icon]) => (
-                  <button key={label as string} className="w-full flex items-center gap-3 px-3 py-2 rounded text-gray-700 hover:bg-gray-100 text-sm">
-                    {/* @ts-ignore */}
-                    <Icon className="w-5 h-5 shrink-0" />
-                    <span>{label as string}</span>
-                  </button>
-                ))}
-              </>
-            )}
+            {navItem('app-home', 'Application Mapping', Layout)}
+            {navItem('ci-search', 'CI Search', Search)}
+            {navItem('rel-approvals', 'Relationship Approvals', Clock)}
+            <div className={`pt-4 pb-2 ${sidebarCollapsed ? 'px-0' : ''}`}>
+              {!sidebarCollapsed && (
+                <span className="text-xs font-semibold text-gray-500 uppercase px-3">Inventory</span>
+              )}
+            </div>
+            {CI_INVENTORY_TABS.map(({ tab, label }) => inventoryItem(tab, label))}
           </nav>
         </aside>
 
@@ -341,14 +379,21 @@ export function App() {
             )}
 
             {currentView === 'ci-search' && (
-              <CISearchView onViewDetails={(ci) => handleViewCI(ci, 'ci-search')} />
+              <CISearchView
+                initialTab={ciSearchTab}
+                onViewDetails={(ci) => handleViewCI(ci, 'ci-search')}
+              />
             )}
             {currentView === 'app-home' && (
               <ApplicationHome onSelectApp={handleSelectApp} />
             )}
+            {currentView === 'rel-approvals' && (
+              <RelationshipApprovalsView />
+            )}
             {currentView === 'app-details' && (
               <ApplicationDetails
                 selectedApp={selectedApp}
+                hierarchyMode={hierarchyMode}
                 onSelectApp={handleSelectApp}
                 onViewCI={(ci) => handleViewCI(ci, 'app-details')}
                 onBack={handleBack}
@@ -364,10 +409,6 @@ export function App() {
                 hierarchyMode={hierarchyMode}
                 sidebarCollapsed={sidebarCollapsed}
               />
-            )}
-            {currentView === 'dashboard' && <DashboardView />}
-            {currentView === 'network-links' && (
-              <div className="p-6 text-gray-500 text-sm">Network Links — coming soon.</div>
             )}
             {currentView === 'not-found' && (
               <NotFoundView
@@ -429,36 +470,6 @@ function NotFoundView({ table, sysId, onGoHome, onGoSearch }: {
             CI Search
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Inline dashboard ──────────────────────────────────────────────────────────
-function DashboardView() {
-  return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Overview of CMDB configuration items</p>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Servers',   count: '1,240', Icon: Server,       bg: 'bg-blue-100',   ic: 'text-blue-600'   },
-          { label: 'Switches',  count: '385',   Icon: Network,      bg: 'bg-green-100',  ic: 'text-green-600'  },
-          { label: 'Databases', count: '452',   Icon: Database,     bg: 'bg-purple-100', ic: 'text-purple-600' },
-          { label: 'Circuits',  count: '98',    Icon: CircuitBoard, bg: 'bg-orange-100', ic: 'text-orange-600' },
-        ].map(({ label, count, Icon, bg, ic }) => (
-          <div key={label} className="bg-white rounded-lg border border-gray-200 p-6">
-            <div className="flex items-center gap-4">
-              <div className={`p-3 ${bg} rounded-lg`}><Icon className={`w-6 h-6 ${ic}`} /></div>
-              <div>
-                <p className="text-3xl font-semibold text-gray-900">{count}</p>
-                <p className="text-sm text-gray-600">{label}</p>
-              </div>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );

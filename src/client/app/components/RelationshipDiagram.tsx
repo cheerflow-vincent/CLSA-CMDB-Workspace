@@ -26,6 +26,7 @@ import {
   ArrowUp, ArrowDown, ArrowLeftRight, Loader2, Network, ExternalLink,
 } from 'lucide-react';
 import { queryTable, getSysProperties } from '../../api/servicenow';
+import { loadAppRelationshipPeers, type RelCIPeer } from '../utils/appRelationships';
 import type { AppItem } from '../data/appData';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -81,6 +82,10 @@ interface RelCI {
   direction: Direction;
 }
 
+function peerToRelCI(peer: RelCIPeer): RelCI {
+  return { sysId: peer.sysId, name: peer.name, sysClass: peer.sysClass, direction: peer.direction };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sn = (v: unknown): string => {
   if (!v) return '';
@@ -106,43 +111,8 @@ function getSubtreeDepth(nodeId: string, cm: Map<string, RelCI[]>, maxRemaining:
 
 // ─── CMDB fetch — L1 (direct relations of center) ────────────────────────────
 async function fetchRelationships(sysId: string): Promise<RelCI[]> {
-  const TYPE_Q = `type.nameIN${IMP_TYPE},${RDF_TYPE}`;
-  const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
-    queryTable<Record<string, unknown>>({
-      table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^parent.sys_id=${sysId}`,
-      fields: ['child.sys_id', 'child.name', 'child.sys_class_name'],
-      limit: 300,
-    }),
-    queryTable<Record<string, unknown>>({
-      table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^child.sys_id=${sysId}`,
-      fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name'],
-      limit: 300,
-    }),
-  ]);
-
-  const upSet = new Set<string>();
-  const dnSet = new Set<string>();
-  const ciMap = new Map<string, { name: string; cls: string }>();
-
-  for (const r of asParent) {
-    const id = sn(r['child.sys_id']);
-    if (!id || id === sysId) continue;
-    ciMap.set(id, { name: sn(r['child.name']), cls: sn(r['child.sys_class_name']) });
-    dnSet.add(id);
-  }
-  for (const r of asChild) {
-    const id = sn(r['parent.sys_id']);
-    if (!id || id === sysId) continue;
-    ciMap.set(id, { name: sn(r['parent.name']), cls: sn(r['parent.sys_class_name']) });
-    upSet.add(id);
-  }
-
-  return [...ciMap.entries()].map(([id, { name, cls }]) => ({
-    sysId: id, name, sysClass: cls,
-    direction: upSet.has(id) && dnSet.has(id) ? 'bidirectional' : upSet.has(id) ? 'upstream' : 'downstream',
-  }));
+  const peers = await loadAppRelationshipPeers(sysId);
+  return peers.map(peerToRelCI);
 }
 
 // ─── CMDB fetch — children of multiple nodes (one hop each) ──────────────────

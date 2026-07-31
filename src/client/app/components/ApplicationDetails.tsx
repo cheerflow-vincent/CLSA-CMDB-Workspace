@@ -6,7 +6,8 @@ import {
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE } from './RelationshipDiagram';
 import type { DiagramFilters } from './RelationshipDiagram';
 import RelationshipTable from './RelationshipTable';
-import EditRelationshipModal from './EditRelationshipModal';
+import EditRelationshipModal, { type RelationshipMutation } from './EditRelationshipModal';
+import RelationshipChangesList from './RelationshipChangesList';
 import RecordEditDialog from './recordEdit/RecordEditDialog';
 import AppSearchHeader from './AppSearchHeader';
 import { type AppItem } from '../data/appData';
@@ -24,6 +25,7 @@ import {
 import RelatedListSection from './RelatedListSection';
 import { queryTableWithAccess, fetchFieldAccess, type TableAccess } from '../../api/servicenow';
 import { filterFieldsByReadableKeys, isAccessDenied, canEditRecord } from '../utils/acl';
+import { pollChangeUntilState } from '../utils/pollRelationshipChange';
 
 const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
 const OVERVIEW_DEFAULT_LIMIT = 10;
@@ -62,16 +64,20 @@ interface ApplicationDetailsProps {
   onSelectApp: (app: AppItem) => void;
   onViewCI?: (ci: CIItem) => void;
   selectedApp?: AppItem | null;
+  hierarchyMode?: boolean;
 }
 
 type ViewMode = 'map' | 'table';
-type ExpandKey = 'servers' | 'databases' | 'netgear' | 'incidents' | 'changes';
+type ExpandKey = 'servers' | 'databases' | 'netgear' | 'incidents' | 'changes' | 'relChanges';
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp }: ApplicationDetailsProps) {
+export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp, hierarchyMode = true }: ApplicationDetailsProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [relRefreshKey, setRelRefreshKey] = useState(0);
+  const [diagramRefreshKey, setDiagramRefreshKey] = useState(0);
+  const [processingChangeIds, setProcessingChangeIds] = useState<string[]>([]);
   const [showRecordEditModal, setShowRecordEditModal] = useState(false);
   const [canWriteRecord, setCanWriteRecord] = useState(false);
   const [overviewRefresh, setOverviewRefresh] = useState(0);
@@ -81,7 +87,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     platform: true, infrastructure: true, business: true,
   });
   const [expanded, setExpanded] = useState<Record<ExpandKey, boolean>>({
-    servers: false, databases: false, netgear: false, incidents: false, changes: false,
+    servers: false, databases: false, netgear: false, incidents: false, changes: false, relChanges: false,
   });
 
   // ── Overview panel: dynamic view fields ──────────────────────────────────
@@ -119,6 +125,32 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
   const toggleExpand = (key: ExpandKey) =>
     setExpanded(e => ({ ...e, [key]: !e[key] }));
+
+  const refreshRelationships = (refreshDiagram = true) => {
+    setRelRefreshKey(n => n + 1);
+    if (refreshDiagram) setDiagramRefreshKey(n => n + 1);
+  };
+
+  const handleRelationshipMutations = async (mutations: RelationshipMutation[]) => {
+    const appSysId = selectedApp?.sysId;
+    if (!appSysId || mutations.length === 0) return;
+
+    setExpanded(prev => ({ ...prev, relChanges: true }));
+    setProcessingChangeIds(mutations.map(m => m.changeSysId));
+
+    let refreshDiagram = false;
+    for (const mutation of mutations) {
+      if (mutation.action === 'create') {
+        await pollChangeUntilState(appSysId, mutation.changeSysId, 'completed');
+        refreshDiagram = true;
+      } else {
+        await pollChangeUntilState(appSysId, mutation.changeSysId, 'pending_approval');
+      }
+    }
+
+    setProcessingChangeIds([]);
+    refreshRelationships(refreshDiagram);
+  };
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -248,7 +280,14 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
           {/* ── Canvas / table — fills all remaining height ── */}
           {viewMode === 'map' ? (
             <div className="flex-1 min-h-0">
-              <RelationshipDiagram filters={filters} nodeSearch={nodeSearch} onEditRelationship={() => setShowEditModal(true)} selectedApp={selectedApp} onSelectApp={onSelectApp} />
+              <RelationshipDiagram
+                key={diagramRefreshKey}
+                filters={filters}
+                nodeSearch={nodeSearch}
+                onEditRelationship={() => setShowEditModal(true)}
+                selectedApp={selectedApp}
+                onSelectApp={onSelectApp}
+              />
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-5">
@@ -367,6 +406,20 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                     </div>
                   </section>
 
+                  {/* ── Relationship Changes ── */}
+                  <section>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Relationships</p>
+                    <RelationshipChangesList
+                      appSysId={selectedApp?.sysId}
+                      appName={selectedApp?.name}
+                      isOpen={expanded.relChanges}
+                      onToggle={() => toggleExpand('relChanges')}
+                      refreshKey={relRefreshKey}
+                      processingChangeIds={processingChangeIds}
+                      onChanged={opts => refreshRelationships(opts?.refreshDiagram ?? true)}
+                    />
+                  </section>
+
                   {/* ── Active Flags ── */}
                   <section>
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Active Flags</p>
@@ -423,7 +476,14 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
       </div>
 
-      {showEditModal && <EditRelationshipModal onClose={() => setShowEditModal(false)} />}
+      {showEditModal && selectedApp?.sysId && (
+        <EditRelationshipModal
+          selectedApp={{ sysId: selectedApp.sysId, name: selectedApp.name }}
+          hierarchyMode={hierarchyMode}
+          onClose={() => setShowEditModal(false)}
+          onSubmitted={handleRelationshipMutations}
+        />
+      )}
       {showRecordEditModal && selectedApp?.sysId && (
         <RecordEditDialog
           title="Edit Application"

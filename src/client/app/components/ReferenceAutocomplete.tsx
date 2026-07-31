@@ -18,6 +18,8 @@ function inputShellClass(disabled: boolean, focused: boolean): string {
 export interface ReferenceAutocompleteProps {
   label: string;
   referenceTable: string;
+  /** Additional encoded query filters prepended to every search (e.g. u_service_type=instance). */
+  referenceQuery?: string;
   value: EditFieldValue;
   disabled?: boolean;
   onChange: (value: EditFieldValue) => void;
@@ -26,6 +28,7 @@ export interface ReferenceAutocompleteProps {
 export default function ReferenceAutocomplete({
   label,
   referenceTable,
+  referenceQuery = '',
   value,
   disabled = false,
   onChange,
@@ -90,12 +93,12 @@ export default function ReferenceAutocomplete({
     }
     setLoading(true);
     debounceRef.current = setTimeout(() => {
-      searchReferenceTable(referenceTable, text)
+      searchReferenceTable(referenceTable, text, 15, referenceQuery)
         .then(setOptions)
         .catch(() => setOptions([]))
         .finally(() => setLoading(false));
     }, 280);
-  }, [referenceTable]);
+  }, [referenceTable, referenceQuery]);
 
   useEffect(() => () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);

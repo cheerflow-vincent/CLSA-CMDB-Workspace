@@ -378,11 +378,21 @@ async function queryReferenceRows(
   })).filter(o => o.sys_id)
 }
 
+/** Append a fixed filter query before a search-specific query segment. */
+function combineReferenceQuery(extraQuery: string, searchQuery: string): string {
+  const extra = extraQuery.trim();
+  const search = searchQuery.trim();
+  if (!extra) return search;
+  if (!search) return extra;
+  return `${extra}^${search}`;
+}
+
 /** Search a referenced table by display name for autocomplete. */
 export async function searchReferenceTable(
   table: string,
   searchText: string,
   limit = 15,
+  extraQuery = '',
 ): Promise<ReferenceOption[]> {
   const q = searchText.trim()
   if (!table || q.length < 1) return []
@@ -393,7 +403,7 @@ export async function searchReferenceTable(
 
     let rows = await queryReferenceRows(
       table,
-      `${displayField}LIKE${escaped}^ORDERBY${displayField}`,
+      combineReferenceQuery(extraQuery, `${displayField}LIKE${escaped}^ORDERBY${displayField}`),
       displayField,
       limit,
     )
@@ -401,7 +411,7 @@ export async function searchReferenceTable(
     if (!rows.length && displayField !== 'name') {
       rows = await queryReferenceRows(
         table,
-        `nameLIKE${escaped}^ORDERBYname`,
+        combineReferenceQuery(extraQuery, `nameLIKE${escaped}^ORDERBYname`),
         'name',
         limit,
       )
@@ -410,7 +420,7 @@ export async function searchReferenceTable(
     if (!rows.length) {
       rows = await queryReferenceRows(
         table,
-        `123TEXTQUERY321=${escaped}`,
+        combineReferenceQuery(extraQuery, `123TEXTQUERY321=${escaped}`),
         displayField,
         limit,
       )
@@ -449,5 +459,229 @@ export async function resolveReferenceList(
     return ids.map(id => ({ sys_id: id, display: byId.get(id) || id }))
   } catch {
     return ids.map(id => ({ sys_id: id, display: id }))
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scripted REST — relationship change
+// ──────────────────────────────────────────────────────────────────────────────
+
+export type RelationshipChangeAction = 'create' | 'delete';
+export type RelationshipChangeState = 'pending_approval' | 'completed' | 'rejected' | 'cancelled';
+export type RelationshipApprovalDecision = 'approve' | 'reject';
+
+export interface RelationshipChangeRequest {
+  sys_id: string;
+  action: RelationshipChangeAction;
+  state: RelationshipChangeState;
+  relationship_sys_id: string;
+  rel_type: string;
+  parent_ci_sys_id: string;
+  child_ci_sys_id: string;
+  source_ci_sys_id: string;
+  target_ci_sys_id: string;
+  source_ci_name: string;
+  target_ci_name: string;
+  direction: 'upstream' | 'downstream' | 'bidirectional';
+  requested_by_sys_id: string;
+  requested_by_name: string;
+  requested_at: string;
+  approver_sys_id: string;
+  approver_name: string;
+  approval_comments: string;
+  completed_at: string;
+}
+
+export interface RelationshipChangeSummary {
+  sys_id: string;
+  action: RelationshipChangeAction;
+  state: RelationshipChangeState;
+  relationship_sys_id: string;
+  rel_type: string;
+  source_ci_sys_id: string;
+  target_ci_sys_id: string;
+  source_ci_name: string;
+  target_ci_name: string;
+  direction: string;
+  requested_by_name: string;
+  requested_at: string;
+}
+
+export interface RelationshipApprovalRecord {
+  sys_id: string;
+  document_id: string;
+  state: string;
+  approver_sys_id: string;
+  approver_name: string;
+  comments: string;
+  due_date: string;
+  sysapproval_sys_id: string;
+  change?: RelationshipChangeSummary;
+}
+
+export interface RelationshipChangeListResponse {
+  result: RelationshipChangeRequest[];
+}
+
+export interface RelationshipApprovalListResponse {
+  current_user_sys_id: string;
+  result: RelationshipApprovalRecord[];
+}
+
+function unwrapRestBody<T>(data: unknown): T {
+  const d = data as { result?: T } & T;
+  if (d && typeof d === 'object' && 'result' in d && d.result !== undefined) {
+    return d.result as T;
+  }
+  return d as T;
+}
+
+export async function fetchRelationshipChangesForApp(
+  ciSysId: string,
+): Promise<RelationshipChangeListResponse> {
+  const empty: RelationshipChangeListResponse = { result: [] };
+  if (!ciSysId) return empty;
+  try {
+    const r = await axios.get(`/api/${APP_SCOPE}/portal/relationship_change`, {
+      params: { ci_sys_id: ciSysId },
+    });
+    const body = r.data?.result ?? r.data;
+    return {
+      result: body?.result ?? [],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export async function fetchRelationshipApprovalsForApp(
+  ciSysId: string,
+): Promise<RelationshipApprovalListResponse> {
+  const empty: RelationshipApprovalListResponse = { current_user_sys_id: '', result: [] };
+  if (!ciSysId) return empty;
+  try {
+    const r = await axios.get(`/api/${APP_SCOPE}/portal/relationship_approval`, {
+      params: { ci_sys_id: ciSysId },
+    });
+    const body = r.data?.result ?? r.data;
+    return {
+      current_user_sys_id: body?.current_user_sys_id ?? '',
+      result: body?.result ?? [],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export async function fetchRelationshipApprovalInbox(): Promise<RelationshipApprovalListResponse> {
+  const empty: RelationshipApprovalListResponse = { current_user_sys_id: '', result: [] };
+  try {
+    const r = await axios.get(`/api/${APP_SCOPE}/portal/relationship_approval`, {
+      params: { inbox: 'approver' },
+    });
+    const body = r.data?.result ?? r.data;
+    return {
+      current_user_sys_id: body?.current_user_sys_id ?? '',
+      result: body?.result ?? [],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export interface CreateRelationshipChangeBody {
+  source_ci_sys_id: string;
+  target_ci_sys_id: string;
+  direction: 'upstream' | 'downstream' | 'bidirectional';
+  rel_type: string;
+}
+
+export async function createRelationshipChange(
+  body: CreateRelationshipChangeBody,
+): Promise<{ ok: true; change: RelationshipChangeRequest } | { ok: false; error: string }> {
+  try {
+    const r = await axios.post(`/api/${APP_SCOPE}/portal/relationship_change`, {
+      action: 'create',
+      source_ci: body.source_ci_sys_id,
+      target_ci: body.target_ci_sys_id,
+      direction: body.direction,
+      rel_type: body.rel_type,
+    });
+    const change = unwrapRestBody<{ result?: RelationshipChangeRequest } & RelationshipChangeRequest>(r.data);
+    const row = (change as { result?: RelationshipChangeRequest }).result ?? change;
+    return { ok: true, change: row as RelationshipChangeRequest };
+  } catch (err) {
+    return { ok: false, error: extractRelationshipChangeError(err) };
+  }
+}
+
+export async function requestRelationshipDelete(body: {
+  source_ci_sys_id: string;
+  relationship_sys_id: string;
+}): Promise<{ ok: true; change: RelationshipChangeRequest } | { ok: false; error: string }> {
+  try {
+    const r = await axios.post(`/api/${APP_SCOPE}/portal/relationship_change`, {
+      action: 'delete',
+      source_ci: body.source_ci_sys_id,
+      relationship_sys_id: body.relationship_sys_id,
+    });
+    const change = unwrapRestBody<{ result?: RelationshipChangeRequest } & RelationshipChangeRequest>(r.data);
+    const row = (change as { result?: RelationshipChangeRequest }).result ?? change;
+    return { ok: true, change: row as RelationshipChangeRequest };
+  } catch (err) {
+    return { ok: false, error: extractRelationshipChangeError(err) };
+  }
+}
+
+function extractRelationshipChangeError(err: unknown): string {
+  if (typeof err !== 'object' || err === null || !('response' in err)) {
+    return 'Request failed. Please try again.';
+  }
+  const resp = (err as { response?: { status?: number; data?: unknown } }).response;
+  const data = resp?.data;
+  const status = resp?.status;
+
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+
+    if (typeof d.error === 'string' && d.error.trim()) return d.error;
+
+    if (d.error && typeof d.error === 'object') {
+      const nested = d.error as { message?: string; detail?: string };
+      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message;
+      if (typeof nested.detail === 'string' && nested.detail.trim()) return nested.detail;
+    }
+
+    const result = d.result;
+    if (result && typeof result === 'object') {
+      const r = result as Record<string, unknown>;
+      if (typeof r.error === 'string' && r.error.trim()) return r.error;
+      if (typeof r.message === 'string' && r.message.trim()) return r.message;
+    }
+    if (typeof result === 'string' && result.trim()) return result;
+  }
+
+  if (status === 404) return 'Relationship change API not found. Deploy the latest portal REST changes.';
+  if (status === 403) return 'You do not have permission to perform this relationship change.';
+  if (status === 401) return 'Session expired. Refresh the page and try again.';
+  if (status) return `Request failed (HTTP ${status}). Please try again.`;
+  return 'Request failed. Please try again.';
+}
+
+export async function decideRelationshipApproval(
+  approvalSysId: string,
+  decision: RelationshipApprovalDecision,
+  comments?: string,
+): Promise<{ ok: true; approval: RelationshipApprovalRecord } | { ok: false; error: string }> {
+  try {
+    const r = await axios.patch(`/api/${APP_SCOPE}/portal/relationship_approval/${approvalSysId}`, {
+      decision,
+      comments: comments ?? '',
+    });
+    const approval = unwrapRestBody<{ result?: RelationshipApprovalRecord } & RelationshipApprovalRecord>(r.data);
+    const row = (approval as { result?: RelationshipApprovalRecord }).result ?? approval;
+    return { ok: true, approval: row as RelationshipApprovalRecord };
+  } catch (err) {
+    return { ok: false, error: extractRelationshipChangeError(err) };
   }
 }
