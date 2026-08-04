@@ -13,7 +13,11 @@ interface Props {
   enableAsyncPoll?: boolean;
   onProcessingStart?: (changeSysId: string) => void;
   onDone: () => void;
-  compact?: boolean;
+  onCancel?: () => void;
+  /** inline = table column (inbox); panel = full-width sub-row (app detail) */
+  variant?: 'inline' | 'panel';
+  requestedByName?: string;
+  requestedAt?: string;
 }
 
 export function RelationshipProcessingBadge({ compact = false }: { compact?: boolean }) {
@@ -36,7 +40,10 @@ export default function RelationshipChangeActions({
   enableAsyncPoll = false,
   onProcessingStart,
   onDone,
-  compact = false,
+  onCancel,
+  variant = 'inline',
+  requestedByName,
+  requestedAt,
 }: Props) {
   const [busy, setBusy] = useState<RelationshipApprovalDecision | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -44,6 +51,7 @@ export default function RelationshipChangeActions({
   const [timeoutMsg, setTimeoutMsg] = useState('');
   const [showReject, setShowReject] = useState(false);
   const [comments, setComments] = useState('');
+  const isPanel = variant === 'panel';
 
   const run = async (decision: RelationshipApprovalDecision) => {
     if (decision === 'reject' && !comments.trim()) {
@@ -84,15 +92,83 @@ export default function RelationshipChangeActions({
 
   if (processing) {
     return (
-      <div className="flex flex-col items-end gap-1">
-        <RelationshipProcessingBadge compact={compact} />
+      <div className={isPanel ? 'py-1' : 'flex flex-col items-end gap-1'}>
+        <RelationshipProcessingBadge compact={!isPanel} />
       </div>
     );
   }
 
-  const btnCls = compact
-    ? 'px-2 py-1 text-[11px] rounded border font-medium transition-colors'
-    : 'px-3 py-1.5 text-xs rounded-lg border font-medium transition-colors';
+  const btnCls = isPanel
+    ? 'px-3 py-1.5 text-xs rounded-lg border font-medium transition-colors'
+    : 'px-2 py-1 text-[11px] rounded border font-medium transition-colors';
+
+  if (isPanel) {
+    return (
+      <div className="space-y-3 text-left">
+        {(requestedByName || requestedAt) && (
+          <p className="text-[11px] text-gray-600">
+            {requestedByName && <span>Requested by {requestedByName}</span>}
+            {requestedByName && requestedAt && <span className="mx-1.5 text-gray-300">·</span>}
+            {requestedAt && <span>{requestedAt}</span>}
+          </p>
+        )}
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">
+            Comments <span className="font-normal normal-case text-gray-400">(required to reject)</span>
+          </label>
+          <textarea
+            value={comments}
+            onChange={e => setComments(e.target.value)}
+            placeholder="Explain why you are rejecting this removal request…"
+            rows={3}
+            className="w-full text-xs border border-gray-300 rounded-lg px-3 py-2 resize-y min-h-[72px] focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+          />
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {onCancel && (
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={onCancel}
+              className={`${btnCls} border-gray-300 text-gray-600 hover:bg-gray-50`}
+            >
+              Close
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => run('reject')}
+            className={`${btnCls} border-red-300 text-red-700 hover:bg-red-50`}
+          >
+            {busy === 'reject' ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" /> : (
+              <>
+                <X className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
+                Reject
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => run('approve')}
+            className={`${btnCls} border-green-300 text-green-700 hover:bg-green-50`}
+          >
+            {busy === 'approve' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin inline" />
+            ) : (
+              <>
+                <Check className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
+                Approve
+              </>
+            )}
+          </button>
+        </div>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        {timeoutMsg && <p className="text-xs text-amber-700">{timeoutMsg}</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-end gap-1">

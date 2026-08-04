@@ -521,6 +521,8 @@ export interface RelationshipApprovalRecord {
 
 export interface RelationshipChangeListResponse {
   result: RelationshipChangeRequest[];
+  total_count?: number;
+  pending_count?: number;
 }
 
 export interface RelationshipApprovalListResponse {
@@ -538,16 +540,22 @@ function unwrapRestBody<T>(data: unknown): T {
 
 export async function fetchRelationshipChangesForApp(
   ciSysId: string,
+  options?: { limit?: number; offset?: number },
 ): Promise<RelationshipChangeListResponse> {
   const empty: RelationshipChangeListResponse = { result: [] };
   if (!ciSysId) return empty;
   try {
-    const r = await axios.get(`/api/${APP_SCOPE}/portal/relationship_change`, {
-      params: { ci_sys_id: ciSysId },
-    });
+    const params: Record<string, string | number> = { ci_sys_id: ciSysId };
+    if (options?.limit != null) {
+      params.limit = options.limit;
+      params.offset = options.offset ?? 0;
+    }
+    const r = await axios.get(`/api/${APP_SCOPE}/portal/relationship_change`, { params });
     const body = r.data?.result ?? r.data;
     return {
       result: body?.result ?? [],
+      total_count: body?.total_count,
+      pending_count: body?.pending_count,
     };
   } catch {
     return empty;

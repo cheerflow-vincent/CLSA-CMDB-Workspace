@@ -73,9 +73,9 @@ export default function RelationshipApprovalsView() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <RelationshipChangeActions
+                          variant="inline"
                           approvalSysId={row.sys_id}
                           onDone={reload}
-                          compact
                         />
                       </td>
                     </tr>

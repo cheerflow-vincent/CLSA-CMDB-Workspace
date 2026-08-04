@@ -232,6 +232,21 @@ RelationshipChangeHandler.prototype = {
     };
   },
 
+  countChangesForCi: function (ciSysId, stateFilter) {
+    var ga = new GlideAggregate(this.CHANGE_TABLE);
+    var qc = ga.addQuery('source_ci', ciSysId);
+    qc.addOrCondition('target_ci', ciSysId);
+    if (stateFilter) {
+      ga.addQuery('state', stateFilter);
+    }
+    ga.addAggregate('COUNT');
+    ga.query();
+    if (ga.next()) {
+      return parseInt(ga.getAggregate('COUNT'), 10) || 0;
+    }
+    return 0;
+  },
+
   handleGet: function (request, response) {
     var ciSysId = request.queryParams.ci_sys_id ? request.queryParams.ci_sys_id.toString() : '';
 
@@ -240,12 +255,26 @@ RelationshipChangeHandler.prototype = {
       return;
     }
 
+    var limitParam = request.queryParams.limit ? request.queryParams.limit.toString() : '';
+    var offsetParam = request.queryParams.offset ? request.queryParams.offset.toString() : '';
+    var usePagination = limitParam !== '';
+
+    var limit = usePagination ? parseInt(limitParam, 10) : 200;
+    var offset = usePagination ? (parseInt(offsetParam, 10) || 0) : 0;
+    if (isNaN(limit) || limit < 1) limit = 10;
+    if (limit > 200) limit = 200;
+    if (isNaN(offset) || offset < 0) offset = 0;
+
     var gr = new GlideRecord(this.CHANGE_TABLE);
     var qc = gr.addQuery('source_ci', ciSysId);
     qc.addOrCondition('target_ci', ciSysId);
 
     gr.orderByDesc('requested_at');
-    gr.setLimit(200);
+    if (usePagination) {
+      gr.chooseWindow(offset, offset + limit - 1);
+    } else {
+      gr.setLimit(200);
+    }
     gr.query();
 
     var rows = [];
@@ -253,9 +282,13 @@ RelationshipChangeHandler.prototype = {
       rows.push(this.serializeChangeRow(gr));
     }
 
-    this.jsonOk(response, {
-      result: rows,
-    });
+    var body = { result: rows };
+    if (usePagination) {
+      body.total_count = this.countChangesForCi(ciSysId);
+      body.pending_count = this.countChangesForCi(ciSysId, 'pending_approval');
+    }
+
+    this.jsonOk(response, body);
   },
 
   handlePost: function (request, response) {

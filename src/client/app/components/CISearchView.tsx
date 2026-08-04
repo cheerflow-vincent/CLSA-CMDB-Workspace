@@ -2,14 +2,17 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Server, Database, CircuitBoard, Network, Search,
   ChevronDown, ArrowUpDown, ChevronLeft, ChevronRight,
-  AlertCircle, Calendar, Check, X,
+  Check, X,
   Download, FileText, ExternalLink, Loader2
 } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
-import { queryTable, queryTableWithAccess, getCIFilter, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
+import CIFlagBadges from './CIFlagBadges';
+import FlagDetailPanel, { type FlagType } from './FlagDetailPanel';
+import { queryTableWithAccess, getCIFilter, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
 import { loadListFields, raw, str, type ViewField } from '../utils/viewFields';
 import { filterColumnsByRecords, isAccessDenied } from '../utils/acl';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
+import { enrichRowsWithTaskFlags } from '../utils/relatedCIFlags';
 
 const PROP_CI_SEARCH_FIELDS = `${APP_SCOPE}.ci.search.filter.table.field`;
 const DEFAULT_SEARCH_FIELDS = ['name'];
@@ -25,41 +28,6 @@ interface CISearchViewProps {
 }
 
 type Tab = 'all' | 'servers' | 'switches' | 'databases' | 'circuits';
-type FlagType = 'incident' | 'change';
-
-// ─── Mock data ────────────────────────────────────────────────────────────────
-const mockData = [
-  { id: '1',  name: 'vhkdld1019',               type: 'Server',           class: 'Linux Red Hat 7.8',       environment: 'Non-production', location: 'HKD',    owner: 'Bhaskar Baruah', supportGroup: 'DS - TechOps Support Group', lastModified: '2026-2-11 09:30', hasIncident: true,  hasChange: false },
-  { id: '5',  name: 'winprod0042',               type: 'Server',           class: 'Windows Server 2019',     environment: 'Production',     location: 'SHG',    owner: 'James Lam',      supportGroup: 'DS - TechOps Support Group', lastModified: '2026-3-01 14:10', hasIncident: false, hasChange: true  },
-  { id: '6',  name: 'lnxdr0088',                 type: 'Server',           class: 'Linux Red Hat 8.5',       environment: 'DR',             location: 'SNG',    owner: 'Rita Chan',      supportGroup: 'DS - Infra Support Group',   lastModified: '2026-1-20 11:00', hasIncident: false, hasChange: false },
-  { id: '2',  name: 'xmusw04',                   type: 'Switch',           class: 'Network Switch',          environment: 'Production',     location: 'MUM',    owner: 'Bhaskar Baruah', supportGroup: 'DS - TechOps Support Group', lastModified: '2026-2-11 09:30', hasIncident: false, hasChange: true  },
-  { id: '7',  name: 'hkgsw12',                   type: 'Switch',           class: 'Cisco Catalyst 9300',     environment: 'Production',     location: 'HKG',    owner: 'Derek Ng',       supportGroup: 'DS - Network Support Group', lastModified: '2026-4-05 08:45', hasIncident: true,  hasChange: false },
-  { id: '3',  name: 'cobrahkg@zhkdp2616',        type: 'Database',         class: 'Oracle 18.2.0.0.0',       environment: 'DR',             location: 'HKD',    owner: 'Bhaskar Baruah', supportGroup: 'DS - TechOps Support Group', lastModified: '2026-2-11 09:30', hasIncident: false, hasChange: false },
-  { id: '8',  name: 'sqlprd001',                 type: 'Database',         class: 'MS SQL Server 2019',      environment: 'Production',     location: 'HKG',    owner: 'Amy Wong',       supportGroup: 'DS - DB Support Group',      lastModified: '2026-3-18 16:20', hasIncident: false, hasChange: true  },
-  { id: '9',  name: 'mysqluat03',                type: 'Database',         class: 'MySQL 8.0',               environment: 'Non-production', location: 'SHG',    owner: 'Tom Leung',      supportGroup: 'DS - DB Support Group',      lastModified: '2026-2-28 10:55', hasIncident: true,  hasChange: false },
-  { id: '4',  name: '0/6/LLUXS/6030G6/UN//CLVI', type: 'Circuit',         class: 'Lightpath ISO Mbps',      environment: 'Production',     location: 'HKD',    owner: 'Bhaskar Baruah', supportGroup: 'DS - TechOps Support Group', lastModified: '2026-2-11 09:30', hasIncident: false, hasChange: false },
-  { id: '10', name: '1/2/MPLS/4020A1/HK//CLSA',  type: 'Circuit',         class: 'MPLS 100 Mbps',           environment: 'Production',     location: 'HKG',    owner: 'Grace Ho',       supportGroup: 'DS - Network Support Group', lastModified: '2026-1-15 13:30', hasIncident: false, hasChange: true  },
-  { id: '11', name: 'Trading Platform',           type: 'Business Service', class: 'Business Service',       environment: 'Production',     location: 'Global', owner: 'Michael Chen',   supportGroup: 'DS - BizOps Support Group',  lastModified: '2026-4-10 09:00', hasIncident: true,  hasChange: false },
-  { id: '12', name: 'Risk Management',            type: 'Business Service', class: 'Business Service',       environment: 'Production',     location: 'HKG',    owner: 'Sarah Liu',      supportGroup: 'DS - BizOps Support Group',  lastModified: '2026-3-22 15:40', hasIncident: false, hasChange: true  },
-];
-
-// Mock incident / change detail records keyed by CI id
-const mockIncidents: Record<string, object[]> = {
-  '1':  [{ number: 'INC0012345', priority: 'P2 - High',   state: 'In Progress',  short: 'CPU spike >95% sustained 30 min', opened: '2026-2-10 08:12', assignee: 'John Smith'    },
-         { number: 'INC0012201', priority: 'P3 - Medium', state: 'Resolved',     short: 'Disk usage warning on /var',       opened: '2026-1-28 14:55', assignee: 'Alice Tan'     }],
-  '7':  [{ number: 'INC0013001', priority: 'P1 - Critical', state: 'New',        short: 'Port flapping on GE0/0/5',         opened: '2026-4-04 22:03', assignee: 'Derek Ng'      }],
-  '9':  [{ number: 'INC0011988', priority: 'P3 - Medium', state: 'In Progress',  short: 'Slow query on orders table',        opened: '2026-2-27 11:30', assignee: 'Tom Leung'     }],
-  '11': [{ number: 'INC0013210', priority: 'P2 - High',   state: 'In Progress',  short: 'Login service returning 503',       opened: '2026-4-09 07:44', assignee: 'Michael Chen'  }],
-};
-
-const mockChanges: Record<string, object[]> = {
-  '5':  [{ number: 'CHG0008811', type: 'Standard',  state: 'Scheduled', short: 'OS patching – KB5034441',   scheduled: '2026-3-05 22:00', implementer: 'James Lam'     },
-         { number: 'CHG0008650', type: 'Normal',    state: 'Closed',    short: 'Disk expansion +200 GB',     scheduled: '2026-2-20 01:00', implementer: 'James Lam'     }],
-  '2':  [{ number: 'CHG0008900', type: 'Emergency', state: 'Scheduled', short: 'Firmware upgrade to 17.9.4', scheduled: '2026-2-15 23:00', implementer: 'Bhaskar Baruah'}],
-  '8':  [{ number: 'CHG0009022', type: 'Normal',    state: 'Approved',  short: 'Index rebuild on prod DB',   scheduled: '2026-3-25 00:00', implementer: 'Amy Wong'      }],
-  '10': [{ number: 'CHG0009100', type: 'Standard',  state: 'Scheduled', short: 'Bandwidth upgrade to 1 Gbps',scheduled: '2026-1-20 02:00', implementer: 'Grace Ho'      }],
-  '12': [{ number: 'CHG0009250', type: 'Normal',    state: 'Approved',  short: 'Risk scoring engine update', scheduled: '2026-3-28 22:30', implementer: 'Sarah Liu'     }],
-};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const tabTypeMap: Record<Tab, string | null> = {
@@ -126,6 +94,8 @@ interface SearchRow {
   table: string;
   label: string;
   values: Record<string, string>;
+  incidents: number;
+  changes: number;
 }
 
 interface TabData {
@@ -169,6 +139,8 @@ function mapApiRow(
     table,
     label:    cfg?.label ?? formatClassLabel(table),
     values,
+    incidents: 0,
+    changes:   0,
   };
 }
 
@@ -184,8 +156,8 @@ function buildCIItem(row: SearchRow): CIItem {
     owner:        row.values.managed_by ?? row.values.assigned_to ?? '',
     supportGroup: row.values.support_group ?? '',
     lastModified: row.values.sys_updated_on ?? '',
-    hasIncident:  false,
-    hasChange:    false,
+    hasIncident:  row.incidents > 0,
+    hasChange:    row.changes > 0,
   };
 }
 
@@ -363,120 +335,6 @@ function MultiSelectDropdown({ label, options, selected, onChange }: {
   );
 }
 
-// ─── Flag Detail Panel ────────────────────────────────────────────────────────
-interface PanelInfo { ciId: string; ciName: string; flagType: FlagType; }
-
-function FlagDetailPanel({ info, onClose }: { info: PanelInfo; onClose: () => void; }) {
-  const isIncident = info.flagType === 'incident';
-  const records = isIncident ? (mockIncidents[info.ciId] ?? []) : (mockChanges[info.ciId] ?? []);
-
-  const priorityColor: Record<string, string> = {
-    'P1 - Critical': 'bg-red-100 text-red-700',
-    'P2 - High':     'bg-orange-100 text-orange-700',
-    'P3 - Medium':   'bg-yellow-100 text-yellow-700',
-    'P4 - Low':      'bg-gray-100 text-gray-600',
-  };
-  const stateColor: Record<string, string> = {
-    'New':         'bg-blue-100 text-blue-700',
-    'In Progress': 'bg-purple-100 text-purple-700',
-    'Resolved':    'bg-green-100 text-green-700',
-    'Closed':      'bg-gray-100 text-gray-500',
-    'Scheduled':   'bg-blue-100 text-blue-700',
-    'Approved':    'bg-green-100 text-green-700',
-  };
-  const changeTypeColor: Record<string, string> = {
-    'Standard':  'bg-gray-100 text-gray-600',
-    'Normal':    'bg-blue-100 text-blue-700',
-    'Emergency': 'bg-red-100 text-red-700',
-  };
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-30 bg-black/20" onClick={onClose} />
-
-      {/* Slide-in panel */}
-      <div className="fixed right-0 top-0 h-full w-[420px] z-40 bg-white shadow-2xl flex flex-col animate-[slideIn_0.2s_ease-out]"
-        style={{ animation: 'slideIn 0.2s ease-out' }}>
-
-        {/* Panel header */}
-        <div className={`px-5 py-4 border-b flex items-start justify-between ${isIncident ? 'bg-red-50 border-red-100' : 'bg-yellow-50 border-yellow-100'}`}>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              {isIncident
-                ? <AlertCircle className="w-5 h-5 text-red-600" />
-                : <Calendar    className="w-5 h-5 text-yellow-600" />}
-              <span className={`text-sm font-semibold ${isIncident ? 'text-red-700' : 'text-yellow-700'}`}>
-                {isIncident ? 'Active Incidents' : 'Scheduled Changes'}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500">CI: <span className="font-medium text-gray-800">{info.ciName}</span></p>
-          </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-black/10 text-gray-500 hover:text-gray-800">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Records */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {records.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center mt-10">No records found.</p>
-          ) : (
-            records.map((rec: any, i) => (
-              <div key={i} className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-blue-700 hover:underline cursor-pointer">{rec.number}</span>
-                  <div className="flex gap-2">
-                    {isIncident && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[rec.priority] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {rec.priority}
-                      </span>
-                    )}
-                    {!isIncident && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${changeTypeColor[rec.type] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {rec.type}
-                      </span>
-                    )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stateColor[rec.state] ?? 'bg-gray-100 text-gray-600'}`}>
-                      {rec.state}
-                    </span>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-800 mb-3">{rec.short}</p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
-                  {isIncident ? (
-                    <>
-                      <span className="text-gray-400">Opened</span>     <span className="text-gray-700">{rec.opened}</span>
-                      <span className="text-gray-400">Assignee</span>   <span className="text-gray-700">{rec.assignee}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-gray-400">Scheduled</span>    <span className="text-gray-700">{rec.scheduled}</span>
-                      <span className="text-gray-400">Implementer</span>  <span className="text-gray-700">{rec.implementer}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-gray-100 bg-gray-50">
-          <p className="text-xs text-gray-400">{records.length} record{records.length !== 1 ? 's' : ''} linked to this CI</p>
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes slideIn {
-          from { transform: translateX(100%); }
-          to   { transform: translateX(0); }
-        }
-      `}</style>
-    </>
-  );
-}
-
 // ─── Export button ────────────────────────────────────────────────────────────
 function ExportButton({
   columns,
@@ -568,10 +426,12 @@ function SearchResultCard({
   row,
   columns,
   onViewDetails,
+  onFlagClick,
 }: {
   row: SearchRow;
   columns: ViewField[];
   onViewDetails: (ci: CIItem) => void;
+  onFlagClick?: (type: FlagType) => void;
 }) {
   if (!columns.length) return null;
 
@@ -582,14 +442,22 @@ function SearchResultCard({
   return (
     <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
       <div className="mb-3">
-        <button
-          type="button"
-          onClick={() => onViewDetails(buildCIItem(row))}
-          title="View CI details"
-          className="text-sm font-semibold text-gray-900 hover:text-blue-700 hover:underline text-left break-words"
-        >
-          {title}
-        </button>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => onViewDetails(buildCIItem(row))}
+            title="View CI details"
+            className="text-sm font-semibold text-gray-900 hover:text-blue-700 hover:underline text-left break-words"
+          >
+            {title}
+          </button>
+          <CIFlagBadges
+            incidents={row.incidents}
+            changes={row.changes}
+            onFlagClick={onFlagClick}
+            size="md"
+          />
+        </div>
         <a
           href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
           target="_blank"
@@ -626,7 +494,11 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const [pending, setPending]     = useState<PendingFilters>(emptyPending());
   const [applied, setApplied]     = useState<PendingFilters>(emptyPending());
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
-  const [panel, setPanel] = useState<PanelInfo | null>(null);
+  const [panel, setPanel] = useState<{
+    recordSysId: string;
+    ciName: string;
+    flagType: FlagType;
+  } | null>(null);
   const [pillCounts, setPillCounts] = useState<PillCounts>(EMPTY_COUNTS);
   const [pillAccess, setPillAccess] = useState<PillAccess>(EMPTY_PILL_ACCESS);
   const [tabData, setTabData] = useState<Record<SpecificTab, TabData>>({
@@ -743,9 +615,11 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         setAllColumns(cols);
         return fetchAllMerged(snQuery, cols);
       })
-      .then(result => {
+      .then(async result => {
         if (cancelled || !result) return;
-        setAllMergedRows(result.rows);
+        const enriched = await enrichRowsWithTaskFlags(result.rows);
+        if (cancelled) return;
+        setAllMergedRows(enriched);
         setAllTotalCount(result.totalCount);
         setTabData(prev => {
           const next = { ...prev };
@@ -782,13 +656,15 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         if (cancelled) return null;
         return fetchTabPage(cfg, snQuery, cols, page, pageSize).then(res => res);
       })
-      .then(result => {
+      .then(async result => {
         if (cancelled || !result) return;
+        const enriched = await enrichRowsWithTaskFlags(result.rows);
+        if (cancelled) return;
         setTabData(prev => ({
           ...prev,
           [activeTab]: {
             columns: result.columns,
-            rows: result.rows,
+            rows: enriched,
             totalCount: result.totalCount,
             loading: false,
             access: result.access,
@@ -900,17 +776,32 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     const val = row.values[col.element] || '—';
 
     if (colIdx === 0) {
+      const openFlag = (type: FlagType) => {
+        setPanel({
+          recordSysId: row.sysId,
+          ciName: val !== '—' ? val : row.values.name || row.sysId,
+          flagType: type,
+        });
+      };
       return (
         <td key={col.element} className="px-6 py-4 max-w-[240px]">
           <div className="flex flex-col items-start gap-1">
-            <button
-              type="button"
-              onClick={() => onViewDetails(buildCIItem(row))}
-              title="View CI details"
-              className="font-medium text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
-            >
-              {val}
-            </button>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => onViewDetails(buildCIItem(row))}
+                title="View CI details"
+                className="font-medium text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
+              >
+                {val}
+              </button>
+              <CIFlagBadges
+                incidents={row.incidents}
+                changes={row.changes}
+                onFlagClick={openFlag}
+                size="md"
+              />
+            </div>
             <a
               href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
               target="_blank"
@@ -1080,6 +971,11 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                   row={row}
                   columns={columns}
                   onViewDetails={onViewDetails}
+                  onFlagClick={type => setPanel({
+                    recordSysId: row.sysId,
+                    ciName: row.values.name || row.sysId,
+                    flagType: type,
+                  })}
                 />
               ))
             )}
@@ -1198,7 +1094,14 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       </div>
 
       {/* Right slide-out panel */}
-      {panel && <FlagDetailPanel info={panel} onClose={() => setPanel(null)} />}
+      {panel && (
+        <FlagDetailPanel
+          title={panel.ciName}
+          flagType={panel.flagType}
+          recordSysId={panel.recordSysId}
+          onClose={() => setPanel(null)}
+        />
+      )}
     </div>
   );
 }

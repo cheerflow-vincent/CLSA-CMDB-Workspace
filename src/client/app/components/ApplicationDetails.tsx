@@ -3,7 +3,7 @@ import {
   Search, Server, Database, DollarSign, Network,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
-import RelationshipDiagram, { DIR_COLOR, SVC_STYLE } from './RelationshipDiagram';
+import RelationshipDiagram, { DIR_COLOR, SVC_STYLE, PENDING_EDGE_DASH } from './RelationshipDiagram';
 import type { DiagramFilters } from './RelationshipDiagram';
 import RelationshipTable from './RelationshipTable';
 import EditRelationshipModal, { type RelationshipMutation } from './EditRelationshipModal';
@@ -75,10 +75,11 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [relationshipEditTarget, setRelationshipEditTarget] = useState<{ sysId: string; name: string } | null>(null);
+  const [recordEditTarget, setRecordEditTarget] = useState<{ sysId: string; name: string; table: string } | null>(null);
   const [relRefreshKey, setRelRefreshKey] = useState(0);
   const [diagramRefreshKey, setDiagramRefreshKey] = useState(0);
   const [processingChangeIds, setProcessingChangeIds] = useState<string[]>([]);
-  const [showRecordEditModal, setShowRecordEditModal] = useState(false);
   const [canWriteRecord, setCanWriteRecord] = useState(false);
   const [overviewRefresh, setOverviewRefresh] = useState(0);
   const [nodeSearch, setNodeSearch] = useState('');
@@ -162,7 +163,15 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
         onSelectApp={onSelectApp}
         onBackToHome={onBack}
         canEditRecord={canWriteRecord}
-        onEditRecord={() => setShowRecordEditModal(true)}
+        onEditRecord={() => {
+          if (selectedApp?.sysId) {
+            setRecordEditTarget({
+              sysId: selectedApp.sysId,
+              name: selectedApp.name,
+              table: selectedApp.table ?? 'cmdb_ci_service',
+            });
+          }
+        }}
       />
 
       {/* ── Main content: fills remaining viewport height ── */}
@@ -223,11 +232,29 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 }`}>
                 <svg width="22" height="8" viewBox="0 0 26 10">
                   <polygon points="0,5 6,2 6,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
-                  <line x1="6" y1="5" x2="20" y2="5" stroke={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'} strokeWidth="2" strokeDasharray="4 2"/>
+                  <line x1="6" y1="5" x2="20" y2="5" stroke={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'} strokeWidth="2"/>
                   <polygon points="20,2 26,5 20,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
                 </svg>
                 Bi-directional
               </button>
+
+              {viewMode === 'map' && (
+                <>
+                  <div className="h-5 w-px bg-gray-200 mx-1" />
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Legend</span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-xs text-gray-600">
+                    <svg width="22" height="8" viewBox="0 0 26 10" aria-hidden>
+                      <line
+                        x1="0" y1="5" x2="26" y2="5"
+                        stroke="#6B7280"
+                        strokeWidth="2"
+                        strokeDasharray={PENDING_EDGE_DASH}
+                      />
+                    </svg>
+                    Pending approval
+                  </span>
+                </>
+              )}
 
               <div className="h-5 w-px bg-gray-200 mx-1" />
 
@@ -284,9 +311,16 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 key={diagramRefreshKey}
                 filters={filters}
                 nodeSearch={nodeSearch}
-                onEditRelationship={() => setShowEditModal(true)}
                 selectedApp={selectedApp}
                 onSelectApp={onSelectApp}
+                pendingRefreshKey={relRefreshKey}
+                canEditCenterRecord={canWriteRecord}
+                onEditRelationships={app => {
+                  setRelationshipEditTarget(app);
+                  setShowEditModal(true);
+                }}
+                onEditCiDetails={app => setRecordEditTarget(app)}
+                onRelationshipMutations={handleRelationshipMutations}
               />
             </div>
           ) : (
@@ -348,6 +382,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         config={SERVER_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
                         responsiveLayout={false}
+                        showCIFlags
                         isOpen={expanded.servers}
                         onToggle={() => toggleExpand('servers')}
                         onViewCI={onViewCI}
@@ -365,6 +400,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         config={DATABASE_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
                         responsiveLayout={false}
+                        showCIFlags
                         isOpen={expanded.databases}
                         onToggle={() => toggleExpand('databases')}
                         onViewCI={onViewCI}
@@ -382,6 +418,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         config={NETGEAR_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
                         responsiveLayout={false}
+                        showCIFlags
                         isOpen={expanded.netgear}
                         onToggle={() => toggleExpand('netgear')}
                         onViewCI={onViewCI}
@@ -476,22 +513,29 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
       </div>
 
-      {showEditModal && selectedApp?.sysId && (
+      {showEditModal && relationshipEditTarget && (
         <EditRelationshipModal
-          selectedApp={{ sysId: selectedApp.sysId, name: selectedApp.name }}
+          selectedApp={relationshipEditTarget}
           hierarchyMode={hierarchyMode}
-          onClose={() => setShowEditModal(false)}
+          onClose={() => {
+            setShowEditModal(false);
+            setRelationshipEditTarget(null);
+          }}
           onSubmitted={handleRelationshipMutations}
         />
       )}
-      {showRecordEditModal && selectedApp?.sysId && (
+      {recordEditTarget && (
         <RecordEditDialog
           title="Edit Application"
-          table={selectedApp.table ?? 'cmdb_ci_service'}
-          sysId={selectedApp.sysId}
-          recordName={selectedApp.name}
-          onClose={() => setShowRecordEditModal(false)}
-          onSaved={() => setOverviewRefresh(n => n + 1)}
+          table={recordEditTarget.table}
+          sysId={recordEditTarget.sysId}
+          recordName={recordEditTarget.name}
+          onClose={() => setRecordEditTarget(null)}
+          onSaved={() => {
+            if (recordEditTarget.sysId === selectedApp?.sysId) {
+              setOverviewRefresh(n => n + 1);
+            }
+          }}
         />
       )}
     </div>

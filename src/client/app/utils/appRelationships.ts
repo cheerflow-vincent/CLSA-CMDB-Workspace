@@ -1,6 +1,7 @@
 import { queryTable } from '../../api/servicenow';
 import type { RelTypeChoice } from './relationshipTypeMap';
 import { IMPACT_REL_TYPE, DATA_FLOW_REL_TYPE } from './relationshipTypeMap';
+import { raw, str } from './viewFields';
 
 export type RelationshipDirection = 'upstream' | 'downstream' | 'bidirectional';
 
@@ -102,6 +103,8 @@ export interface RelCIPeer {
   sysId: string;
   name: string;
   sysClass: string;
+  /** From app.department.description — drives Platform / Infrastructure / Business legend. */
+  departmentDescription: string;
   direction: RelationshipDirection;
 }
 
@@ -110,38 +113,49 @@ export async function loadAppRelationshipPeers(centerSysId: string): Promise<Rel
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
       query: `${TYPE_Q}^parent.sys_id=${centerSysId}`,
-      fields: ['child.sys_id', 'child.name', 'child.sys_class_name'],
+      fields: ['child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'],
       limit: 300,
+      displayValue: 'all',
     }),
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
       query: `${TYPE_Q}^child.sys_id=${centerSysId}`,
-      fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name'],
+      fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'],
       limit: 300,
+      displayValue: 'all',
     }),
   ]);
 
   const upSet = new Set<string>();
   const dnSet = new Set<string>();
-  const ciMap = new Map<string, { name: string; cls: string }>();
+  const ciMap = new Map<string, { name: string; cls: string; deptDesc: string }>();
 
   for (const r of asParent) {
-    const id = sn(r['child.sys_id']);
+    const id = raw(r['child.sys_id']);
     if (!id || id === centerSysId) continue;
-    ciMap.set(id, { name: sn(r['child.name']), cls: sn(r['child.sys_class_name']) });
+    ciMap.set(id, {
+      name: str(r['child.name']),
+      cls: raw(r['child.sys_class_name']),
+      deptDesc: str(r['child.department.description']),
+    });
     dnSet.add(id);
   }
   for (const r of asChild) {
-    const id = sn(r['parent.sys_id']);
+    const id = raw(r['parent.sys_id']);
     if (!id || id === centerSysId) continue;
-    ciMap.set(id, { name: sn(r['parent.name']), cls: sn(r['parent.sys_class_name']) });
+    ciMap.set(id, {
+      name: str(r['parent.name']),
+      cls: raw(r['parent.sys_class_name']),
+      deptDesc: str(r['parent.department.description']),
+    });
     upSet.add(id);
   }
 
-  return [...ciMap.entries()].map(([id, { name, cls }]) => ({
+  return [...ciMap.entries()].map(([id, { name, cls, deptDesc }]) => ({
     sysId: id,
     name,
     sysClass: cls,
+    departmentDescription: deptDesc,
     direction: upSet.has(id) && dnSet.has(id) ? 'bidirectional' : upSet.has(id) ? 'upstream' : 'downstream',
   }));
 }

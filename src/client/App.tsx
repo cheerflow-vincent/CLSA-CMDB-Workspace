@@ -280,12 +280,14 @@ export function App() {
         type="button"
         onClick={() => navTo(view, ciTab)}
         title={label}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors ${
+        className={`w-full flex items-center justify-start gap-3 px-3 py-2 rounded text-sm text-left transition-colors ${
           active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
         }`}
       >
         <Icon className="w-5 h-5 shrink-0" />
-        {!sidebarCollapsed && <span>{label}</span>}
+        {!sidebarCollapsed && (
+          <span className="flex-1 min-w-0 text-left leading-snug">{label}</span>
+        )}
       </button>
     );
   };
@@ -299,12 +301,14 @@ export function App() {
         type="button"
         onClick={() => navToInventory(tab)}
         title={label}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors ${
+        className={`w-full flex items-center justify-start gap-3 px-3 py-2 rounded text-sm text-left transition-colors ${
           active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
         }`}
       >
         <Icon className="w-5 h-5 shrink-0" />
-        {!sidebarCollapsed && <span>{label}</span>}
+        {!sidebarCollapsed && (
+          <span className="flex-1 min-w-0 text-left leading-snug">{label}</span>
+        )}
       </button>
     );
   };

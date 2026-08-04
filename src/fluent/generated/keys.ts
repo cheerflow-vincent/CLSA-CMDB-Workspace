@@ -111,6 +111,14 @@ declare global {
                         id: '61d8035450bb43a08a753df8ba0a9903'
                         deleted: true
                     }
+                    'relationship-change-param-limit': {
+                        table: 'sys_ws_query_parameter'
+                        id: 'd8843064f40d4ef892e78cbe96df93a4'
+                    }
+                    'relationship-change-param-offset': {
+                        table: 'sys_ws_query_parameter'
+                        id: 'aa892b33739e4ba38672a8baaf9816d9'
+                    }
                     'relationship-change-param-state': {
                         table: 'sys_ws_query_parameter'
                         id: 'b36643c73dbf4b969ff852b398e782f7'
@@ -241,6 +249,14 @@ declare global {
                             name: 'x_citi4_clsa_cmd_0_relationship_change'
                             element: 'state'
                             value: 'cancelled'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '22f4de65e05f4b66aec6d799f48b6cd4'
+                        key: {
+                            web_service_operation: 'd656ce658c414c8eb74175d02d0105a1'
+                            web_service_query_parameter: 'aa892b33739e4ba38672a8baaf9816d9'
                         }
                     },
                     {
@@ -650,6 +666,14 @@ declare global {
                         key: {
                             name: 'x_citi4_clsa_cmd_0_relationship_change'
                             element: 'child_ci'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: 'e06afb619f984563828fb74c828ef8e0'
+                        key: {
+                            web_service_operation: 'd656ce658c414c8eb74175d02d0105a1'
+                            web_service_query_parameter: 'd8843064f40d4ef892e78cbe96df93a4'
                         }
                     },
                     {

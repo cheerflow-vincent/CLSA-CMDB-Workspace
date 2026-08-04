@@ -1,19 +1,20 @@
 import { useState, useEffect } from 'react';
 import { ArrowUp, ArrowDown, ArrowLeftRight, ExternalLink, Loader2, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 import { queryTable } from '../../api/servicenow';
-import { type ViewField, str, loadViewFields as loadViewFieldsUtil } from '../utils/viewFields';
+import { type ViewField, str, loadViewFields as loadViewFieldsUtil, raw } from '../utils/viewFields';
 import type { AppItem } from '../data/appData';
 import type { DiagramFilters } from './RelationshipDiagram';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
+import { serviceTypeFromDepartment, type ServiceType } from '../utils/serviceTypeFromDepartment';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Direction   = 'upstream' | 'downstream' | 'bidirectional';
-type ServiceType = 'platform' | 'infrastructure' | 'business';
 
 interface RelRow {
   sysId:     string;
   name:      string;
   sysClass:  string;
+  departmentDescription: string;
   direction: Direction;
 }
 
@@ -72,10 +73,8 @@ function tableLabel(cls: string) {
   return TABLE_LABEL[cls] ?? cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function classToServiceType(cls: string): ServiceType {
-  if (cls === 'cmdb_ci_service')      return 'business';
-  if (cls === 'cmdb_ci_service_auto') return 'platform';
-  return 'infrastructure';
+function rowServiceType(row: Pick<RelRow, 'departmentDescription'>): ServiceType {
+  return serviceTypeFromDepartment(row.departmentDescription);
 }
 
 const SVC_LABEL: Record<ServiceType, string> = {
@@ -106,28 +105,36 @@ function opStatusBadge(status: string) {
 async function fetchRelationships(sysId: string): Promise<RelRow[]> {
   const TYPE_Q = `type.nameIN${IMP_TYPE},${RDF_TYPE}`;
   const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
-    queryTable<Record<string, unknown>>({ table: 'cmdb_rel_ci', query: `${TYPE_Q}^parent.sys_id=${sysId}`, fields: ['child.sys_id', 'child.name', 'child.sys_class_name'], limit: 300 }),
-    queryTable<Record<string, unknown>>({ table: 'cmdb_rel_ci', query: `${TYPE_Q}^child.sys_id=${sysId}`,  fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name'], limit: 300 }),
+    queryTable<Record<string, unknown>>({ table: 'cmdb_rel_ci', query: `${TYPE_Q}^parent.sys_id=${sysId}`, fields: ['child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'], limit: 300, displayValue: 'all' }),
+    queryTable<Record<string, unknown>>({ table: 'cmdb_rel_ci', query: `${TYPE_Q}^child.sys_id=${sysId}`,  fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'], limit: 300, displayValue: 'all' }),
   ]);
 
   const upSet = new Set<string>(), dnSet = new Set<string>();
-  const ciMap = new Map<string, { name: string; cls: string }>();
+  const ciMap = new Map<string, { name: string; cls: string; deptDesc: string }>();
 
   for (const r of asParent) {
-    const id = sn(r['child.sys_id']);
+    const id = raw(r['child.sys_id']);
     if (!id || id === sysId) continue;
-    ciMap.set(id, { name: sn(r['child.name']), cls: sn(r['child.sys_class_name']) });
+    ciMap.set(id, {
+      name: str(r['child.name']),
+      cls: raw(r['child.sys_class_name']),
+      deptDesc: str(r['child.department.description']),
+    });
     dnSet.add(id);
   }
   for (const r of asChild) {
-    const id = sn(r['parent.sys_id']);
+    const id = raw(r['parent.sys_id']);
     if (!id || id === sysId) continue;
-    ciMap.set(id, { name: sn(r['parent.name']), cls: sn(r['parent.sys_class_name']) });
+    ciMap.set(id, {
+      name: str(r['parent.name']),
+      cls: raw(r['parent.sys_class_name']),
+      deptDesc: str(r['parent.department.description']),
+    });
     upSet.add(id);
   }
 
-  const rows: RelRow[] = [...ciMap.entries()].map(([id, { name, cls }]) => ({
-    sysId: id, name, sysClass: cls,
+  const rows: RelRow[] = [...ciMap.entries()].map(([id, { name, cls, deptDesc }]) => ({
+    sysId: id, name, sysClass: cls, departmentDescription: deptDesc,
     direction: upSet.has(id) && dnSet.has(id) ? 'bidirectional' : upSet.has(id) ? 'upstream' : 'downstream',
   }));
   const ORDER: Record<Direction, number> = { upstream: 0, downstream: 1, bidirectional: 2 };
@@ -218,7 +225,7 @@ function RelRowCard({
   onViewDetails: (row: RelRow) => void;
 }) {
   const meta = DIR_META[row.direction];
-  const svcType = classToServiceType(row.sysClass);
+  const svcType = rowServiceType(row);
 
   return (
     <div className="card-stack border border-gray-200 rounded-lg p-4 bg-white hover:shadow-sm transition-shadow">
@@ -304,7 +311,7 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
 
   const filtered = rows.filter(r => {
     if (!activeFilters[r.direction])                     return false;
-    if (!activeFilters[classToServiceType(r.sysClass)]) return false;
+    if (!activeFilters[rowServiceType(r)]) return false;
     if (q && !r.name.toLowerCase().includes(q))          return false;
     return true;
   });
@@ -366,7 +373,7 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
         <tbody className="divide-y divide-gray-100">
           {filtered.map(row => {
             const meta    = DIR_META[row.direction];
-            const svcType = classToServiceType(row.sysClass);
+            const svcType = rowServiceType(row);
             const detail  = detailMap.get(row.sysId);
             return (
               <tr key={row.sysId} className={`hover:bg-gray-50 transition-colors ${meta.rowCls}`}>

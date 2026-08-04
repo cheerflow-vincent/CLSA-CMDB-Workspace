@@ -22,16 +22,27 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  MoreVertical, Eye, Edit2, Plus, Trash2,
-  ArrowUp, ArrowDown, ArrowLeftRight, Loader2, Network, ExternalLink,
+  MoreVertical, Eye, Edit2, Trash2,
+  Loader2, Network, ExternalLink,
 } from 'lucide-react';
-import { queryTable, getSysProperties } from '../../api/servicenow';
-import { loadAppRelationshipPeers, type RelCIPeer } from '../utils/appRelationships';
+import {
+  queryTable, getSysProperties, fetchRelationshipChangesForApp,
+  fetchFieldAccess,
+  requestRelationshipDelete,
+  type RelationshipChangeRequest,
+} from '../../api/servicenow';
+import { loadAppRelationshipPeers, loadAppRelationships, type RelCIPeer } from '../utils/appRelationships';
+import { canRemoveRelationship } from '../utils/relationshipEdit';
+import { isDirectCenterPeer } from '../utils/diagramLinkPartner';
+import { canEditRecord } from '../utils/acl';
+import { raw, str } from '../utils/viewFields';
+import { serviceTypeFromDepartment, type ServiceType } from '../utils/serviceTypeFromDepartment';
+import type { RelationshipMutation } from './EditRelationshipModal';
 import type { AppItem } from '../data/appData';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 type Direction   = 'upstream' | 'downstream' | 'bidirectional';
-type ServiceType = 'platform' | 'infrastructure' | 'business';
+export type { ServiceType };
 
 export interface DiagramFilters {
   upstream: boolean; downstream: boolean; bidirectional: boolean;
@@ -41,15 +52,23 @@ export interface DiagramFilters {
 interface Props {
   filters:             DiagramFilters;
   nodeSearch?:         string;
-  onEditRelationship:  () => void;
   selectedApp?:        AppItem | null;
   onSelectApp?:        (app: AppItem) => void;
+  /** Bumps when relationship changes update — refetches pending edge styling. */
+  pendingRefreshKey?:  number;
+  /** ACL gate for the center (hub) node menu edit actions. */
+  canEditCenterRecord?: boolean;
+  onEditRelationships: (app: { sysId: string; name: string }) => void;
+  onEditCiDetails:     (app: { sysId: string; name: string; table: string }) => void;
+  onRelationshipMutations?: (mutations: RelationshipMutation[]) => void;
 }
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 export const DIR_COLOR: Record<Direction, string> = {
   upstream: '#F97316', downstream: '#3B82F6', bidirectional: '#8B5CF6',
 };
+/** Dashed stroke for edges with a pending removal approval. */
+export const PENDING_EDGE_DASH = '7 4';
 export const SVC_STYLE: Record<ServiceType, { bg: string; border: string; text: string }> = {
   platform:       { bg: '#EFF6FF', border: '#3B82F6', text: '#1E40AF' },
   infrastructure: { bg: '#F8FAFC', border: '#64748B', text: '#334155' },
@@ -79,11 +98,22 @@ interface RelCI {
   sysId:     string;
   name:      string;
   sysClass:  string;
+  departmentDescription: string;
   direction: Direction;
 }
 
 function peerToRelCI(peer: RelCIPeer): RelCI {
-  return { sysId: peer.sysId, name: peer.name, sysClass: peer.sysClass, direction: peer.direction };
+  return {
+    sysId: peer.sysId,
+    name: peer.name,
+    sysClass: peer.sysClass,
+    departmentDescription: peer.departmentDescription,
+    direction: peer.direction,
+  };
+}
+
+function relCIToServiceType(ci: Pick<RelCI, 'departmentDescription'>): ServiceType {
+  return serviceTypeFromDepartment(ci.departmentDescription);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,11 +125,6 @@ const sn = (v: unknown): string => {
   return String(v);
 };
 
-function classToServiceType(cls: string): ServiceType {
-  if (cls === 'cmdb_ci_service') return 'business';
-  if (cls === 'cmdb_ci_service_auto') return 'platform';
-  return 'infrastructure';
-}
 
 /** Actual depth of the subtree rooted at nodeId, up to maxRemaining hops. */
 function getSubtreeDepth(nodeId: string, cm: Map<string, RelCI[]>, maxRemaining: number): number {
@@ -130,14 +155,16 @@ async function fetchChildrenForNodes(
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
       query: `${TYPE_Q}^parent.sys_idIN${ids}`,
-      fields: ['parent.sys_id', 'child.sys_id', 'child.name', 'child.sys_class_name'],
+      fields: ['parent.sys_id', 'child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'],
       limit: 500,
+      displayValue: 'all',
     }),
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
       query: `${TYPE_Q}^child.sys_idIN${ids}`,
-      fields: ['child.sys_id', 'parent.sys_id', 'parent.name', 'parent.sys_class_name'],
+      fields: ['child.sys_id', 'parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'],
       limit: 500,
+      displayValue: 'all',
     }),
   ]);
 
@@ -153,33 +180,69 @@ async function fetchChildrenForNodes(
   };
 
   for (const r of asParent) {
-    const pId  = sn(r['parent.sys_id']);
-    const cId  = sn(r['child.sys_id']);
+    const pId  = raw(r['parent.sys_id']);
+    const cId  = raw(r['child.sys_id']);
     if (!cId || visited.has(cId) || !nodeIdSet.has(pId)) continue;
-    add(pId, { sysId: cId, name: sn(r['child.name']), sysClass: sn(r['child.sys_class_name']), direction: 'downstream' });
+    add(pId, {
+      sysId: cId,
+      name: str(r['child.name']),
+      sysClass: raw(r['child.sys_class_name']),
+      departmentDescription: str(r['child.department.description']),
+      direction: 'downstream',
+    });
   }
   for (const r of asChild) {
-    const cId  = sn(r['child.sys_id']);
-    const pId  = sn(r['parent.sys_id']);
+    const cId  = raw(r['child.sys_id']);
+    const pId  = raw(r['parent.sys_id']);
     if (!pId || visited.has(pId) || !nodeIdSet.has(cId)) continue;
-    add(cId, { sysId: pId, name: sn(r['parent.name']), sysClass: sn(r['parent.sys_class_name']), direction: 'upstream' });
+    add(cId, {
+      sysId: pId,
+      name: str(r['parent.name']),
+      sysClass: raw(r['parent.sys_class_name']),
+      departmentDescription: str(r['parent.department.description']),
+      direction: 'upstream',
+    });
   }
 
   return result;
 }
 
-// ─── Edge builder ─────────────────────────────────────────────────────────────
-interface EdgeDef { id: string; source: string; target: string; direction: Direction; serviceType: ServiceType; }
+function pendingRemovalPeerIds(
+  centerSysId: string,
+  changes: RelationshipChangeRequest[],
+): Set<string> {
+  const peers = new Set<string>();
+  for (const c of changes) {
+    if (c.action !== 'delete' || c.state !== 'pending_approval') continue;
+    if (c.parent_ci_sys_id === centerSysId) peers.add(c.child_ci_sys_id);
+    if (c.child_ci_sys_id === centerSysId) peers.add(c.parent_ci_sys_id);
+  }
+  return peers;
+}
 
-function buildEdge({ id, source, target, direction, serviceType }: EdgeDef, hidden: boolean): Edge {
+// ─── Edge builder ─────────────────────────────────────────────────────────────
+interface EdgeDef {
+  id: string; source: string; target: string; direction: Direction; serviceType: ServiceType;
+  pendingRemoval?: boolean;
+}
+
+function buildEdge(
+  { id, source, target, direction, serviceType, pendingRemoval = false }: EdgeDef,
+  hidden: boolean,
+): Edge {
   const color = DIR_COLOR[direction];
   const isBi  = direction === 'bidirectional';
   return {
     id, source, target, hidden, type: 'default',
-    style: { stroke: color, strokeWidth: 2, opacity: 0.88, ...(isBi ? { strokeDasharray: '7 4' } : {}) },
+    style: {
+      stroke: color,
+      strokeWidth: 2,
+      opacity: 0.88,
+      ...(pendingRemoval ? { strokeDasharray: PENDING_EDGE_DASH } : {}),
+    },
     markerEnd:  { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     ...(isBi ? { markerStart: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 } } : {}),
-    data: { direction, serviceType },
+    data: { direction, serviceType, pendingRemoval },
   };
 }
 
@@ -239,7 +302,7 @@ function placeChildrenRecursive(
     placedIds.add(child.sysId);
 
     const pos     = { x, y: startY + i * spacing };
-    const svcType = classToServiceType(child.sysClass);
+    const svcType = relCIToServiceType(child);
     const maxLvls = getSubtreeDepth(child.sysId, childrenByNode, maxDepth);
     const curLvl  = expandedLevels[child.sysId] ?? 0;
 
@@ -306,6 +369,7 @@ function buildDiagram(
   maxDepth:       number,
   selectedApp:    AppItem | null | undefined,
   openMenu:       NodeData['onOpenMenu'],
+  pendingPeerIds: Set<string>,
 ): DiagramResult {
   const CX = CENTER_X, CY = CENTER_Y;
 
@@ -326,7 +390,7 @@ function buildDiagram(
   });
 
   const placeL1 = (ci: RelCI, pos: { x: number; y: number }, chainDir: ChainDir, edgeSrc: string, edgeTgt: string) => {
-    const svcType = classToServiceType(ci.sysClass);
+    const svcType = relCIToServiceType(ci);
     const maxLvls = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth);
     const curLvl  = expandedLevels[ci.sysId] ?? 0;
     const l1Info  = { direction: ci.direction, svcType };
@@ -339,7 +403,11 @@ function buildDiagram(
       id: ci.sysId, type: 'appNode', position: pos, hidden: false,
       data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, searchHighlight: 'none', onOpenMenu: openMenu } satisfies NodeData,
     });
-    edges.push(buildEdge({ id: `e-${edgeSrc === 'center' ? 'dn' : 'up'}-${ci.sysId}`, source: edgeSrc, target: edgeTgt, direction: ci.direction, serviceType: svcType }, false));
+    edges.push(buildEdge({
+      id: `e-${edgeSrc === 'center' ? 'dn' : 'up'}-${ci.sysId}`,
+      source: edgeSrc, target: edgeTgt, direction: ci.direction, serviceType: svcType,
+      pendingRemoval: pendingPeerIds.has(ci.sysId),
+    }, false));
 
     if (curLvl > 0) {
       placeChildrenRecursive(ci.sysId, pos, chainDir, curLvl, childrenByNode, expandedLevels, maxDepth, openMenu, nodes, edges, placedIds);
@@ -359,7 +427,7 @@ function buildDiagram(
     const rowCount    = Math.min(MAX_BI_PER_ROW, bidir.length - row * MAX_BI_PER_ROW);
     const biSpacing   = rowCount > 1 ? Math.min(190, 560 / (rowCount - 1)) : 0;
     const biStartX    = CX - ((rowCount - 1) * biSpacing) / 2;
-    const svcType     = classToServiceType(ci.sysClass);
+    const svcType     = relCIToServiceType(ci);
     const maxLvls     = getSubtreeDepth(ci.sysId, childrenByNode, maxDepth);
     const curLvl      = expandedLevels[ci.sysId] ?? 0;
     const pos         = { x: biStartX + col * biSpacing, y: CY - BI_Y_OFFSET - row * BI_ROW_Y_GAP };
@@ -373,7 +441,11 @@ function buildDiagram(
       id: ci.sysId, type: 'appNode', position: pos, hidden: false,
       data: { label: ci.name || ci.sysId, serviceType: svcType, isCenter: false, maxLevels: maxLvls, curLevel: curLvl, searchHighlight: 'none', onOpenMenu: openMenu } satisfies NodeData,
     });
-    edges.push(buildEdge({ id: `e-bi-${ci.sysId}`, source: 'center', target: ci.sysId, direction: 'bidirectional', serviceType: svcType }, false));
+    edges.push(buildEdge({
+      id: `e-bi-${ci.sysId}`, source: 'center', target: ci.sysId,
+      direction: 'bidirectional', serviceType: svcType,
+      pendingRemoval: pendingPeerIds.has(ci.sysId),
+    }, false));
 
     if (curLvl > 0) {
       placeChildrenRecursive(ci.sysId, pos, 'right', curLvl, childrenByNode, expandedLevels, maxDepth, openMenu, nodes, edges, placedIds);
@@ -511,16 +583,29 @@ const NODE_TYPES = { appNode: AppNode, centerNode: CenterNode };
 
 interface MenuState { nodeId: string; label: string; isCenter: boolean; x: number; y: number; }
 
+interface MenuPermissions {
+  loading: boolean;
+  canEdit: boolean;
+  canRemove: boolean;
+  removing: boolean;
+  removeError: string;
+}
+
 // ─── DiagramFlow ──────────────────────────────────────────────────────────────
-function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp, onSelectApp }: Props) {
+function DiagramFlow({
+  filters, nodeSearch = '', selectedApp, onSelectApp, pendingRefreshKey = 0,
+  canEditCenterRecord = false, onEditRelationships, onEditCiDetails, onRelationshipMutations,
+}: Props) {
   const { setCenter, getZoom } = useReactFlow();
 
   const [nodeMenu,        setNodeMenu]        = useState<MenuState | null>(null);
+  const [menuPermissions, setMenuPermissions] = useState<MenuPermissions | null>(null);
   const [relCIs,          setRelCIs]          = useState<RelCI[]>([]);
   const [childrenByNode,  setChildrenByNode]  = useState<Map<string, RelCI[]>>(new Map());
   const [expandedLevels,  setExpandedLevels]  = useState<Record<string, number>>({});
   const [maxDepth,        setMaxDepth]        = useState<number>(DEFAULT_DEPTH);
   const [loading,         setLoading]         = useState(false);
+  const [pendingPeerIds,  setPendingPeerIds]  = useState<Set<string>>(new Set());
   const [nodes, setNodes, onNodesChange]      = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange]      = useEdgesState<Edge>([]);
 
@@ -536,6 +621,9 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
   useEffect(() => { childrenRef.current    = childrenByNode; }, [childrenByNode]);
   useEffect(() => { onSelectAppRef.current = onSelectApp; },    [onSelectApp]);
   useEffect(() => { nodeSearchRef.current  = nodeSearch; },     [nodeSearch]);
+
+  const onRelationshipMutationsRef = useRef(onRelationshipMutations);
+  useEffect(() => { onRelationshipMutationsRef.current = onRelationshipMutations; }, [onRelationshipMutations]);
 
   // Fetch max depth from system property once on mount
   useEffect(() => {
@@ -558,12 +646,157 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
     });
   }, []);
 
-  const closeMenu  = useCallback(() => setNodeMenu(null), []);
+  const closeMenu  = useCallback(() => {
+    setNodeMenu(null);
+    setMenuPermissions(null);
+  }, []);
+
+  // ── Menu permissions (edit CI + remove relationship) ───────────────────────
+  useEffect(() => {
+    if (!nodeMenu) {
+      setMenuPermissions(null);
+      return;
+    }
+
+    if (nodeMenu.isCenter) {
+      setMenuPermissions({
+        loading: false,
+        canEdit: canEditCenterRecord,
+        canRemove: false,
+        removing: false,
+        removeError: '',
+      });
+      return;
+    }
+
+    let cancelled = false;
+    const nodeId = nodeMenu.nodeId;
+    const info = nodeInfoMapRef.current.get(nodeId);
+    const table = info?.sysClass || 'cmdb_ci_service';
+    const centerSysId = selectedApp?.sysId ?? '';
+
+    setMenuPermissions({
+      loading: true,
+      canEdit: false,
+      canRemove: false,
+      removing: false,
+      removeError: '',
+    });
+
+    (async () => {
+      const isL1Peer = isDirectCenterPeer(nodeId, relCIsRef.current);
+
+      try {
+        const [access, rels, pendingRes] = await Promise.all([
+          fetchFieldAccess(table, nodeId, ['name']),
+          isL1Peer && centerSysId ? loadAppRelationships(nodeId) : Promise.resolve([]),
+          fetchRelationshipChangesForApp(nodeId),
+        ]);
+
+        if (cancelled) return;
+
+        const canEdit = canEditRecord(access);
+        const pending = pendingRes.result ?? [];
+        const linkRels = isL1Peer
+          ? rels.filter(r => r.otherAppSysId === centerSysId)
+          : [];
+        const canRemove = canEdit && isL1Peer && linkRels.some(r => !canRemoveRelationship(r, pending));
+
+        setMenuPermissions({
+          loading: false,
+          canEdit,
+          canRemove,
+          removing: false,
+          removeError: '',
+        });
+      } catch {
+        if (!cancelled) {
+          setMenuPermissions({
+            loading: false,
+            canEdit: false,
+            canRemove: false,
+            removing: false,
+            removeError: '',
+          });
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [nodeMenu, canEditCenterRecord, selectedApp?.sysId]);
+
+  const handleRemoveRelationship = useCallback(async () => {
+    if (!nodeMenu || nodeMenu.isCenter) return;
+
+    const nodeId = nodeMenu.nodeId;
+    const centerSysId = selectedApp?.sysId;
+    if (!centerSysId || !isDirectCenterPeer(nodeId, relCIsRef.current)) return;
+
+    const partnerSysId = centerSysId;
+
+    setMenuPermissions(prev => prev
+      ? { ...prev, removing: true, removeError: '' }
+      : { loading: false, canEdit: false, canRemove: true, removing: true, removeError: '' },
+    );
+
+    try {
+      const [rels, { result: pending }] = await Promise.all([
+        loadAppRelationships(nodeId),
+        fetchRelationshipChangesForApp(nodeId),
+      ]);
+
+      const linkRels = rels.filter(r => r.otherAppSysId === partnerSysId);
+      const toRemove = linkRels.filter(r => !canRemoveRelationship(r, pending));
+
+      if (!toRemove.length) {
+        setMenuPermissions(prev => prev
+          ? { ...prev, removing: false, removeError: 'No removable relationship found.' }
+          : null,
+        );
+        return;
+      }
+
+      const mutations: RelationshipMutation[] = [];
+      for (const rel of toRemove) {
+        const res = await requestRelationshipDelete({
+          source_ci_sys_id: nodeId,
+          relationship_sys_id: rel.sysId,
+        });
+        if (!res.ok) {
+          setMenuPermissions(prev => prev
+            ? { ...prev, removing: false, removeError: res.error }
+            : null,
+          );
+          return;
+        }
+        mutations.push({ changeSysId: res.change.sys_id, action: 'delete' });
+      }
+
+      closeMenu();
+      onRelationshipMutationsRef.current?.(mutations);
+    } catch {
+      setMenuPermissions(prev => prev
+        ? { ...prev, removing: false, removeError: 'Failed to request relationship removal.' }
+        : null,
+      );
+    }
+  }, [nodeMenu, selectedApp?.sysId, closeMenu]);
+
   const setLevel   = useCallback((nodeId: string, lvl: number) => {
     if (lvl > 0) focusNodeIdRef.current = nodeId;
     setExpandedLevels(prev => ({ ...prev, [nodeId]: lvl }));
     setNodeMenu(null);
   }, []);
+
+  // ── Pending removal edges (center ↔ L1 peer) ───────────────────────────────
+  useEffect(() => {
+    const sysId = selectedApp?.sysId;
+    if (!sysId) { setPendingPeerIds(new Set()); return; }
+
+    fetchRelationshipChangesForApp(sysId)
+      .then(({ result }) => setPendingPeerIds(pendingRemovalPeerIds(sysId, result)))
+      .catch(() => setPendingPeerIds(new Set()));
+  }, [selectedApp?.sysId, pendingRefreshKey]);
 
   // ── Fetch L1 relationships when selected app changes ─────────────────────
   useEffect(() => {
@@ -618,7 +851,7 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
     prevSysIdRef.current = sysId;
 
     const { nodes: n, edges: e, nodeL1Map, nodeInfoMap } = buildDiagram(
-      relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp, openMenu,
+      relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp, openMenu, pendingPeerIds,
     );
     nodeL1MapRef.current   = nodeL1Map;
     nodeInfoMapRef.current = nodeInfoMap;
@@ -648,7 +881,7 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
       setTimeout(() => setCenter(CENTER_X, CENTER_Y, { zoom, duration: 420 }), 80);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp?.sysId]);
+  }, [relCIs, childrenByNode, expandedLevels, maxDepth, selectedApp?.sysId, pendingPeerIds]);
 
   // ── Search: glow matches, dim non-matches (preserve positions) ───────────
   useEffect(() => {
@@ -668,7 +901,9 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
       if (node.id === 'center') return node;
       const l1Info = nodeL1MapRef.current.get(node.id);
       if (!l1Info) return node;
-      const newHidden = !(filters[l1Info.direction] && filters[l1Info.svcType]);
+      const svcType = (node.data as NodeData).serviceType;
+      if (svcType === 'center') return node;
+      const newHidden = !(filters[l1Info.direction] && filters[svcType as ServiceType]);
       if (node.hidden === newHidden) return node;
       return { ...node, hidden: newHidden };
     }));
@@ -677,7 +912,8 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
       const targetL1 = nodeL1MapRef.current.get(edge.target);
       const l1Info   = sourceL1 ?? targetL1;
       if (!l1Info) return edge;
-      const newHidden = !(filters[l1Info.direction] && filters[l1Info.svcType]);
+      const svcType = ((edge.data as { serviceType?: ServiceType })?.serviceType) ?? l1Info.svcType;
+      const newHidden = !(filters[l1Info.direction] && filters[svcType]);
       if (edge.hidden === newHidden) return edge;
       return { ...edge, hidden: newHidden };
     }));
@@ -787,21 +1023,71 @@ function DiagramFlow({ filters, nodeSearch = '', onEditRelationship, selectedApp
             })()}
 
             {nodeMenu.isCenter ? (
-              <>
-                <MI icon={<ArrowUp        size={14} className="text-orange-400" />} label="Add Upstream Relationship"     onClick={closeMenu} />
-                <MI icon={<ArrowDown      size={14} className="text-blue-400"   />} label="Add Downstream Relationship"   onClick={closeMenu} />
-                <MI icon={<ArrowLeftRight size={14} className="text-violet-400" />} label="Add Bidirectional Relationship" onClick={closeMenu} />
-                <div className="border-t border-gray-100 my-1" />
-                <MI icon={<Edit2 size={14} className="text-gray-400" />} label="Edit CI Details"
-                    onClick={() => { onEditRelationship(); closeMenu(); }} />
-              </>
+              menuPermissions?.canEdit && selectedApp?.sysId && (
+                <>
+                  <div className="border-t border-gray-100 my-1" />
+                  <MI icon={<Network size={14} className="text-blue-500" />} label="Edit Relationships"
+                      onClick={() => {
+                        onEditRelationships({ sysId: selectedApp.sysId!, name: selectedApp.name });
+                        closeMenu();
+                      }} />
+                  <MI icon={<Edit2 size={14} className="text-gray-400" />} label="Edit CI Details"
+                      onClick={() => {
+                        onEditCiDetails({
+                          sysId: selectedApp.sysId!,
+                          name: selectedApp.name,
+                          table: selectedApp.table ?? 'cmdb_ci_service',
+                        });
+                        closeMenu();
+                      }} />
+                </>
+              )
             ) : (
               <>
-                <MI icon={<Edit2  size={14} className="text-gray-400" />} label="Edit Relationship"
-                    onClick={() => { onEditRelationship(); closeMenu(); }} />
-                <MI icon={<Plus   size={14} className="text-gray-400" />} label="Add New Relationship" onClick={closeMenu} />
-                <div className="border-t border-gray-100 my-1" />
-                <MI icon={<Trash2 size={14} className="text-red-400"  />} label="Remove Relationship"  onClick={closeMenu} danger />
+                {menuPermissions?.loading && (
+                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400">
+                    <Loader2 size={12} className="animate-spin" /> Checking permissions…
+                  </div>
+                )}
+                {!menuPermissions?.loading && menuPermissions?.canEdit && (() => {
+                  const info = nodeInfoMapRef.current.get(nodeMenu.nodeId);
+                  const table = info?.sysClass || 'cmdb_ci_service';
+                  return (
+                    <>
+                      <div className="border-t border-gray-100 my-1" />
+                      <MI icon={<Network size={14} className="text-blue-500" />} label="Edit Relationships"
+                          onClick={() => {
+                            onEditRelationships({ sysId: nodeMenu.nodeId, name: nodeMenu.label });
+                            closeMenu();
+                          }} />
+                      <MI icon={<Edit2 size={14} className="text-gray-400" />} label="Edit CI Details"
+                          onClick={() => {
+                            onEditCiDetails({
+                              sysId: nodeMenu.nodeId,
+                              name: nodeMenu.label,
+                              table,
+                            });
+                            closeMenu();
+                          }} />
+                    </>
+                  );
+                })()}
+                {!menuPermissions?.loading && menuPermissions?.canRemove && (
+                  <>
+                    <div className="border-t border-gray-100 my-1" />
+                    <MI
+                      icon={menuPermissions.removing
+                        ? <Loader2 size={14} className="text-red-400 animate-spin" />
+                        : <Trash2 size={14} className="text-red-400" />}
+                      label={menuPermissions.removing ? 'Requesting removal…' : 'Remove Relationship'}
+                      onClick={() => { if (!menuPermissions.removing) void handleRemoveRelationship(); }}
+                      danger
+                    />
+                    {menuPermissions.removeError && (
+                      <p className="px-3 py-1.5 text-[11px] text-red-600 leading-snug">{menuPermissions.removeError}</p>
+                    )}
+                  </>
+                )}
               </>
             )}
           </div>

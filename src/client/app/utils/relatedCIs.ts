@@ -1,6 +1,7 @@
 import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
+import { fetchCITaskFlagCounts } from './relatedCIFlags';
 
 export const LIST_VIEW_TITLE = 'CLSA CMDB Workspace Overview';
 export const RELATED_CI_PAGE_SIZE = 10;
@@ -18,6 +19,8 @@ export interface RelatedCIRow {
   sysId: string;
   sysClass: string;
   values: Record<string, string>;
+  incidents: number;
+  changes: number;
 }
 
 export interface RelatedCIPage {
@@ -160,8 +163,17 @@ export async function fetchRelatedCIPage(
       }
     }
     if (!values.name && rec && 'name' in rec) values.name = str(rec.name);
-    return { sysId: id, sysClass, values };
+    return { sysId: id, sysClass, values, incidents: 0, changes: 0 };
   });
+
+  const flagCounts = await fetchCITaskFlagCounts(childIds);
+  for (const row of rows) {
+    const flags = flagCounts.get(row.sysId);
+    if (flags) {
+      row.incidents = flags.incidents;
+      row.changes = flags.changes;
+    }
+  }
 
   return { rows, columns, totalCount, access };
 }

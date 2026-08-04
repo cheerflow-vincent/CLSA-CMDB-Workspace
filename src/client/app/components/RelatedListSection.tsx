@@ -1,6 +1,8 @@
 import { useState, useEffect, type ElementType } from 'react';
 import { ChevronLeft, ChevronRight, ChevronDown, Loader2, ExternalLink } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
+import FlagDetailPanel, { type FlagType } from './FlagDetailPanel';
+import CIFlagBadges from './CIFlagBadges';
 import { type ViewField } from '../utils/viewFields';
 import { useNarrowContainer, useResponsiveListVariant } from '../utils/useNarrowLayout';
 import {
@@ -148,21 +150,26 @@ function buildCIItem(row: RelatedCIRow): CIItem {
     owner: '',
     supportGroup: '',
     lastModified: '',
-    hasIncident: false,
-    hasChange: false,
+    hasIncident: row.incidents > 0,
+    hasChange: row.changes > 0,
   };
 }
+
 
 function RelatedCICard({
   row,
   columns,
   onViewCI,
   hoverRow,
+  showCIFlags,
+  onFlagClick,
 }: {
   row: RelatedCIRow;
   columns: ViewField[];
   onViewCI?: (ci: CIItem) => void;
   hoverRow?: string;
+  showCIFlags?: boolean;
+  onFlagClick?: (type: FlagType) => void;
 }) {
   if (!columns.length) return null;
 
@@ -174,17 +181,26 @@ function RelatedCICard({
   return (
     <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
       <div className="mb-3">
-        {onViewCI ? (
-          <button
-            type="button"
-            onClick={() => onViewCI(ciItem)}
-            className={`text-sm font-semibold text-blue-700 hover:underline text-left break-words ${hoverRow ?? ''}`}
-          >
-            {title}
-          </button>
-        ) : (
-          <span className="text-sm font-semibold text-gray-900 break-words">{title}</span>
-        )}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {onViewCI ? (
+            <button
+              type="button"
+              onClick={() => onViewCI(ciItem)}
+              className={`text-sm font-semibold text-blue-700 hover:underline text-left break-words ${hoverRow ?? ''}`}
+            >
+              {title}
+            </button>
+          ) : (
+            <span className="text-sm font-semibold text-gray-900 break-words">{title}</span>
+          )}
+          {showCIFlags && (
+            <CIFlagBadges
+              incidents={row.incidents}
+              changes={row.changes}
+              onFlagClick={onFlagClick}
+            />
+          )}
+        </div>
       </div>
       {bodyCols.length > 0 && (
         <div className="border-t border-gray-100 pt-3 space-y-1">
@@ -283,6 +299,7 @@ export default function RelatedListSection({
   variant = 'table',
   embedded = false,
   responsiveLayout = true,
+  showCIFlags = false,
 }: {
   config: RelatedCIConfig | RelatedTaskConfig;
   recordSysId?: string;
@@ -302,7 +319,14 @@ export default function RelatedListSection({
   embedded?: boolean;
   /** When false, keep table/compact layout even in narrow containers (e.g. app detail sidebar). */
   responsiveLayout?: boolean;
+  /** Show incident/change flag badges next to related CI names. */
+  showCIFlags?: boolean;
 }) {
+  const [flagPanel, setFlagPanel] = useState<{
+    recordSysId: string;
+    ciName: string;
+    flagType: FlagType;
+  } | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
   const [columns, setColumns] = useState<ViewField[]>([]);
@@ -401,20 +425,38 @@ export default function RelatedListSection({
 
     if (colIdx === 0) {
       const ciRow = row as RelatedCIRow;
+      const openFlag = (type: FlagType) => {
+        setFlagPanel({
+          recordSysId: ciRow.sysId,
+          ciName: cellVal !== '—' ? cellVal : ciRow.values.name || ciRow.sysId,
+          flagType: type,
+        });
+      };
       return (
-        <td key={col.element} className="px-3 py-1.5 max-w-[150px]">
-          {onViewCI ? (
-            <button
-              type="button"
-              onClick={() => onViewCI(buildCIItem(ciRow))}
-              className={`font-mono text-[11px] text-blue-700 truncate block max-w-full text-left hover:underline ${hoverRow ?? ''}`}
-              title={cellVal}
-            >
-              {cellVal}
-            </button>
-          ) : (
-            <span className="font-mono text-[11px] text-gray-700 truncate block">{cellVal}</span>
-          )}
+        <td key={col.element} className="px-3 py-1.5 max-w-[180px]">
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            {onViewCI ? (
+              <button
+                type="button"
+                onClick={() => onViewCI(buildCIItem(ciRow))}
+                className={`font-mono text-[11px] text-blue-700 truncate text-left hover:underline min-w-0 ${hoverRow ?? ''}`}
+                title={cellVal}
+              >
+                {cellVal}
+              </button>
+            ) : (
+              <span className="font-mono text-[11px] text-gray-700 truncate min-w-0" title={cellVal}>
+                {cellVal}
+              </span>
+            )}
+            {showCIFlags && (
+              <CIFlagBadges
+                incidents={ciRow.incidents}
+                changes={ciRow.changes}
+                onFlagClick={openFlag}
+              />
+            )}
+          </div>
         </td>
       );
     }
@@ -504,6 +546,12 @@ export default function RelatedListSection({
               columns={columns}
               onViewCI={onViewCI}
               hoverRow={hoverRow}
+              showCIFlags={showCIFlags}
+              onFlagClick={type => setFlagPanel({
+                recordSysId: row.sysId,
+                ciName: row.values[columns[0]?.element] || row.values.name || row.sysId,
+                flagType: type,
+              })}
             />
           ))}
         </div>
@@ -568,10 +616,23 @@ export default function RelatedListSection({
   }
 
   if (embedded) {
-    return <div ref={narrowRef} className="detail-pane">{listBody}</div>;
+    return (
+      <div ref={narrowRef} className="detail-pane">
+        {listBody}
+        {flagPanel && (
+          <FlagDetailPanel
+            title={flagPanel.ciName}
+            flagType={flagPanel.flagType}
+            recordSysId={flagPanel.recordSysId}
+            onClose={() => setFlagPanel(null)}
+          />
+        )}
+      </div>
+    );
   }
 
   return (
+    <>
     <div ref={narrowRef} className="detail-pane bg-white rounded-lg border border-gray-200 overflow-hidden">
       <button type="button" onClick={onToggle}
         className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
@@ -591,5 +652,15 @@ export default function RelatedListSection({
         </div>
       )}
     </div>
+
+    {flagPanel && (
+      <FlagDetailPanel
+        title={flagPanel.ciName}
+        flagType={flagPanel.flagType}
+        recordSysId={flagPanel.recordSysId}
+        onClose={() => setFlagPanel(null)}
+      />
+    )}
+    </>
   );
 }

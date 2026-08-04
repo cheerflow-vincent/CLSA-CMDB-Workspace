@@ -37,6 +37,8 @@ export const portal_rest_api = RestApi({
       produces: 'application/json',
       parameters: [
         { $id: Now.ID['relationship-change-param-ci'], name: 'ci_sys_id', required: false, shortDescription: 'App CI sys_id for related list' },
+        { $id: Now.ID['relationship-change-param-limit'], name: 'limit', required: false, shortDescription: 'Page size for paginated related list' },
+        { $id: Now.ID['relationship-change-param-offset'], name: 'offset', required: false, shortDescription: 'Zero-based row offset for paginated related list' },
       ],
       script: Now.include('../scripts/relationship-change-get.js'),
     },
