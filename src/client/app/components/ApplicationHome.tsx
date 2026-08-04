@@ -1,20 +1,42 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Search, AlertCircle, Calendar, CheckCircle2, Clock,
-  ChevronDown, ChevronUp, ChevronRight, X, LayoutGrid, List,
+  ChevronDown, ChevronUp, ChevronRight, ChevronLeft, X, LayoutGrid, List,
   Layers, TrendingUp, ArrowRight, Building2, SlidersHorizontal,
   Box, Package, Database, Loader2, ExternalLink,
 } from 'lucide-react';
 import FlagDetailPanel, { type FlagType, type IncidentRecord, type ChangeRecord } from './FlagDetailPanel';
 import AppSearchHeader from './AppSearchHeader';
 import { queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
-import { filterColumnsByProbe, isAccessDenied } from '../utils/acl';
-import { type ViewField, str, raw, loadViewFields as loadViewFieldsUtil } from '../utils/viewFields';
+import { isAccessDenied } from '../utils/acl';
+import { str } from '../utils/viewFields';
 import {
   mockApplications, appIncidents, appChanges, appFamilies,
   type AppItem, type AppFamily,
 } from '../data/appData';
 import { useEffectiveGridList, useNarrowContainer } from '../utils/useNarrowLayout';
+import {
+  type LiveInstance,
+  type SidebarFilterCriteria,
+  type TwoLevelMapping,
+  type ThreeLevelMapping,
+  fetchFlagCountsForIds,
+  loadInstanceCatalog,
+  buildInstanceFilterQuery,
+  mergeFilterCriteria,
+  hasActiveLiveFilters,
+  sidebarFiltersEqual,
+  fetchFilteredInstanceIds,
+  fetchTwoLevelFamilyPage,
+  fetchThreeLevelFamilyPage,
+  resolveTwoLevelMatchingFamilies,
+  resolveThreeLevelMatchingFamilies,
+  sumFlagCounts,
+  FAMILY_PAGE_SIZE,
+  SEARCH_DEBOUNCE_MS,
+  type FamilyMeta,
+} from '../utils/appHomeLoader';
+import type { CITaskFlagCounts } from '../utils/relatedCIFlags';
 import {
   envAccent,
   LiveInstanceCard,
@@ -49,37 +71,17 @@ const criticalityBadge: Record<string, string> = {
 
 // ─── Live data types ──────────────────────────────────────────────────────────
 
-/** Fallback fields used when the form view is absent or returns nothing */
-const DEFAULT_VIEW_FIELDS: ViewField[] = [
-  { element: 'department',         label: 'Department' },
-  { element: 'environment',        label: 'Environment' },
-  { element: 'operational_status', label: 'Operational Status' },
-  { element: 'owned_by',           label: 'Owner' },
-  { element: 'support_group',      label: 'Support Group' },
-];
-
-interface LiveInstance {
-  sys_id: string;
-  name: string;
-  sys_class_name: string;
-  operational_status: string;  // always needed for badge / border colour
-  environment: string;
-  /** Dynamic field values keyed by API field name */
-  fieldValues: Record<string, string>;
-  /** Table-specific view configuration (resolved per sys_class_name) */
-  viewFields: ViewField[];
-  incidentRecords: IncidentRecord[];
-  changeRecords: ChangeRecord[];
-  incidents: number;
-  changes: number;
-}
+const AUTO_TABLE = 'cmdb_ci_service_auto';
 interface LiveService {
   sys_id: string;
   name: string;
   short_description: string;
+  /** Resolved instance IDs (may be filtered). */
+  instanceIds: string[];
   instances: LiveInstance[];
   totalIncidents: number;
   totalChanges: number;
+  instancesLoading?: boolean;
 }
 interface LiveCoreApp {
   sys_id: string;
@@ -101,230 +103,66 @@ interface LiveAppSvc {
   sys_id: string;
   name: string;
   short_description: string;
-  /** Instance-type services that are children of this application service */
+  /** Resolved instance IDs (may be filtered). */
+  instanceIds: string[];
   instances: LiveInstance[];
   totalIncidents: number;
   totalChanges: number;
-  /** True while Phase 2 instance details are still loading */
   instancesLoading?: boolean;
 }
 
-// Extract sys_id from a reference field ({value, link} object or plain string)
-const refId = (f: unknown): string => {
-  if (typeof f === 'string') return f;
-  if (f && typeof f === 'object' && 'value' in f) return String((f as Record<string, unknown>).value ?? '');
-  return '';
-};
 
-// ─── Form-view field loader ───────────────────────────────────────────────────
-const VIEW_TITLE = 'CLSA CMDB Workspace';
-/** Wrapper: load view fields using shared utility with the CLSA CMDB Workspace view title. */
-async function loadViewFields(tableName: string): Promise<ViewField[]> {
-  return loadViewFieldsUtil(tableName, VIEW_TITLE, 5, DEFAULT_VIEW_FIELDS);
+// ─── 3-level hierarchy assembly ─────────────────────────────────────────────────
+
+function resolveInstanceIds(
+  allIds: string[],
+  filteredInstIds: Set<string> | null,
+): string[] {
+  const unique = [...new Set(allIds)];
+  if (!filteredInstIds) return unique;
+  return unique.filter(id => filteredInstIds.has(id));
 }
 
-// ─── 3-level hierarchy loader ─────────────────────────────────────────────────
-
-interface ThreeLevelMapping {
-  bApps: { sys_id: string; name: string; short_description: string }[];
-  svcMap: Map<string, { name: string; short_description: string }>;
-  bAppToSvcs: Map<string, string[]>;
-  svcToInstIds: Map<string, string[]>;
-  instanceIds: string[];
-}
-
-/** Assemble LiveCoreApp[] from mapping + instMap. Pass an empty instMap for skeleton rendering. */
 function assembleThreeLevelHierarchy(
   mapping: ThreeLevelMapping,
-  instMap: Map<string, LiveInstance>,
-  instancesLoading: boolean,
+  instCache: Map<string, LiveInstance>,
+  flagCounts: Map<string, CITaskFlagCounts>,
+  filteredInstIds: Set<string> | null,
+  loadingKeys: Set<string>,
 ): LiveCoreApp[] {
   const { bApps, svcMap, bAppToSvcs, svcToInstIds } = mapping;
   return bApps.map(app => {
     const svcIds = [...new Set(bAppToSvcs.get(app.sys_id) ?? [])];
     const services: LiveService[] = svcIds.map(sId => {
-      const svc  = svcMap.get(sId);
-      const iIds = [...new Set(svcToInstIds.get(sId) ?? [])];
-      const instances = iIds.map(id => instMap.get(id)).filter((x): x is LiveInstance => !!x);
+      const svc = svcMap.get(sId);
+      const iIds = resolveInstanceIds(svcToInstIds.get(sId) ?? [], filteredInstIds);
+      const instances = iIds.map(id => instCache.get(id)).filter((x): x is LiveInstance => !!x);
+      const totals = sumFlagCounts(iIds, flagCounts, instCache);
       return {
-        sys_id:            sId,
-        name:              svc?.name ?? sId,
+        sys_id: sId,
+        name: svc?.name ?? sId,
         short_description: svc?.short_description ?? '',
+        instanceIds: iIds,
         instances,
-        totalIncidents:    instances.reduce((s, i) => s + i.incidents, 0),
-        totalChanges:      instances.reduce((s, i) => s + i.changes, 0),
+        instancesLoading: loadingKeys.has(sId),
+        totalIncidents: totals.incidents,
+        totalChanges: totals.changes,
       };
-    });
+    }).filter(svc => !filteredInstIds || svc.instanceIds.length > 0);
+
+    const allInstIds = services.flatMap(s => s.instanceIds);
+    const appTotals = sumFlagCounts(allInstIds, flagCounts, instCache);
+
     return {
-      sys_id:            app.sys_id,
-      name:              app.name,
+      sys_id: app.sys_id,
+      name: app.name,
       short_description: app.short_description ?? '',
       services,
-      instancesLoading,
-      totalIncidents:    services.reduce((s, sv) => s + sv.totalIncidents, 0),
-      totalChanges:      services.reduce((s, sv) => s + sv.totalChanges, 0),
-      totalInstances:    services.reduce((s, sv) => s + sv.instances.length, 0),
+      totalIncidents: appTotals.incidents,
+      totalChanges: appTotals.changes,
+      totalInstances: allInstIds.length,
     };
   }).filter(app => app.services.length > 0);
-}
-
-/**
- * Phase 1 (fast): fetch business apps, relationship maps, and service names.
- * No instance detail data fetched.
- */
-async function buildThreeLevelMapping(): Promise<ThreeLevelMapping | null> {
-  const { result: bApps = [], access } = await queryTableWithAccess<{ sys_id: string; name: string; short_description: string }>({
-    table:   'cmdb_ci_business_app',
-    fields:  ['sys_id', 'name', 'short_description'],
-    limit:   500,
-    orderBy: 'name',
-  });
-  if (access === 'denied' || !bApps.length) return null;
-
-  // business_app → service (Consumes::Consumed by) — chunked to avoid 414
-  const bAppIds = bApps.map(a => a.sys_id);
-  const consumesRows = (await chunkedIN<{ parent: unknown; child: unknown }>(
-    'cmdb_rel_ci', 'parent.sys_id', bAppIds,
-    'type.name=Consumes::Consumed by', ['parent', 'child'], 5000,
-  )).rows;
-
-  const serviceIds = [...new Set(consumesRows.map(r => refId(r.child)).filter(Boolean))];
-  if (!serviceIds.length) return null;
-
-  // Service name/description — chunked
-  const svcRows = (await chunkedIN<{ sys_id: string; name: string; short_description: string }>(
-    'cmdb_ci_service', 'sys_id', serviceIds, '',
-    ['sys_id', 'name', 'short_description'], 500,
-  )).rows;
-  const svcMap = new Map<string, { name: string; short_description: string }>();
-  for (const s of svcRows) svcMap.set(s.sys_id, s);
-
-  // service → instance (Contains::Contained by) — chunked
-  const containsRows = (await chunkedIN<{ parent: unknown; child: unknown }>(
-    'cmdb_rel_ci', 'parent.sys_id', serviceIds,
-    'type.name=Contains::Contained by', ['parent', 'child'], 5000,
-  )).rows;
-
-  const bAppToSvcs = new Map<string, string[]>();
-  for (const r of consumesRows) {
-    const b = refId(r.parent), s = refId(r.child);
-    if (!b || !s) continue;
-    if (!bAppToSvcs.has(b)) bAppToSvcs.set(b, []);
-    bAppToSvcs.get(b)!.push(s);
-  }
-
-  const svcToInstIds = new Map<string, string[]>();
-  for (const r of containsRows) {
-    const s = refId(r.parent), i = refId(r.child);
-    if (!s || !i) continue;
-    if (!svcToInstIds.has(s)) svcToInstIds.set(s, []);
-    svcToInstIds.get(s)!.push(i);
-  }
-
-  const instanceIds = [...new Set(containsRows.map(r => refId(r.child)).filter(Boolean))];
-  return { bApps, svcMap, bAppToSvcs, svcToInstIds, instanceIds };
-}
-
-/**
- * Phase 2 (slow): fetch full instance details (fields, view config, incidents,
- * changes) and return an instMap ready for assembleThreeLevelHierarchy.
- */
-async function loadThreeLevelInstanceDetails(mapping: ThreeLevelMapping): Promise<Map<string, LiveInstance>> {
-  const { instanceIds } = mapping;
-  const instMap = new Map<string, LiveInstance>();
-  if (!instanceIds.length) return instMap;
-
-  const CORE         = ['sys_id', 'name', 'sys_class_name', 'operational_status', 'environment'];
-  const FILTER_EXTRA = ['department', 'u_tier'];
-
-  const coreInsts = (await chunkedIN<Record<string, unknown>>(
-    'cmdb_ci_service_auto', 'sys_id', instanceIds, '', CORE, 500, { displayValue: 'all' },
-  )).rows;
-  const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
-
-  const [viewFieldsByTable, incResult, chgResult] = await Promise.all([
-    Promise.all(tableNames.map(t => loadViewFields(t).then(vf => ({ table: t, vf })))),
-    chunkedIN<{
-      'ci_item.sys_id': unknown;
-      'task.number': unknown; 'task.short_description': unknown;
-      'task.priority': unknown; 'task.state': unknown;
-      'task.opened_at': unknown; 'task.assigned_to': unknown;
-    }>(
-      'task_ci', 'ci_item', instanceIds,
-      'task.sys_class_name=incident^task.active=true',
-      ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.priority', 'task.state', 'task.opened_at', 'task.assigned_to'],
-      500, { displayValue: true },
-    ),
-    chunkedIN<{
-      'ci_item.sys_id': unknown;
-      'task.number': unknown; 'task.short_description': unknown;
-      'task.type': unknown; 'task.state': unknown;
-      'task.start_date': unknown; 'task.assigned_to': unknown;
-    }>(
-      'task_ci', 'ci_item', instanceIds,
-      'task.sys_class_name=change_request^task.state=-2',
-      ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.type', 'task.state', 'task.start_date', 'task.assigned_to'],
-      500, { displayValue: true },
-    ),
-  ]);
-  const incRows = incResult.access === 'denied' ? [] : incResult.rows;
-  const chgRows = chgResult.access === 'denied' ? [] : chgResult.rows;
-
-  const viewFieldMap = new Map(viewFieldsByTable.map(({ table, vf }) => [table, vf]));
-  const allViewElems = [...new Set(viewFieldsByTable.flatMap(({ vf }) => vf.map(f => f.element)))];
-  const fetchFields  = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
-
-  const fullInsts = (await chunkedIN<Record<string, unknown>>(
-    'cmdb_ci_service_auto', 'sys_id', instanceIds, '', fetchFields, 500, { displayValue: 'all' },
-  )).rows;
-
-  for (const i of fullInsts) {
-    const tableName = raw(i.sys_class_name);
-    const layoutFields = viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS;
-    const readableFields = filterColumnsByProbe(layoutFields, i);
-    const fieldValues: Record<string, string> = {};
-    for (const field of fetchFields) {
-      if (field in i) fieldValues[field] = str(i[field]);
-    }
-    instMap.set(raw(i.sys_id) || str(i.sys_id), {
-      sys_id:             raw(i.sys_id) || str(i.sys_id),
-      name:               str(i.name),
-      sys_class_name:     tableName,
-      operational_status: str(i.operational_status),
-      environment:        str(i.environment),
-      fieldValues,
-      viewFields:         readableFields,
-      incidentRecords: [], changeRecords: [],
-      incidents: 0, changes: 0,
-    });
-  }
-
-  for (const r of incRows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
-    if (!inst) continue;
-    inst.incidentRecords.push({
-      number:   str(r['task.number']),    short:    str(r['task.short_description']),
-      priority: str(r['task.priority']),  state:    str(r['task.state']),
-      opened:   str(r['task.opened_at']), assignee: str(r['task.assigned_to']),
-    });
-  }
-
-  for (const r of chgRows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
-    if (!inst) continue;
-    inst.changeRecords.push({
-      number:      str(r['task.number']),     short:       str(r['task.short_description']),
-      type:        str(r['task.type']),       state:       str(r['task.state']),
-      scheduled:   str(r['task.start_date']), implementer: str(r['task.assigned_to']),
-    });
-  }
-
-  for (const inst of instMap.values()) {
-    inst.incidents = inst.incidentRecords.length;
-    inst.changes   = inst.changeRecords.length;
-  }
-
-  return instMap;
 }
 
 // ─── System property reader ───────────────────────────────────────────────────
@@ -345,234 +183,61 @@ async function readHierarchyMode(): Promise<boolean> {
   }
 }
 
-// ─── 2-level hierarchy loader ─────────────────────────────────────────────────
+// ─── 2-level hierarchy assembly ───────────────────────────────────────────────
 
-// Helper: run the same query in safe-sized ID chunks to avoid HTTP 414 URI Too Long.
-// Each sys_id is 32 chars; 150 IDs ≈ 5 KB, well within any server limit.
-const CHUNK = 150;
-async function chunkedIN<T>(
-  table: string,
-  inField: string,
-  ids: string[],
-  extraQuery: string,
-  fields: string[],
-  limitPerChunk: number,
-  options?: { displayValue?: boolean | 'all' },
-): Promise<{ rows: T[]; access: TableAccess }> {
-  if (!ids.length) return { rows: [], access: 'ok' };
-  const all: T[] = [];
-  let access: TableAccess = 'ok';
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const slice = ids.slice(i, i + CHUNK).join(',');
-    const q = extraQuery ? `${inField}IN${slice}^${extraQuery}` : `${inField}IN${slice}`;
-    const result = await queryTableWithAccess<T>({
-      table, query: q, fields, limit: limitPerChunk,
-      ...(options?.displayValue ? { displayValue: options.displayValue } : {}),
-    });
-    if (result.access === 'denied') return { rows: [], access: 'denied' };
-    if (result.access === 'error') access = 'error';
-    all.push(...(result.result ?? []));
-  }
-  return { rows: all, access };
-}
-
-interface TwoLevelMapping {
-  appFamilyMeta: Map<string, { name: string; short_description: string }>;
-  appToInstances: Map<string, Set<string>>;
-  instanceSvcIds: string[];
-}
-
-/**
- * Phase 1 (fast): run the two dot-walk relationship queries and build the
- * app-family → instance-id mapping. No instance detail data is fetched.
- */
-async function buildTwoLevelMapping(): Promise<TwoLevelMapping | null> {
-  const { result: hop1Rels = [], access: hop1Access } = await queryTableWithAccess<{
-    parent: unknown; 'parent.name': unknown; 'parent.short_description': unknown; child: unknown;
-  }>({
-    table:  'cmdb_rel_ci',
-    query:  'parent.u_service_type=service^type.name=Connects to::Connected by',
-    fields: ['parent', 'parent.name', 'parent.short_description', 'child'],
-    limit:  50000,
-  });
-  if (hop1Access === 'denied' || !hop1Rels.length) return null;
-
-  const { result: hop2Rels = [], access: hop2Access } = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
-    table:  'cmdb_rel_ci',
-    query:  'child.u_service_type=instance^type.name=Connects to::Connected by',
-    fields: ['parent', 'child'],
-    limit:  50000,
-  });
-  if (hop2Access === 'denied' || !hop2Rels.length) return null;
-
-  const hop1Map       = new Map<string, string[]>();
-  const appFamilyMeta = new Map<string, { name: string; short_description: string }>();
-  for (const r of hop1Rels) {
-    const p = refId(r.parent), c = refId(r.child);
-    if (!p || !c) continue;
-    if (!hop1Map.has(p)) hop1Map.set(p, []);
-    hop1Map.get(p)!.push(c);
-    if (!appFamilyMeta.has(p)) {
-      appFamilyMeta.set(p, {
-        name:              str(r['parent.name']),
-        short_description: str(r['parent.short_description']),
-      });
-    }
-  }
-
-  const hop2Map = new Map<string, string[]>();
-  for (const r of hop2Rels) {
-    const p = refId(r.parent), c = refId(r.child);
-    if (!p || !c) continue;
-    if (!hop2Map.has(p)) hop2Map.set(p, []);
-    hop2Map.get(p)!.push(c);
-  }
-
-  const appToInstances = new Map<string, Set<string>>();
-  for (const [appId] of hop1Map) {
-    const instSet = new Set<string>();
-    for (const intId of hop1Map.get(appId) ?? []) {
-      for (const instId of hop2Map.get(intId) ?? []) instSet.add(instId);
-    }
-    if (instSet.size > 0) appToInstances.set(appId, instSet);
-  }
-  if (!appToInstances.size) return null;
-
-  const instanceSvcIds = [...new Set([...appToInstances.values()].flatMap(s => [...s]))];
-  return { appFamilyMeta, appToInstances, instanceSvcIds };
-}
-
-/**
- * Phase 2 (slow): fetch full instance details (fields, view config, incidents,
- * changes) and return populated LiveAppSvc objects.
- */
-async function loadTwoLevelInstanceDetails(mapping: TwoLevelMapping): Promise<LiveAppSvc[]> {
-  const CORE         = ['sys_id', 'name', 'sys_class_name', 'operational_status', 'environment'];
-  const FILTER_EXTRA = ['department', 'u_tier'];
-  const { appFamilyMeta, appToInstances, instanceSvcIds } = mapping;
-
-  const coreInsts = (await chunkedIN<Record<string, unknown>>(
-    SVC_TABLE, 'sys_id', instanceSvcIds, '', CORE, 500, { displayValue: 'all' },
-  )).rows;
-  const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
-
-  const [viewFieldsByTable, incResult, chgResult] = await Promise.all([
-    Promise.all(tableNames.map(t => loadViewFields(t).then(vf => ({ table: t, vf })))),
-    chunkedIN<{
-      'ci_item.sys_id': unknown;
-      'task.number': unknown; 'task.short_description': unknown;
-      'task.priority': unknown; 'task.state': unknown;
-      'task.opened_at': unknown; 'task.assigned_to': unknown;
-    }>(
-      'task_ci', 'ci_item', instanceSvcIds,
-      'task.sys_class_name=incident^task.active=true',
-      ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.priority', 'task.state', 'task.opened_at', 'task.assigned_to'],
-      500, { displayValue: true },
-    ),
-    chunkedIN<{
-      'ci_item.sys_id': unknown;
-      'task.number': unknown; 'task.short_description': unknown;
-      'task.type': unknown; 'task.state': unknown;
-      'task.start_date': unknown; 'task.assigned_to': unknown;
-    }>(
-      'task_ci', 'ci_item', instanceSvcIds,
-      'task.sys_class_name=change_request^task.state=-2',
-      ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.type', 'task.state', 'task.start_date', 'task.assigned_to'],
-      500, { displayValue: true },
-    ),
-  ]);
-  const incRows = incResult.access === 'denied' ? [] : incResult.rows;
-  const chgRows = chgResult.access === 'denied' ? [] : chgResult.rows;
-
-  const viewFieldMap = new Map(viewFieldsByTable.map(({ table, vf }) => [table, vf]));
-  const allViewElems = [...new Set(viewFieldsByTable.flatMap(({ vf }) => vf.map(f => f.element)))];
-  const fetchFields  = [...new Set([...CORE, ...allViewElems, ...FILTER_EXTRA])];
-
-  const fullInsts = (await chunkedIN<Record<string, unknown>>(
-    SVC_TABLE, 'sys_id', instanceSvcIds, '', fetchFields, 500, { displayValue: 'all' },
-  )).rows;
-
-  const instMap = new Map<string, LiveInstance>();
-  for (const i of fullInsts) {
-    const tableName = raw(i.sys_class_name);
-    const layoutFields = viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS;
-    const readableFields = filterColumnsByProbe(layoutFields, i);
-    const fieldValues: Record<string, string> = {};
-    for (const field of fetchFields) {
-      if (field in i) fieldValues[field] = str(i[field]);
-    }
-    instMap.set(raw(i.sys_id) || str(i.sys_id), {
-      sys_id:             raw(i.sys_id) || str(i.sys_id),
-      name:               str(i.name),
-      sys_class_name:     tableName,
-      operational_status: str(i.operational_status),
-      environment:        str(i.environment),
-      fieldValues,
-      viewFields:         readableFields,
-      incidentRecords: [], changeRecords: [],
-      incidents: 0, changes: 0,
-    });
-  }
-
-  for (const r of incRows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
-    if (!inst) continue;
-    inst.incidentRecords.push({
-      number:   str(r['task.number']),    short:    str(r['task.short_description']),
-      priority: str(r['task.priority']),  state:    str(r['task.state']),
-      opened:   str(r['task.opened_at']), assignee: str(r['task.assigned_to']),
-    });
-  }
-
-  for (const r of chgRows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
-    if (!inst) continue;
-    inst.changeRecords.push({
-      number:      str(r['task.number']),     short:       str(r['task.short_description']),
-      type:        str(r['task.type']),       state:       str(r['task.state']),
-      scheduled:   str(r['task.start_date']), implementer: str(r['task.assigned_to']),
-    });
-  }
-
-  for (const inst of instMap.values()) {
-    inst.incidents = inst.incidentRecords.length;
-    inst.changes   = inst.changeRecords.length;
-  }
-
-  return [...appToInstances.keys()]
+function assembleTwoLevelFamilies(
+  mapping: TwoLevelMapping,
+  instCache: Map<string, LiveInstance>,
+  flagCounts: Map<string, CITaskFlagCounts>,
+  filteredInstIds: Set<string> | null,
+  loadingKeys: Set<string>,
+): LiveAppSvc[] {
+  return [...mapping.appToInstances.keys()]
     .map(appId => {
-      const meta      = appFamilyMeta.get(appId) ?? { name: appId, short_description: '' };
-      const childIds  = [...(appToInstances.get(appId) ?? [])];
-      const instances = childIds.map(id => instMap.get(id)).filter((x): x is LiveInstance => !!x);
+      const meta = mapping.appFamilyMeta.get(appId) ?? { name: appId, short_description: '' };
+      const iIds = resolveInstanceIds([...(mapping.appToInstances.get(appId) ?? [])], filteredInstIds);
+      const instances = iIds.map(id => instCache.get(id)).filter((x): x is LiveInstance => !!x);
+      const totals = sumFlagCounts(iIds, flagCounts, instCache);
       return {
-        sys_id:            appId,
-        name:              meta.name,
+        sys_id: appId,
+        name: meta.name,
         short_description: meta.short_description,
+        instanceIds: iIds,
         instances,
-        instancesLoading:  false,
-        totalIncidents:    instances.reduce((a, i) => a + i.incidents, 0),
-        totalChanges:      instances.reduce((a, i) => a + i.changes, 0),
+        instancesLoading: loadingKeys.has(appId),
+        totalIncidents: totals.incidents,
+        totalChanges: totals.changes,
       };
     })
-    .filter(s => s.instances.length > 0)
+    .filter(s => !filteredInstIds || s.instanceIds.length > 0)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const safe = str;
 
+const EMPTY_SIDEBAR: SidebarFilterCriteria = {
+  env: [], status: [], dept: [], bizUnit: [], tier: [],
+};
+
 // ─── Live Service Group (2nd level) ──────────────────────────────────────────
-function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLoading }: {
+function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }: {
   svc: LiveService;
   viewMode: 'grid' | 'list';
   onSelectApp: (app: AppItem) => void;
   onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
-  instancesLoading?: boolean;
+  onExpand?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const instanceCount = svc.instanceIds.length;
+  const toggleOpen = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) onExpand?.();
+  };
   return (
     <div className="mb-4">
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={toggleOpen}
         className="w-full flex items-center gap-3 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-left"
       >
         <Package className="w-4 h-4 text-gray-500 shrink-0" />
@@ -581,7 +246,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
           <span className="text-xs text-gray-400 hidden sm:block truncate max-w-xs">{svc.short_description}</span>
         )}
         <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
-          {svc.instances.length} instance{svc.instances.length !== 1 ? 's' : ''}
+          {instanceCount} instance{instanceCount !== 1 ? 's' : ''}
         </span>
         {svc.totalIncidents > 0 && (
           <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full shrink-0">
@@ -596,7 +261,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
         {open ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />}
       </button>
 
-      {open && instancesLoading && (
+      {open && svc.instancesLoading && (
         <div className="mt-3 pl-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {[1, 2, 3].map(i => (
             <div key={i} className="h-36 bg-white rounded-xl border border-gray-200 animate-pulse" />
@@ -604,7 +269,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
         </div>
       )}
 
-      {open && !instancesLoading && svc.instances.length > 0 && (
+      {open && !svc.instancesLoading && svc.instances.length > 0 && (
         <div className="mt-3 pl-2">
           {viewMode === 'grid' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -613,15 +278,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
                   key={inst.sys_id}
                   inst={inst}
                   svcName={svc.name}
-                  onViewDetails={() => onSelectApp({
-                    id: inst.sys_id, name: safe(inst.name) || inst.sys_id, app: svc.name, family: 'live',
-                    dept: '', env: safe(inst.environment),
-                    status: safe(inst.operational_status).toLowerCase().includes('operational') && !safe(inst.operational_status).toLowerCase().includes('non')
-                      ? 'Operational' : 'Degraded',
-                    incidents: inst.incidents, changes: inst.changes,
-                    criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
-                  })}
+                  onViewDetails={() => onSelectApp(instanceToAppItem(inst, svc.name))}
                   onFlagClick={ft => onFlagClick(
                     safe(inst.name) || inst.sys_id, ft, inst.sys_id,
                   )}
@@ -634,15 +291,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
                 <LiveInstanceRow
                   key={inst.sys_id}
                   inst={inst}
-                  onViewDetails={() => onSelectApp({
-                    id: inst.sys_id, name: safe(inst.name) || inst.sys_id, app: svc.name, family: 'live',
-                    dept: '', env: safe(inst.environment),
-                    status: safe(inst.operational_status).toLowerCase().includes('operational') && !safe(inst.operational_status).toLowerCase().includes('non')
-                      ? 'Operational' : 'Degraded',
-                    incidents: inst.incidents, changes: inst.changes,
-                    criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
-                  })}
+                  onViewDetails={() => onSelectApp(instanceToAppItem(inst, svc.name))}
                   onFlagClick={ft => onFlagClick(
                     inst.name, ft, inst.sys_id,
                   )}
@@ -652,7 +301,14 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
           )}
         </div>
       )}
-      {open && !instancesLoading && svc.instances.length === 0 && (
+      {open && !svc.instancesLoading && svc.instances.length === 0 && instanceCount > 0 && (
+        <div className="mt-3 pl-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-36 bg-white rounded-xl border border-gray-200 animate-pulse" />
+          ))}
+        </div>
+      )}
+      {open && !svc.instancesLoading && instanceCount === 0 && (
         <p className="mt-2 pl-6 text-xs text-gray-400 italic">No instances found</p>
       )}
     </div>
@@ -660,17 +316,24 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, instancesLo
 }
 
 // ─── 2-level: Application Service Section ────────────────────────────────────
-function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
+function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick, onExpand }: {
   appSvc: LiveAppSvc;
   viewMode: 'grid' | 'list';
   onSelectApp: (a: AppItem) => void;
   onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  onExpand?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const instanceCount = appSvc.instanceIds.length;
+  const toggleOpen = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) onExpand?.();
+  };
   return (
     <div className="mb-6">
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={toggleOpen}
         className="w-full flex items-center gap-3 px-5 py-3 rounded-xl text-left transition-colors bg-white border border-gray-200 hover:bg-gray-50 shadow-sm"
       >
         <div className="p-1.5 rounded-lg bg-indigo-700 shrink-0">
@@ -684,7 +347,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-            {appSvc.instances.length} instance{appSvc.instances.length !== 1 ? 's' : ''}
+            {instanceCount} instance{instanceCount !== 1 ? 's' : ''}
           </span>
           {appSvc.totalIncidents > 0 && (
             <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
@@ -717,15 +380,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                   key={inst.sys_id}
                   inst={inst}
                   svcName={appSvc.name}
-                  onViewDetails={() => onSelectApp({
-                    id: inst.sys_id, name: safe(inst.name) || inst.sys_id, app: appSvc.name, family: 'live',
-                    dept: '', env: safe(inst.environment),
-                    status: safe(inst.operational_status).toLowerCase().includes('operational') && !safe(inst.operational_status).toLowerCase().includes('non')
-                      ? 'Operational' : 'Degraded',
-                    incidents: inst.incidents, changes: inst.changes,
-                    criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
-                  })}
+                  onViewDetails={() => onSelectApp(instanceToAppItem(inst, appSvc.name))}
                   onFlagClick={ft => onFlagClick(
                     safe(inst.name) || inst.sys_id, ft, inst.sys_id,
                   )}
@@ -738,15 +393,7 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
                 <LiveInstanceRow
                   key={inst.sys_id}
                   inst={inst}
-                  onViewDetails={() => onSelectApp({
-                    id: inst.sys_id, name: safe(inst.name) || inst.sys_id, app: appSvc.name, family: 'live',
-                    dept: '', env: safe(inst.environment),
-                    status: safe(inst.operational_status).toLowerCase().includes('operational') && !safe(inst.operational_status).toLowerCase().includes('non')
-                      ? 'Operational' : 'Degraded',
-                    incidents: inst.incidents, changes: inst.changes,
-                    criticality: 'Tier 1', servers: 0, lastUpdated: '',
-                    sysId: inst.sys_id, table: inst.sys_class_name || SVC_TABLE,
-                  })}
+                  onViewDetails={() => onSelectApp(instanceToAppItem(inst, appSvc.name))}
                   onFlagClick={ft => onFlagClick(
                     safe(inst.name) || inst.sys_id, ft, inst.sys_id,
                   )}
@@ -756,16 +403,24 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
           )}
         </div>
       )}
+      {open && !appSvc.instancesLoading && appSvc.instances.length === 0 && instanceCount > 0 && (
+        <div className="mt-3 pl-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-36 bg-white rounded-xl border border-gray-200 animate-pulse" />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Live Core Application Section (1st level) ───────────────────────────────
-function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick }: {
+function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick, onExpandService }: {
   app: LiveCoreApp;
   viewMode: 'grid' | 'list';
   onSelectApp: (a: AppItem) => void;
   onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  onExpandService?: (svc: LiveService) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -817,7 +472,7 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick }: {
                   viewMode={viewMode}
                   onSelectApp={onSelectApp}
                   onFlagClick={onFlagClick}
-                  instancesLoading={app.instancesLoading}
+                  onExpand={() => onExpandService?.(svc)}
                 />
               ))
           }
@@ -978,14 +633,14 @@ function FamilySection({ family, appGroups, viewMode, onSelectApp, onFlagClick }
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [cardSearch, setCardSearch]         = useState('');
+  const [appliedSearch, setAppliedSearch]   = useState('');
   const [viewMode, setViewMode]             = useState<'grid' | 'list'>('grid');
   const { ref: narrowRef, narrow } = useNarrowContainer();
   const effectiveViewMode = useEffectiveGridList(viewMode, narrow);
-  const [checkedEnv, setCheckedEnv]         = useState<string[]>([]);
-  const [checkedStatus, setCheckedStatus]   = useState<string[]>([]);
-  const [checkedBizUnit, setCheckedBizUnit] = useState<string[]>([]);
-  const [checkedDept, setCheckedDept]       = useState<string[]>([]);
-  const [checkedTier, setCheckedTier]       = useState<string[]>([]);
+
+  // Sidebar filter draft (checkbox UI) vs applied (drives server queries)
+  const [draftSidebar, setDraftSidebar]     = useState<SidebarFilterCriteria>({ ...EMPTY_SIDEBAR });
+  const [appliedSidebar, setAppliedSidebar] = useState<SidebarFilterCriteria>({ ...EMPTY_SIDEBAR });
 
   // Mock data panel
   const [panel, setPanel] = useState<{ app: AppItem; flagType: FlagType } | null>(null);
@@ -1016,8 +671,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       }).then(({ result }) => {
         const seen = new Set<string>();
         return (result ?? [])
-          .filter(r => r.label && !seen.has(r.value) && seen.add(r.value))
-          .map(r => ({ label: r.label, value: r.label }));
+          .filter(r => r.label && r.value && !seen.has(r.value) && seen.add(r.value))
+          .map(r => ({ label: r.label, value: r.value }));
       });
 
     const TIER_FALLBACK: FilterOption[] = [
@@ -1033,15 +688,22 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       }).then(({ result }) =>
         (result ?? [])
           .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-          .map(r => ({ label: r.name, value: r.name }))
+          .map(r => ({ label: r.name, value: r.sys_id }))
       ),
-      queryTable<{ sys_id: string; name: string }>({
+      queryTable<{ sys_id: string; name: string; description: string }>({
         table: 'cmn_department', query: 'u_it_department=true',
-        fields: ['sys_id', 'name'], limit: 100, orderBy: 'name',
+        fields: ['sys_id', 'name', 'description'], limit: 100, orderBy: 'name',
       }).then(({ result }) =>
         (result ?? [])
-          .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-          .map(r => ({ label: r.name, value: r.name }))
+          .sort((a, b) => {
+            const aLabel = (a.description ?? a.name ?? '').trim();
+            const bLabel = (b.description ?? b.name ?? '').trim();
+            return aLabel.localeCompare(bLabel);
+          })
+          .map(r => ({
+            label: (r.description ?? r.name ?? r.sys_id).trim(),
+            value: r.sys_id,
+          }))
       ),
       fetchChoice('u_tier').then(opts => opts.length ? opts : TIER_FALLBACK),
     ])
@@ -1054,14 +716,37 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   }, []);
 
   // ── Live hierarchy ─────────────────────────────────────────────────────────
-  // hierarchyMode: true = 3-level (business app → service → instance)
-  //                false = 2-level (application service → instance service)
-  const [hierarchyMode,       setHierarchyMode]       = useState<boolean | null>(null);
-  const [liveData,             setLiveData]             = useState<LiveCoreApp[]>([]);
-  const [liveTwoLevel,         setLiveTwoLevel]         = useState<LiveAppSvc[]>([]);
-  const [liveLoading,          setLiveLoading]          = useState(true);
-  const [liveInstancesLoading, setLiveInstancesLoading] = useState(false);
-  const [liveError,            setLiveError]            = useState<string | null>(null);
+  const [hierarchyMode, setHierarchyMode] = useState<boolean | null>(null);
+  const [threeLevelMapping, setThreeLevelMapping] = useState<ThreeLevelMapping | null>(null);
+  const [twoLevelMapping, setTwoLevelMapping] = useState<TwoLevelMapping | null>(null);
+  const instCacheRef = useRef<Map<string, LiveInstance>>(new Map());
+  const [instCacheVersion, setInstCacheVersion] = useState(0);
+  const [flagCounts, setFlagCounts] = useState<Map<string, CITaskFlagCounts>>(new Map());
+  const [filteredInstIds, setFilteredInstIds] = useState<Set<string> | null>(null);
+  const [matchingFamilies, setMatchingFamilies] = useState<FamilyMeta[] | null>(null);
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set());
+  const [familyPage, setFamilyPage] = useState(0);
+  const [totalFamilies, setTotalFamilies] = useState(0);
+  const [liveLoading, setLiveLoading] = useState(true);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
+
+  const appliedFilterCriteria = useMemo(
+    () => mergeFilterCriteria(appliedSearch, appliedSidebar),
+    [appliedSearch, appliedSidebar],
+  );
+  const filtersActive = hasActiveLiveFilters(appliedFilterCriteria);
+  const hasPendingFilterChanges = !sidebarFiltersEqual(draftSidebar, appliedSidebar);
+
+  // Debounced toolbar search → applied server query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAppliedSearch(cardSearch);
+      setFamilyPage(0);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [cardSearch]);
 
   // ── Live stats — runs after hierarchyMode is known ─────────────────────────
   const [statsLoading, setStatsLoading] = useState(true);
@@ -1125,84 +810,231 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   }, [hierarchyMode]);
 
   useEffect(() => {
-    readHierarchyMode().then(is3Level => {
-      setHierarchyMode(is3Level);
-      if (is3Level) {
-        // 3-level: two-phase loading (same pattern as 2-level)
-        buildThreeLevelMapping()
-          .then(mapping => {
-            setLiveLoading(false);
-            if (!mapping) return;
-
-            // Phase 1 complete — show skeleton core app headers
-            setLiveData(assembleThreeLevelHierarchy(mapping, new Map(), true));
-            setLiveInstancesLoading(true);
-
-            // Phase 2 — load full instance details in background
-            loadThreeLevelInstanceDetails(mapping)
-              .then(instMap => setLiveData(assembleThreeLevelHierarchy(mapping, instMap, false)))
-              .catch(e => setLiveError(String(e?.message ?? e)))
-              .finally(() => setLiveInstancesLoading(false));
-          })
-          .catch(e => {
-            setLiveError(String(e?.message ?? e));
-            setLiveLoading(false);
-          });
-      } else {
-        // 2-level: two-phase loading
-        // Phase 1 – fast relationship queries; show family headers immediately
-        buildTwoLevelMapping()
-          .then(mapping => {
-            setLiveLoading(false);
-            if (!mapping) return;
-
-            // Show skeleton families while Phase 2 loads instance details
-            const skeletonFamilies: LiveAppSvc[] = [...mapping.appToInstances.keys()]
-              .map(appId => {
-                const meta = mapping.appFamilyMeta.get(appId) ?? { name: appId, short_description: '' };
-                return {
-                  sys_id:            appId,
-                  name:              meta.name,
-                  short_description: meta.short_description,
-                  instances:         [],
-                  instancesLoading:  true,
-                  totalIncidents:    0,
-                  totalChanges:      0,
-                };
-              })
-              .sort((a, b) => a.name.localeCompare(b.name));
-            setLiveTwoLevel(skeletonFamilies);
-            setLiveInstancesLoading(true);
-
-            // Phase 2 – slow: fetch full instance details in background
-            loadTwoLevelInstanceDetails(mapping)
-              .then(setLiveTwoLevel)
-              .catch(e => setLiveError(String(e?.message ?? e)))
-              .finally(() => setLiveInstancesLoading(false));
-          })
-          .catch(e => {
-            setLiveError(String(e?.message ?? e));
-            setLiveLoading(false);
-          });
-      }
-    }).catch(e => {
+    readHierarchyMode().then(setHierarchyMode).catch(e => {
       setLiveError(String(e?.message ?? e));
       setLiveLoading(false);
     });
   }, []);
 
-  const toggleFilter = (arr: string[], setArr: (v: string[]) => void, val: string) =>
-    setArr(arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val]);
+  // Resolve server filter → instance IDs + matching family list (once per applied criteria)
+  useEffect(() => {
+    if (hierarchyMode === null) return;
+
+    if (!filtersActive) {
+      setFilteredInstIds(null);
+      setMatchingFamilies(null);
+      setFilterLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setFilterLoading(true);
+
+    (async () => {
+      try {
+        const table = hierarchyMode ? AUTO_TABLE : SVC_TABLE;
+        const query = buildInstanceFilterQuery(appliedFilterCriteria, !hierarchyMode);
+        const { ids, access } = await fetchFilteredInstanceIds(table, query);
+        if (cancelled) return;
+
+        if (access === 'denied') {
+          setFilteredInstIds(new Set());
+          setMatchingFamilies([]);
+          return;
+        }
+
+        setFilteredInstIds(ids);
+        if (ids.size === 0) {
+          setMatchingFamilies([]);
+          return;
+        }
+
+        const resolved = hierarchyMode
+          ? await resolveThreeLevelMatchingFamilies(ids)
+          : await resolveTwoLevelMatchingFamilies(ids);
+        if (cancelled) return;
+
+        setMatchingFamilies(resolved.families);
+      } catch {
+        if (!cancelled) {
+          setFilteredInstIds(new Set());
+          setMatchingFamilies([]);
+        }
+      } finally {
+        if (!cancelled) setFilterLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [hierarchyMode, appliedFilterCriteria, filtersActive]);
+
+  // Server-paged family load (re-runs on page change; uses cached filter resolution)
+  useEffect(() => {
+    if (hierarchyMode === null) return;
+    if (filtersActive && filterLoading) return;
+
+    const requestId = ++loadRequestRef.current;
+    setLiveLoading(true);
+    setLiveError(null);
+
+    (async () => {
+      try {
+        const instIds = filtersActive ? filteredInstIds : null;
+        const matched = filtersActive ? matchingFamilies : null;
+
+        if (filtersActive && instIds?.size === 0) {
+          setThreeLevelMapping(null);
+          setTwoLevelMapping(null);
+          setTotalFamilies(0);
+          setFlagCounts(new Map());
+          return;
+        }
+
+        const pageResult = hierarchyMode
+          ? await fetchThreeLevelFamilyPage(familyPage, FAMILY_PAGE_SIZE, instIds, matched)
+          : await fetchTwoLevelFamilyPage(familyPage, FAMILY_PAGE_SIZE, instIds, matched);
+        if (requestId !== loadRequestRef.current) return;
+
+        if (pageResult.access === 'denied') {
+          setLiveError('Access denied while loading application data.');
+          setThreeLevelMapping(null);
+          setTwoLevelMapping(null);
+          setTotalFamilies(0);
+          return;
+        }
+
+        setTotalFamilies(pageResult.totalFamilies);
+        if (hierarchyMode) {
+          setThreeLevelMapping(pageResult.mapping as ThreeLevelMapping | null);
+          setTwoLevelMapping(null);
+          const ids = (pageResult.mapping as ThreeLevelMapping | null)?.instanceIds ?? [];
+          if (ids.length) {
+            fetchFlagCountsForIds(ids).then(counts => {
+              if (requestId === loadRequestRef.current) setFlagCounts(counts);
+            });
+          } else {
+            setFlagCounts(new Map());
+          }
+        } else {
+          setTwoLevelMapping(pageResult.mapping as TwoLevelMapping | null);
+          setThreeLevelMapping(null);
+          const ids = (pageResult.mapping as TwoLevelMapping | null)?.instanceSvcIds ?? [];
+          if (ids.length) {
+            fetchFlagCountsForIds(ids).then(counts => {
+              if (requestId === loadRequestRef.current) setFlagCounts(counts);
+            });
+          } else {
+            setFlagCounts(new Map());
+          }
+        }
+      } catch (e) {
+        if (requestId === loadRequestRef.current) {
+          setLiveError(String((e as Error)?.message ?? e));
+        }
+      } finally {
+        if (requestId === loadRequestRef.current) {
+          setLiveLoading(false);
+        }
+      }
+    })();
+  }, [
+    hierarchyMode,
+    familyPage,
+    filtersActive,
+    filterLoading,
+    filteredInstIds,
+    matchingFamilies,
+  ]);
+
+  const ensureInstancesLoaded = useCallback(async (ids: string[], key: string, table: string) => {
+    const missing = ids.filter(id => !instCacheRef.current.has(id));
+    if (!missing.length) return;
+
+    setLoadingKeys(prev => new Set(prev).add(key));
+    try {
+      const loaded = await loadInstanceCatalog(missing, table);
+      for (const [id, inst] of loaded) instCacheRef.current.set(id, inst);
+      setInstCacheVersion(v => v + 1);
+    } finally {
+      setLoadingKeys(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }, []);
+
+  const handleExpandService = useCallback((svc: LiveService) => {
+    ensureInstancesLoaded(svc.instanceIds, svc.sys_id, AUTO_TABLE);
+  }, [ensureInstancesLoaded]);
+
+  const handleExpandAppSvc = useCallback((appSvc: LiveAppSvc) => {
+    ensureInstancesLoaded(appSvc.instanceIds, appSvc.sys_id, SVC_TABLE);
+  }, [ensureInstancesLoaded]);
+
+  const instCache = instCacheRef.current;
+
+  const liveData = useMemo(() => {
+    if (!threeLevelMapping) return [];
+    return assembleThreeLevelHierarchy(
+      threeLevelMapping,
+      instCache,
+      flagCounts,
+      filteredInstIds,
+      loadingKeys,
+    );
+  }, [threeLevelMapping, instCacheVersion, flagCounts, filteredInstIds, loadingKeys, instCache]);
+
+  const liveTwoLevel = useMemo(() => {
+    if (!twoLevelMapping) return [];
+    return assembleTwoLevelFamilies(
+      twoLevelMapping,
+      instCache,
+      flagCounts,
+      filteredInstIds,
+      loadingKeys,
+    );
+  }, [twoLevelMapping, instCacheVersion, flagCounts, filteredInstIds, loadingKeys, instCache]);
+
+  const familyPageCount = Math.max(1, Math.ceil(totalFamilies / FAMILY_PAGE_SIZE));
+  const familyRangeStart = totalFamilies === 0 ? 0 : familyPage * FAMILY_PAGE_SIZE + 1;
+  const familyRangeEnd = Math.min((familyPage + 1) * FAMILY_PAGE_SIZE, totalFamilies);
+  const showFamilyPagination = totalFamilies > FAMILY_PAGE_SIZE;
+
+  const toggleDraftFilter = (
+    key: keyof SidebarFilterCriteria,
+    val: string,
+  ) => {
+    setDraftSidebar(prev => {
+      const arr = prev[key];
+      const next = arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val];
+      return { ...prev, [key]: next };
+    });
+  };
+
+  const handleApplyFilters = () => {
+    setAppliedSidebar({ ...draftSidebar });
+    setFamilyPage(0);
+  };
+
+  const handleResetFilters = () => {
+    setDraftSidebar({ ...EMPTY_SIDEBAR });
+    setAppliedSidebar({ ...EMPTY_SIDEBAR });
+    setCardSearch('');
+    setAppliedSearch('');
+    setFamilyPage(0);
+  };
 
   // ── Demo data filtering ────────────────────────────────────────────────────
   const filtered = mockApplications.filter(a => {
     const q = cardSearch.toLowerCase();
     const matchesSearch  = !q || a.name.toLowerCase().includes(q) || a.app.toLowerCase().includes(q) || a.dept.toLowerCase().includes(q);
-    const matchesEnv     = checkedEnv.length     === 0 || checkedEnv.includes(a.env);
-    const matchesStatus  = checkedStatus.length  === 0 || checkedStatus.includes(a.status);
-    const matchesBizUnit = checkedBizUnit.length === 0 || checkedBizUnit.includes(a.dept);
-    const matchesDept    = checkedDept.length    === 0 || checkedDept.includes(a.dept);
-    const matchesTier    = checkedTier.length    === 0 || (a.tier !== undefined && checkedTier.includes(a.tier));
+    const matchesEnv     = draftSidebar.env.length     === 0 || draftSidebar.env.includes(a.env);
+    const matchesStatus  = draftSidebar.status.length  === 0 || draftSidebar.status.includes(a.status);
+    // Dept / business unit filters use ServiceNow sys_ids — apply to live data only
+    const matchesBizUnit = draftSidebar.bizUnit.length === 0;
+    const matchesDept    = draftSidebar.dept.length    === 0;
+    const matchesTier    = draftSidebar.tier.length    === 0 || (a.tier !== undefined && draftSidebar.tier.includes(a.tier));
     return matchesSearch && matchesEnv && matchesStatus && matchesBizUnit && matchesDept && matchesTier;
   });
 
@@ -1215,43 +1047,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     famMap.get(item.app)!.push(item);
   }
 
-  // Filter live instances by search text + all active sidebar filters
-  const liveQ = cardSearch.toLowerCase();
-  const anyLiveFilter = liveQ || checkedEnv.length || checkedStatus.length ||
-                        checkedDept.length || checkedBizUnit.length || checkedTier.length;
-
-  const matchesLiveInst = (inst: LiveInstance): boolean => {
-    if (liveQ && !safe(inst.name).toLowerCase().includes(liveQ)) return false;
-    if (checkedEnv.length    && !checkedEnv.includes(inst.environment))            return false;
-    if (checkedStatus.length && !checkedStatus.includes(inst.operational_status))  return false;
-    // Department: match display value of the department reference field
-    if (checkedDept.length   && !checkedDept.includes(inst.fieldValues['department'] ?? '')) return false;
-    // Business Unit filter: also matched against department (same as mock-data behaviour)
-    if (checkedBizUnit.length && !checkedBizUnit.includes(inst.fieldValues['department'] ?? '')) return false;
-    // Tier: match display value of u_tier choice field
-    if (checkedTier.length   && !checkedTier.includes(inst.fieldValues['u_tier'] ?? ''))      return false;
-    return true;
-  };
-
-  const filteredLive = anyLiveFilter
-    ? liveData
-        .map(app => ({
-          ...app,
-          services: app.services
-            .map(svc => ({ ...svc, instances: svc.instances.filter(matchesLiveInst) }))
-            .filter(svc => svc.instances.length > 0),
-        }))
-        .filter(app => app.services.length > 0)
-    : liveData;
-
-  // 2-level filtered live data
-  const filteredLiveTwoLevel = anyLiveFilter
-    ? liveTwoLevel
-        .map(appSvc => ({ ...appSvc, instances: appSvc.instances.filter(matchesLiveInst) }))
-        .filter(appSvc => appSvc.instances.length > 0)
-    : liveTwoLevel;
-
-  const anyFilter = checkedEnv.length + checkedStatus.length + checkedBizUnit.length + checkedDept.length + checkedTier.length > 0;
+  const noFilterResults = filtersActive && !filterLoading && !liveLoading
+    && (filteredInstIds?.size === 0 || totalFamilies === 0);
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
@@ -1260,18 +1057,15 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Filter sidebar ── */}
-        <aside className="w-64 bg-white border-r border-gray-200 overflow-y-auto flex-shrink-0">
-          <div className="p-5">
+        <aside className="w-64 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+          <div className="flex-1 overflow-y-auto p-5 pb-24">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal className="w-4 h-4 text-gray-500" />
                 <span className="text-sm font-semibold text-gray-800">Filters</span>
               </div>
-              {anyFilter && (
-                <button
-                  onClick={() => { setCheckedEnv([]); setCheckedStatus([]); setCheckedBizUnit([]); setCheckedDept([]); setCheckedTier([]); }}
-                  className="text-xs text-red-500 hover:text-red-700 underline"
-                >Clear all</button>
+              {hasPendingFilterChanges && (
+                <span className="text-xs text-amber-600 font-medium">Unapplied</span>
               )}
             </div>
 
@@ -1280,8 +1074,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 : envOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
                 : envOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={checkedEnv.includes(opt.value)}
-                        onChange={() => toggleFilter(checkedEnv, setCheckedEnv, opt.value)}
+                      <input type="checkbox" checked={draftSidebar.env.includes(opt.value)}
+                        onChange={() => toggleDraftFilter('env', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
                       <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
                     </label>
@@ -1294,8 +1088,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 : statusOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
                 : statusOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={checkedStatus.includes(opt.value)}
-                        onChange={() => toggleFilter(checkedStatus, setCheckedStatus, opt.value)}
+                      <input type="checkbox" checked={draftSidebar.status.includes(opt.value)}
+                        onChange={() => toggleDraftFilter('status', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
                       <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
                     </label>
@@ -1308,8 +1102,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 : bizUnitOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
                 : bizUnitOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={checkedBizUnit.includes(opt.value)}
-                        onChange={() => toggleFilter(checkedBizUnit, setCheckedBizUnit, opt.value)}
+                      <input type="checkbox" checked={draftSidebar.bizUnit.includes(opt.value)}
+                        onChange={() => toggleDraftFilter('bizUnit', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
                       <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
                     </label>
@@ -1322,8 +1116,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 : deptOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
                 : deptOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={checkedDept.includes(opt.value)}
-                        onChange={() => toggleFilter(checkedDept, setCheckedDept, opt.value)}
+                      <input type="checkbox" checked={draftSidebar.dept.includes(opt.value)}
+                        onChange={() => toggleDraftFilter('dept', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
                       <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
                     </label>
@@ -1335,14 +1129,33 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               {filtersLoading ? <p className="text-xs text-gray-400 animate-pulse">Loading…</p>
                 : tierOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={checkedTier.includes(opt.value)}
-                        onChange={() => toggleFilter(checkedTier, setCheckedTier, opt.value)}
+                      <input type="checkbox" checked={draftSidebar.tier.includes(opt.value)}
+                        onChange={() => toggleDraftFilter('tier', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
                       <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
                     </label>
                   ))
               }
             </FilterSection>
+          </div>
+
+          <div className="sticky bottom-0 border-t border-gray-200 bg-white p-4 flex gap-2 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
+            <button
+              type="button"
+              onClick={handleApplyFilters}
+              disabled={!hasPendingFilterChanges || filterLoading || liveLoading}
+              className="flex-1 px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Apply
+            </button>
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              disabled={filterLoading || liveLoading}
+              className="flex-1 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Reset
+            </button>
           </div>
         </aside>
 
@@ -1411,11 +1224,11 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 </div>
               )}
 
-              {/* Phase 2 progress bar — shown after families are visible but instances still loading */}
-              {!liveLoading && liveInstancesLoading && (
-                <div className="flex items-center gap-3 px-4 py-2.5 mb-4 rounded-lg bg-blue-50 border border-blue-100 text-blue-600 text-xs">
+              {/* Filter query in progress */}
+              {!liveLoading && filterLoading && (
+                <div className="flex items-center gap-3 px-4 py-2.5 mb-4 rounded-lg bg-gray-50 border border-gray-200 text-gray-600 text-xs">
                   <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
-                  <span>Loading instance details in the background…</span>
+                  <span>Applying filters…</span>
                 </div>
               )}
 
@@ -1427,38 +1240,81 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               )}
 
               {/* ── 3-level hierarchy (business app → service → instance) ── */}
-              {!liveLoading && !liveError && hierarchyMode === true && filteredLive.length === 0 && (
+              {!liveLoading && !liveError && !filterLoading && hierarchyMode === true && noFilterResults && (
+                <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
+                  <Search className="w-10 h-10 mb-2 opacity-30" />
+                  <p className="text-sm">No instances match your filters.</p>
+                </div>
+              )}
+              {!liveLoading && !liveError && !filterLoading && hierarchyMode === true && !noFilterResults && liveData.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Database className="w-10 h-10 mb-2 opacity-30" />
                   <p className="text-sm">No core applications found in ServiceNow.</p>
                 </div>
               )}
-              {!liveLoading && !liveError && hierarchyMode === true && filteredLive.map(app => (
+              {!liveLoading && !liveError && !filterLoading && hierarchyMode === true && liveData.map(app => (
                 <LiveCoreAppSection
                   key={app.sys_id}
                   app={app}
                   viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
                   onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
+                  onExpandService={handleExpandService}
                 />
               ))}
 
               {/* ── 2-level hierarchy (application service → instance service) ── */}
-              {!liveLoading && !liveError && hierarchyMode === false && filteredLiveTwoLevel.length === 0 && (
+              {!liveLoading && !liveError && !filterLoading && hierarchyMode === false && noFilterResults && (
+                <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
+                  <Search className="w-10 h-10 mb-2 opacity-30" />
+                  <p className="text-sm">No instances match your filters.</p>
+                </div>
+              )}
+              {!liveLoading && !liveError && !filterLoading && hierarchyMode === false && !noFilterResults && liveTwoLevel.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Database className="w-10 h-10 mb-2 opacity-30" />
                   <p className="text-sm">No application services found in ServiceNow.</p>
                 </div>
               )}
-              {!liveLoading && !liveError && hierarchyMode === false && filteredLiveTwoLevel.map(appSvc => (
+              {!liveLoading && !liveError && !filterLoading && hierarchyMode === false && liveTwoLevel.map(appSvc => (
                 <LiveAppSvcSection
                   key={appSvc.sys_id}
                   appSvc={appSvc}
                   viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
                   onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
+                  onExpand={() => handleExpandAppSvc(appSvc)}
                 />
               ))}
+
+              {showFamilyPagination && !liveLoading && !filterLoading && (
+                <div className="flex items-center justify-between mt-4 px-2 py-3 border-t border-gray-200">
+                  <p className="text-xs text-gray-500">
+                    {familyRangeStart}–{familyRangeEnd} of {totalFamilies} families
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={familyPage === 0}
+                      onClick={() => setFamilyPage(p => Math.max(0, p - 1))}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" /> Previous
+                    </button>
+                    <span className="text-xs text-gray-500">
+                      Page {familyPage + 1} of {familyPageCount}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={familyPage >= familyPageCount - 1}
+                      onClick={() => setFamilyPage(p => Math.min(familyPageCount - 1, p + 1))}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      Next <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </main>
