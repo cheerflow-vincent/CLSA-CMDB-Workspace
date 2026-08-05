@@ -1,10 +1,19 @@
-import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import {
+  queryTableWithAccess,
+  fetchApplicationHomePage,
+  type ApplicationHomeRequest,
+  type ThreeLevelMappingDto,
+  type TwoLevelMappingDto,
+  type TableAccess,
+} from '../../api/servicenow';
 import { filterColumnsByProbe } from './acl';
 import { fetchCITaskFlagCounts, type CITaskFlagCounts } from './relatedCIFlags';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
 
 export const CHUNK_SIZE = 150;
+/** cmdb_rel_ci IN lists hit URL/query length limits on some instances (use smaller slices). */
+export const REL_CI_IN_CHUNK_SIZE = 50;
 export const CHUNK_CONCURRENCY = 5;
 export const FAMILY_PAGE_SIZE = 50;
 export const VIEW_TITLE = 'CLSA CMDB Workspace';
@@ -108,9 +117,10 @@ export async function chunkedINParallel<T>(
 ): Promise<{ rows: T[]; access: TableAccess }> {
   if (!ids.length) return { rows: [], access: 'ok' };
 
+  const chunkSize = table === 'cmdb_rel_ci' ? REL_CI_IN_CHUNK_SIZE : CHUNK_SIZE;
   const slices: string[] = [];
-  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-    slices.push(ids.slice(i, i + CHUNK_SIZE).join(','));
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    slices.push(ids.slice(i, i + chunkSize).join(','));
   }
 
   const all: T[] = [];
@@ -249,6 +259,161 @@ export function buildInstanceFilterQuery(
   }
 
   return parts.join('^');
+}
+
+/** Filter on cmdb_rel_ci instance edge via child.* dot-walk (hierarchy-aware). */
+export function buildRelCiInstanceEdgeQuery(
+  criteria: LiveFilterCriteria,
+  twoLevel: boolean,
+): string {
+  const parts = [
+    twoLevel
+      ? 'type.name=Connects to::Connected by'
+      : 'type.name=Contains::Contained by',
+  ];
+
+  const child = 'child.';
+  if (twoLevel) {
+    parts.push(`${child}u_service_type=instance`);
+  }
+
+  const q = criteria.search.trim();
+  if (q) parts.push(`${child}nameLIKE${q}`);
+  if (criteria.env.length) parts.push(`${child}environmentIN${criteria.env.join(',')}`);
+  if (criteria.status.length) parts.push(`${child}operational_statusIN${criteria.status.join(',')}`);
+  if (criteria.dept.length) parts.push(`${child}departmentIN${criteria.dept.join(',')}`);
+  if (criteria.bizUnit.length) parts.push(`${child}business_unitIN${criteria.bizUnit.join(',')}`);
+  if (criteria.tier.length) parts.push(`${child}u_tierIN${criteria.tier.join(',')}`);
+
+  return parts.join('^');
+}
+
+export interface FilterResolveResult {
+  instanceIds: Set<string>;
+  families: FamilyMeta[];
+  access: TableAccess;
+}
+
+/** 2-level: filter instance edges on cmdb_rel_ci, then walk to app-family services. */
+export async function resolveFilteredTwoLevelFromRelCi(
+  criteria: LiveFilterCriteria,
+): Promise<FilterResolveResult> {
+  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, true);
+
+  const edgeRes = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
+    table: 'cmdb_rel_ci',
+    query: `${edgeQuery}^ORDERBYchild.name`,
+    fields: ['parent', 'child'],
+    limit: 10000,
+  });
+
+  if (edgeRes.access === 'denied') {
+    return { instanceIds: new Set(), families: [], access: 'denied' };
+  }
+
+  const instanceIds = new Set<string>();
+  const intermediateIds = new Set<string>();
+  for (const r of edgeRes.result ?? []) {
+    const inst = refId(r.child);
+    const mid = refId(r.parent);
+    if (inst) instanceIds.add(inst);
+    if (mid) intermediateIds.add(mid);
+  }
+
+  if (!intermediateIds.size) {
+    return { instanceIds, families: [], access: edgeRes.access };
+  }
+
+  const hop1Res = await chunkedINParallel<{
+    parent: unknown; child: unknown;
+    'parent.name': unknown; 'parent.short_description': unknown;
+  }>(
+    'cmdb_rel_ci', 'child.sys_id', [...intermediateIds],
+    'type.name=Connects to::Connected by^parent.u_service_type=service',
+    ['parent', 'parent.name', 'parent.short_description', 'child'], 5000,
+  );
+
+  if (hop1Res.access === 'denied') {
+    return { instanceIds, families: [], access: 'denied' };
+  }
+
+  const familyMap = new Map<string, FamilyMeta>();
+  for (const r of hop1Res.rows) {
+    const p = refId(r.parent);
+    if (!p || familyMap.has(p)) continue;
+    familyMap.set(p, {
+      sys_id: p,
+      name: str(r['parent.name']) || p,
+      short_description: str(r['parent.short_description']),
+    });
+  }
+
+  return {
+    instanceIds,
+    families: [...familyMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    access: hop1Res.access,
+  };
+}
+
+/** 3-level: filter instance edges on cmdb_rel_ci, then walk to business apps. */
+export async function resolveFilteredThreeLevelFromRelCi(
+  criteria: LiveFilterCriteria,
+): Promise<FilterResolveResult> {
+  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, false);
+
+  const edgeRes = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
+    table: 'cmdb_rel_ci',
+    query: `${edgeQuery}^ORDERBYchild.name`,
+    fields: ['parent', 'child'],
+    limit: 10000,
+  });
+
+  if (edgeRes.access === 'denied') {
+    return { instanceIds: new Set(), families: [], access: 'denied' };
+  }
+
+  const instanceIds = new Set<string>();
+  const serviceIds = new Set<string>();
+  for (const r of edgeRes.result ?? []) {
+    const inst = refId(r.child);
+    const svc = refId(r.parent);
+    if (inst) instanceIds.add(inst);
+    if (svc) serviceIds.add(svc);
+  }
+
+  if (!serviceIds.size) {
+    return { instanceIds, families: [], access: edgeRes.access };
+  }
+
+  const consumesRes = await chunkedINParallel<{
+    parent: unknown; child: unknown;
+    'parent.name': unknown; 'parent.short_description': unknown;
+  }>(
+    'cmdb_rel_ci', 'child.sys_id', [...serviceIds],
+    'type.name=Consumes::Consumed by',
+    ['parent', 'parent.name', 'parent.short_description', 'child'], 5000,
+  );
+
+  if (consumesRes.access === 'denied') {
+    return { instanceIds, families: [], access: 'denied' };
+  }
+
+  const familyMap = new Map<string, FamilyMeta>();
+  for (const r of consumesRes.rows) {
+    const p = refId(r.parent);
+    if (!p || familyMap.has(p)) continue;
+    familyMap.set(p, {
+      sys_id: p,
+      name: str(r['parent.name']) || p,
+      short_description: str(r['parent.short_description']),
+    });
+  }
+
+  return {
+    instanceIds,
+    families: [...familyMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    access: consumesRes.access,
+  };
 }
 
 export function hasActiveLiveFilters(criteria: LiveFilterCriteria): boolean {
@@ -469,7 +634,7 @@ export async function fetchTwoLevelFamilyPage(
   }
 
   const mapping = await buildTwoLevelMappingForFamilies(families, filteredInstIds);
-  if (!mapping && access === 'ok') access = 'error';
+  if (!mapping && access === 'ok' && families.length > 0) access = 'error';
 
   return { mapping, totalFamilies, page, access };
 }
@@ -613,7 +778,187 @@ export async function fetchThreeLevelFamilyPage(
   }
 
   const mapping = await buildThreeLevelMappingForApps(bApps, filteredInstIds);
-  if (!mapping && access === 'ok') access = 'error';
+  if (!mapping && access === 'ok' && bApps.length > 0) access = 'error';
 
   return { mapping, totalFamilies, page, access };
+}
+
+export function hydrateTwoLevelMapping(dto: TwoLevelMappingDto): TwoLevelMapping {
+  const appFamilyMeta = new Map<string, { name: string; short_description: string }>();
+  for (const [id, meta] of Object.entries(dto.app_family_meta ?? {})) {
+    appFamilyMeta.set(id, meta);
+  }
+  const appToInstances = new Map<string, Set<string>>();
+  for (const [id, instIds] of Object.entries(dto.app_to_instances ?? {})) {
+    appToInstances.set(id, new Set(instIds));
+  }
+  return {
+    appFamilyMeta,
+    appToInstances,
+    instanceSvcIds: dto.instance_svc_ids ?? [],
+  };
+}
+
+export function hydrateThreeLevelMapping(dto: ThreeLevelMappingDto): ThreeLevelMapping {
+  const svcMap = new Map<string, { name: string; short_description: string }>();
+  for (const [id, meta] of Object.entries(dto.svc_map ?? {})) {
+    svcMap.set(id, meta);
+  }
+  const bAppToSvcs = new Map<string, string[]>();
+  for (const [id, svcIds] of Object.entries(dto.b_app_to_svcs ?? {})) {
+    bAppToSvcs.set(id, svcIds);
+  }
+  const svcToInstIds = new Map<string, string[]>();
+  for (const [id, instIds] of Object.entries(dto.svc_to_inst_ids ?? {})) {
+    svcToInstIds.set(id, instIds);
+  }
+  return {
+    bApps: dto.b_apps ?? [],
+    svcMap,
+    bAppToSvcs,
+    svcToInstIds,
+    instanceIds: dto.instance_ids ?? [],
+  };
+}
+
+export interface ApplicationHomePageResult {
+  twoLevelMapping: TwoLevelMapping | null;
+  threeLevelMapping: ThreeLevelMapping | null;
+  totalFamilies: number;
+  page: number;
+  access: TableAccess;
+  instanceIds: Set<string> | null;
+  filterToken: string | null;
+  truncated: boolean;
+}
+
+async function fetchApplicationHomePageLegacy(
+  criteria: LiveFilterCriteria,
+  hierarchyMode: boolean,
+  page: number,
+  pageSize: number,
+): Promise<ApplicationHomePageResult> {
+  const filtersActive = hasActiveLiveFilters(criteria);
+
+  if (filtersActive) {
+    const resolved = hierarchyMode
+      ? await resolveFilteredThreeLevelFromRelCi(criteria)
+      : await resolveFilteredTwoLevelFromRelCi(criteria);
+
+    if (resolved.access === 'denied') {
+      return {
+        twoLevelMapping: null,
+        threeLevelMapping: null,
+        totalFamilies: 0,
+        page,
+        access: 'denied',
+        instanceIds: new Set(),
+        filterToken: null,
+        truncated: false,
+      };
+    }
+
+    const pageResult = hierarchyMode
+      ? await fetchThreeLevelFamilyPage(page, pageSize, resolved.instanceIds, resolved.families)
+      : await fetchTwoLevelFamilyPage(page, pageSize, resolved.instanceIds, resolved.families);
+
+    return {
+      twoLevelMapping: hierarchyMode ? null : (pageResult.mapping as TwoLevelMapping | null),
+      threeLevelMapping: hierarchyMode ? (pageResult.mapping as ThreeLevelMapping | null) : null,
+      totalFamilies: pageResult.totalFamilies,
+      page: pageResult.page,
+      access: pageResult.access,
+      instanceIds: resolved.instanceIds,
+      filterToken: null,
+      truncated: false,
+    };
+  }
+
+  const pageResult = hierarchyMode
+    ? await fetchThreeLevelFamilyPage(page, pageSize, null, null)
+    : await fetchTwoLevelFamilyPage(page, pageSize, null, null);
+
+  return {
+    twoLevelMapping: hierarchyMode ? null : (pageResult.mapping as TwoLevelMapping | null),
+    threeLevelMapping: hierarchyMode ? (pageResult.mapping as ThreeLevelMapping | null) : null,
+    totalFamilies: pageResult.totalFamilies,
+    page: pageResult.page,
+    access: pageResult.access,
+    instanceIds: null,
+    filterToken: null,
+    truncated: false,
+  };
+}
+
+export async function fetchApplicationHomePageUnified(
+  criteria: LiveFilterCriteria,
+  hierarchyMode: boolean,
+  page: number,
+  pageSize: number,
+  filterToken: string | null,
+): Promise<ApplicationHomePageResult> {
+  const filtersActive = hasActiveLiveFilters(criteria);
+  const body: ApplicationHomeRequest = {
+    hierarchy_mode: hierarchyMode ? 'three_level' : 'two_level',
+    page,
+    page_size: pageSize,
+    search: criteria.search,
+    env: criteria.env,
+    status: criteria.status,
+    dept: criteria.dept,
+    biz_unit: criteria.bizUnit,
+    tier: criteria.tier,
+  };
+  if (filtersActive && filterToken) {
+    body.filter_token = filterToken;
+  }
+
+  const res = await fetchApplicationHomePage(body);
+
+  const shouldFallback = res.access === 'denied'
+    || res.access === 'error'
+    || (!res.mapping && res.total_families === 0 && !filtersActive);
+
+  if (shouldFallback) {
+    return fetchApplicationHomePageLegacy(criteria, hierarchyMode, page, pageSize);
+  }
+
+  if (res.access === 'denied') {
+    return {
+      twoLevelMapping: null,
+      threeLevelMapping: null,
+      totalFamilies: 0,
+      page,
+      access: 'denied',
+      instanceIds: filtersActive ? new Set() : null,
+      filterToken: null,
+      truncated: false,
+    };
+  }
+
+  const instanceIds = filtersActive ? new Set(res.instance_ids) : null;
+  let twoLevelMapping: TwoLevelMapping | null = null;
+  let threeLevelMapping: ThreeLevelMapping | null = null;
+
+  if (res.mapping) {
+    if (hierarchyMode) {
+      threeLevelMapping = hydrateThreeLevelMapping(res.mapping as ThreeLevelMappingDto);
+    } else {
+      twoLevelMapping = hydrateTwoLevelMapping(res.mapping as TwoLevelMappingDto);
+    }
+  }
+
+  let access: TableAccess = res.access === 'error' ? 'error' : 'ok';
+  if (access === 'ok' && res.total_families > 0 && !res.mapping) access = 'error';
+
+  return {
+    twoLevelMapping,
+    threeLevelMapping,
+    totalFamilies: res.total_families,
+    page: res.page,
+    access,
+    instanceIds,
+    filterToken: res.filter_token,
+    truncated: Boolean(res.truncated),
+  };
 }

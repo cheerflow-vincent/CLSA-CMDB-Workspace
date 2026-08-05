@@ -22,19 +22,13 @@ import {
   type ThreeLevelMapping,
   fetchFlagCountsForIds,
   loadInstanceCatalog,
-  buildInstanceFilterQuery,
   mergeFilterCriteria,
   hasActiveLiveFilters,
   sidebarFiltersEqual,
-  fetchFilteredInstanceIds,
-  fetchTwoLevelFamilyPage,
-  fetchThreeLevelFamilyPage,
-  resolveTwoLevelMatchingFamilies,
-  resolveThreeLevelMatchingFamilies,
+  fetchApplicationHomePageUnified,
   sumFlagCounts,
   FAMILY_PAGE_SIZE,
   SEARCH_DEBOUNCE_MS,
-  type FamilyMeta,
 } from '../utils/appHomeLoader';
 import type { CITaskFlagCounts } from '../utils/relatedCIFlags';
 import {
@@ -162,7 +156,7 @@ function assembleThreeLevelHierarchy(
       totalChanges: appTotals.changes,
       totalInstances: allInstIds.length,
     };
-  }).filter(app => app.services.length > 0);
+  }).filter(app => !filteredInstIds || app.services.length > 0);
 }
 
 // ─── System property reader ───────────────────────────────────────────────────
@@ -192,7 +186,11 @@ function assembleTwoLevelFamilies(
   filteredInstIds: Set<string> | null,
   loadingKeys: Set<string>,
 ): LiveAppSvc[] {
-  return [...mapping.appToInstances.keys()]
+  const appIds = mapping.appFamilyMeta.size
+    ? [...mapping.appFamilyMeta.keys()]
+    : [...mapping.appToInstances.keys()];
+
+  return appIds
     .map(appId => {
       const meta = mapping.appFamilyMeta.get(appId) ?? { name: appId, short_description: '' };
       const iIds = resolveInstanceIds([...(mapping.appToInstances.get(appId) ?? [])], filteredInstIds);
@@ -723,14 +721,14 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [instCacheVersion, setInstCacheVersion] = useState(0);
   const [flagCounts, setFlagCounts] = useState<Map<string, CITaskFlagCounts>>(new Map());
   const [filteredInstIds, setFilteredInstIds] = useState<Set<string> | null>(null);
-  const [matchingFamilies, setMatchingFamilies] = useState<FamilyMeta[] | null>(null);
-  const [filterLoading, setFilterLoading] = useState(false);
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set());
   const [familyPage, setFamilyPage] = useState(0);
   const [totalFamilies, setTotalFamilies] = useState(0);
   const [liveLoading, setLiveLoading] = useState(true);
   const [liveError, setLiveError] = useState<string | null>(null);
   const loadRequestRef = useRef(0);
+  const filterTokenRef = useRef<string | null>(null);
+  const criteriaKeyRef = useRef('');
 
   const appliedFilterCriteria = useMemo(
     () => mergeFilterCriteria(appliedSearch, appliedSidebar),
@@ -742,6 +740,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   // Debounced toolbar search → applied server query
   useEffect(() => {
     const timer = setTimeout(() => {
+      filterTokenRef.current = null;
+      criteriaKeyRef.current = '';
       setAppliedSearch(cardSearch);
       setFamilyPage(0);
     }, SEARCH_DEBOUNCE_MS);
@@ -816,73 +816,44 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     });
   }, []);
 
-  // Resolve server filter → instance IDs + matching family list (once per applied criteria)
+  // Unified server-paged load (filter resolve + mapping via Scripted REST)
   useEffect(() => {
     if (hierarchyMode === null) return;
-
-    if (!filtersActive) {
-      setFilteredInstIds(null);
-      setMatchingFamilies(null);
-      setFilterLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setFilterLoading(true);
-
-    (async () => {
-      try {
-        const table = hierarchyMode ? AUTO_TABLE : SVC_TABLE;
-        const query = buildInstanceFilterQuery(appliedFilterCriteria, !hierarchyMode);
-        const { ids, access } = await fetchFilteredInstanceIds(table, query);
-        if (cancelled) return;
-
-        if (access === 'denied') {
-          setFilteredInstIds(new Set());
-          setMatchingFamilies([]);
-          return;
-        }
-
-        setFilteredInstIds(ids);
-        if (ids.size === 0) {
-          setMatchingFamilies([]);
-          return;
-        }
-
-        const resolved = hierarchyMode
-          ? await resolveThreeLevelMatchingFamilies(ids)
-          : await resolveTwoLevelMatchingFamilies(ids);
-        if (cancelled) return;
-
-        setMatchingFamilies(resolved.families);
-      } catch {
-        if (!cancelled) {
-          setFilteredInstIds(new Set());
-          setMatchingFamilies([]);
-        }
-      } finally {
-        if (!cancelled) setFilterLoading(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [hierarchyMode, appliedFilterCriteria, filtersActive]);
-
-  // Server-paged family load (re-runs on page change; uses cached filter resolution)
-  useEffect(() => {
-    if (hierarchyMode === null) return;
-    if (filtersActive && filterLoading) return;
 
     const requestId = ++loadRequestRef.current;
     setLiveLoading(true);
     setLiveError(null);
 
+    const criteriaKey = JSON.stringify(appliedFilterCriteria) + String(hierarchyMode);
+    const criteriaChanged = criteriaKey !== criteriaKeyRef.current;
+    const tokenToSend = filtersActive && !criteriaChanged ? filterTokenRef.current : null;
+
     (async () => {
       try {
-        const instIds = filtersActive ? filteredInstIds : null;
-        const matched = filtersActive ? matchingFamilies : null;
+        const result = await fetchApplicationHomePageUnified(
+          appliedFilterCriteria,
+          hierarchyMode,
+          familyPage,
+          FAMILY_PAGE_SIZE,
+          tokenToSend,
+        );
+        if (requestId !== loadRequestRef.current) return;
 
-        if (filtersActive && instIds?.size === 0) {
+        filterTokenRef.current = result.filterToken;
+        criteriaKeyRef.current = criteriaKey;
+
+        if (result.access === 'denied') {
+          setLiveError('Access denied while loading application data.');
+          setThreeLevelMapping(null);
+          setTwoLevelMapping(null);
+          setFilteredInstIds(filtersActive ? new Set() : null);
+          setTotalFamilies(0);
+          setFlagCounts(new Map());
+          return;
+        }
+
+        if (result.access === 'error') {
+          setLiveError('Could not load application home data from the server.');
           setThreeLevelMapping(null);
           setTwoLevelMapping(null);
           setTotalFamilies(0);
@@ -890,24 +861,13 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
           return;
         }
 
-        const pageResult = hierarchyMode
-          ? await fetchThreeLevelFamilyPage(familyPage, FAMILY_PAGE_SIZE, instIds, matched)
-          : await fetchTwoLevelFamilyPage(familyPage, FAMILY_PAGE_SIZE, instIds, matched);
-        if (requestId !== loadRequestRef.current) return;
+        setFilteredInstIds(result.instanceIds);
+        setTotalFamilies(result.totalFamilies);
 
-        if (pageResult.access === 'denied') {
-          setLiveError('Access denied while loading application data.');
-          setThreeLevelMapping(null);
-          setTwoLevelMapping(null);
-          setTotalFamilies(0);
-          return;
-        }
-
-        setTotalFamilies(pageResult.totalFamilies);
         if (hierarchyMode) {
-          setThreeLevelMapping(pageResult.mapping as ThreeLevelMapping | null);
+          setThreeLevelMapping(result.threeLevelMapping);
           setTwoLevelMapping(null);
-          const ids = (pageResult.mapping as ThreeLevelMapping | null)?.instanceIds ?? [];
+          const ids = result.threeLevelMapping?.instanceIds ?? [];
           if (ids.length) {
             fetchFlagCountsForIds(ids).then(counts => {
               if (requestId === loadRequestRef.current) setFlagCounts(counts);
@@ -916,9 +876,9 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
             setFlagCounts(new Map());
           }
         } else {
-          setTwoLevelMapping(pageResult.mapping as TwoLevelMapping | null);
+          setTwoLevelMapping(result.twoLevelMapping);
           setThreeLevelMapping(null);
-          const ids = (pageResult.mapping as TwoLevelMapping | null)?.instanceSvcIds ?? [];
+          const ids = result.twoLevelMapping?.instanceSvcIds ?? [];
           if (ids.length) {
             fetchFlagCountsForIds(ids).then(counts => {
               if (requestId === loadRequestRef.current) setFlagCounts(counts);
@@ -940,10 +900,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   }, [
     hierarchyMode,
     familyPage,
+    appliedFilterCriteria,
     filtersActive,
-    filterLoading,
-    filteredInstIds,
-    matchingFamilies,
   ]);
 
   const ensureInstancesLoaded = useCallback(async (ids: string[], key: string, table: string) => {
@@ -1013,11 +971,15 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   };
 
   const handleApplyFilters = () => {
+    filterTokenRef.current = null;
+    criteriaKeyRef.current = '';
     setAppliedSidebar({ ...draftSidebar });
     setFamilyPage(0);
   };
 
   const handleResetFilters = () => {
+    filterTokenRef.current = null;
+    criteriaKeyRef.current = '';
     setDraftSidebar({ ...EMPTY_SIDEBAR });
     setAppliedSidebar({ ...EMPTY_SIDEBAR });
     setCardSearch('');
@@ -1047,7 +1009,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     famMap.get(item.app)!.push(item);
   }
 
-  const noFilterResults = filtersActive && !filterLoading && !liveLoading
+  const noFilterResults = filtersActive && !liveLoading
     && (filteredInstIds?.size === 0 || totalFamilies === 0);
 
   return (
@@ -1143,7 +1105,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
             <button
               type="button"
               onClick={handleApplyFilters}
-              disabled={!hasPendingFilterChanges || filterLoading || liveLoading}
+              disabled={!hasPendingFilterChanges || liveLoading}
               className="flex-1 px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               Apply
@@ -1151,7 +1113,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
             <button
               type="button"
               onClick={handleResetFilters}
-              disabled={filterLoading || liveLoading}
+              disabled={liveLoading}
               className="flex-1 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               Reset
@@ -1224,14 +1186,6 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 </div>
               )}
 
-              {/* Filter query in progress */}
-              {!liveLoading && filterLoading && (
-                <div className="flex items-center gap-3 px-4 py-2.5 mb-4 rounded-lg bg-gray-50 border border-gray-200 text-gray-600 text-xs">
-                  <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
-                  <span>Applying filters…</span>
-                </div>
-              )}
-
               {!liveLoading && liveError && (
                 <div className="flex items-center gap-3 px-5 py-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm mb-4">
                   <AlertCircle className="w-5 h-5 shrink-0" />
@@ -1240,19 +1194,19 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               )}
 
               {/* ── 3-level hierarchy (business app → service → instance) ── */}
-              {!liveLoading && !liveError && !filterLoading && hierarchyMode === true && noFilterResults && (
+              {!liveLoading && !liveError && hierarchyMode === true && noFilterResults && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Search className="w-10 h-10 mb-2 opacity-30" />
                   <p className="text-sm">No instances match your filters.</p>
                 </div>
               )}
-              {!liveLoading && !liveError && !filterLoading && hierarchyMode === true && !noFilterResults && liveData.length === 0 && (
+              {!liveLoading && !liveError && hierarchyMode === true && !noFilterResults && liveData.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Database className="w-10 h-10 mb-2 opacity-30" />
                   <p className="text-sm">No core applications found in ServiceNow.</p>
                 </div>
               )}
-              {!liveLoading && !liveError && !filterLoading && hierarchyMode === true && liveData.map(app => (
+              {!liveLoading && !liveError && hierarchyMode === true && liveData.map(app => (
                 <LiveCoreAppSection
                   key={app.sys_id}
                   app={app}
@@ -1264,19 +1218,19 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               ))}
 
               {/* ── 2-level hierarchy (application service → instance service) ── */}
-              {!liveLoading && !liveError && !filterLoading && hierarchyMode === false && noFilterResults && (
+              {!liveLoading && !liveError && hierarchyMode === false && noFilterResults && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Search className="w-10 h-10 mb-2 opacity-30" />
                   <p className="text-sm">No instances match your filters.</p>
                 </div>
               )}
-              {!liveLoading && !liveError && !filterLoading && hierarchyMode === false && !noFilterResults && liveTwoLevel.length === 0 && (
+              {!liveLoading && !liveError && hierarchyMode === false && !noFilterResults && liveTwoLevel.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Database className="w-10 h-10 mb-2 opacity-30" />
                   <p className="text-sm">No application services found in ServiceNow.</p>
                 </div>
               )}
-              {!liveLoading && !liveError && !filterLoading && hierarchyMode === false && liveTwoLevel.map(appSvc => (
+              {!liveLoading && !liveError && hierarchyMode === false && liveTwoLevel.map(appSvc => (
                 <LiveAppSvcSection
                   key={appSvc.sys_id}
                   appSvc={appSvc}
@@ -1287,7 +1241,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 />
               ))}
 
-              {showFamilyPagination && !liveLoading && !filterLoading && (
+              {showFamilyPagination && !liveLoading && (
                 <div className="flex items-center justify-between mt-4 px-2 py-3 border-t border-gray-200">
                   <p className="text-xs text-gray-500">
                     {familyRangeStart}–{familyRangeEnd} of {totalFamilies} families

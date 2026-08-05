@@ -5,6 +5,14 @@ declare global {
         namespace Internal {
             interface Keys extends KeysRegistry {
                 explicit: {
+                    'application-home-handler': {
+                        table: 'sys_script_include'
+                        id: 'b3678cc7b87f4a87b724ad383edf5b29'
+                    }
+                    'application-home-route': {
+                        table: 'sys_ws_operation'
+                        id: 'dbe94a343cd346cca82a5bc948e1b76c'
+                    }
                     bom_json: {
                         table: 'sys_module'
                         id: '6c04a20d6676451f84a69aaf721b78f8'

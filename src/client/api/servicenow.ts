@@ -240,6 +240,95 @@ export async function fetchFieldAccess(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Scripted REST — application home filter + paging
+// ──────────────────────────────────────────────────────────────────────────────
+
+export type ApplicationHomeHierarchyMode = 'two_level' | 'three_level'
+
+export interface ApplicationHomeRequest {
+  search?: string
+  env?: string[]
+  status?: string[]
+  dept?: string[]
+  biz_unit?: string[]
+  tier?: string[]
+  hierarchy_mode: ApplicationHomeHierarchyMode
+  page?: number
+  page_size?: number
+  filter_token?: string | null
+}
+
+export interface ApplicationHomeFamilyMeta {
+  sys_id: string
+  name: string
+  short_description: string
+}
+
+export interface TwoLevelMappingDto {
+  app_family_meta: Record<string, { name: string; short_description: string }>
+  app_to_instances: Record<string, string[]>
+  instance_svc_ids: string[]
+}
+
+export interface ThreeLevelMappingDto {
+  b_apps: ApplicationHomeFamilyMeta[]
+  svc_map: Record<string, { name: string; short_description: string }>
+  b_app_to_svcs: Record<string, string[]>
+  svc_to_inst_ids: Record<string, string[]>
+  instance_ids: string[]
+}
+
+export interface ApplicationHomeResponse {
+  access: TableAccess
+  hierarchy_mode: ApplicationHomeHierarchyMode
+  page: number
+  page_size: number
+  total_families: number
+  filter_token: string | null
+  instance_ids: string[]
+  mapping: TwoLevelMappingDto | ThreeLevelMappingDto | null
+  truncated?: boolean
+}
+
+const EMPTY_APPLICATION_HOME: ApplicationHomeResponse = {
+  access: 'denied',
+  hierarchy_mode: 'three_level',
+  page: 0,
+  page_size: 50,
+  total_families: 0,
+  filter_token: null,
+  instance_ids: [],
+  mapping: null,
+}
+
+export async function fetchApplicationHomePage(
+  body: ApplicationHomeRequest,
+): Promise<ApplicationHomeResponse> {
+  try {
+    const r = await axios.post(`/api/${APP_SCOPE}/portal/application_home`, body)
+    const result = r.data?.result ?? r.data
+    if (!result || typeof result !== 'object') return EMPTY_APPLICATION_HOME
+    return {
+      access: result.access === 'denied' ? 'denied' : result.access === 'error' ? 'error' : 'ok',
+      hierarchy_mode: result.hierarchy_mode === 'two_level' ? 'two_level' : 'three_level',
+      page: Number(result.page) || 0,
+      page_size: Number(result.page_size) || 50,
+      total_families: Number(result.total_families) || 0,
+      filter_token: result.filter_token ?? null,
+      instance_ids: Array.isArray(result.instance_ids) ? result.instance_ids : [],
+      mapping: result.mapping ?? null,
+      truncated: Boolean(result.truncated),
+    }
+  } catch (err) {
+    if (typeof err === 'object' && err !== null && 'response' in err) {
+      const status = (err as { response?: { status?: number } }).response?.status
+      if (status === 403 || status === 404) return EMPTY_APPLICATION_HOME
+    }
+    return { ...EMPTY_APPLICATION_HOME, access: 'error' }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Table API — record update
 // ──────────────────────────────────────────────────────────────────────────────
 

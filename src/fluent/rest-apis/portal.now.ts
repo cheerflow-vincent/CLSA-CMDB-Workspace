@@ -85,5 +85,17 @@ export const portal_rest_api = RestApi({
       ],
       script: Now.include('../scripts/relationship-approval-patch.js'),
     },
+    {
+      $id: Now.ID['application-home-route'],
+      name: 'Application home page',
+      method: 'POST',
+      path: '/application_home',
+      authentication: true,
+      authorization: true,
+      active: true,
+      consumes: 'application/json',
+      produces: 'application/json',
+      script: Now.include('../scripts/application-home-post.js'),
+    },
   ],
 })
