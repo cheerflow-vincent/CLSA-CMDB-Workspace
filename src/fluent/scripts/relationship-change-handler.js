@@ -61,8 +61,9 @@ RelationshipChangeHandler.prototype = {
       'target_ci',
       'target_ci_sys_id',
       'direction',
-      'rel_type',
+        'rel_type',
         'relationship_sys_id',
+        'relationship_sys_ids',
       ];
     var out = {};
     for (var i = 0; i < fields.length; i++) {
@@ -83,7 +84,7 @@ RelationshipChangeHandler.prototype = {
           return this.normalizeBody(JSON.parse(data));
         }
         var fromData = this.normalizeBody(data);
-        if (fromData.action || fromData.source_ci || fromData.relationship_sys_id) {
+        if (fromData.action || fromData.source_ci || fromData.relationship_sys_id || fromData.relationship_sys_ids) {
           return fromData;
         }
       }
@@ -182,14 +183,35 @@ RelationshipChangeHandler.prototype = {
     return gr.getValue('managed_by') || '';
   },
 
-  hasPendingDelete: function (relationshipSysId) {
+  parseRelationshipSysIds: function (body) {
+    var listField = this.readField(body, 'relationship_sys_ids');
+    if (listField) {
+      return listField.split(',').map(function (s) {
+        return s.replace(/^\s+|\s+$/g, '');
+      }).filter(function (s) {
+        return !!s;
+      });
+    }
+    var single = this.readField(body, 'relationship_sys_id');
+    return single ? [single] : [];
+  },
+
+  relationshipListValue: function (sysIds) {
+    return sysIds.join(',');
+  },
+
+  hasPendingDeleteForRel: function (relationshipSysId) {
     var dup = new GlideRecord(this.CHANGE_TABLE);
-    dup.addQuery('relationship', relationshipSysId);
+    dup.addQuery('relationship', 'CONTAINS', relationshipSysId);
     dup.addQuery('state', 'pending_approval');
     dup.addQuery('action', 'delete');
     dup.setLimit(1);
     dup.query();
     return dup.hasNext();
+  },
+
+  hasPendingDelete: function (relationshipSysId) {
+    return this.hasPendingDeleteForRel(relationshipSysId);
   },
 
   hasActiveRel: function (parentCi, childCi, relTypeName) {
@@ -209,11 +231,20 @@ RelationshipChangeHandler.prototype = {
     var requester = this.sn(gr.getValue('requested_by'));
     var state = this.sn(gr.getValue('state'));
     var action = this.sn(gr.getValue('action'));
+    var relationshipRaw = this.sn(gr.getValue('relationship'));
+    var relationshipSysIds = relationshipRaw
+      ? relationshipRaw.split(',').map(function (s) {
+          return s.replace(/^\s+|\s+$/g, '');
+        }).filter(function (s) {
+          return !!s;
+        })
+      : [];
     return {
       sys_id: gr.getUniqueValue(),
       action: action,
       state: state,
-      relationship_sys_id: this.sn(gr.getValue('relationship')),
+      relationship_sys_id: relationshipRaw,
+      relationship_sys_ids: relationshipSysIds,
       rel_type: this.sn(gr.getValue('rel_type')),
       parent_ci_sys_id: this.sn(gr.getValue('parent_ci')),
       child_ci_sys_id: this.sn(gr.getValue('child_ci')),
@@ -395,11 +426,105 @@ RelationshipChangeHandler.prototype = {
       }
 
       if (action === 'delete') {
-        var relationshipSysId = this.readField(body, 'relationship_sys_id');
-        if (!sourceCi || !relationshipSysId) {
-          this.jsonError(response, 400, 'Missing required fields for delete: source_ci, relationship_sys_id');
+        var relationshipSysIds = this.parseRelationshipSysIds(body);
+        var directionDel = this.readField(body, 'direction');
+        if (!sourceCi || !relationshipSysIds.length) {
+          this.jsonError(
+            response,
+            400,
+            'Missing required fields for delete: source_ci, relationship_sys_ids',
+          );
           return;
         }
+
+        if (directionDel === 'bidirectional' || relationshipSysIds.length > 1) {
+          if (relationshipSysIds.length !== 2) {
+            this.jsonError(
+              response,
+              400,
+              'Bidirectional delete requires exactly two relationship sys_ids.',
+            );
+            return;
+          }
+
+          var relRecords = [];
+          for (var i = 0; i < relationshipSysIds.length; i++) {
+            var relGr = new GlideRecord('cmdb_rel_ci');
+            if (!relGr.get(relationshipSysIds[i])) {
+              this.jsonError(response, 404, 'Relationship not found: ' + relationshipSysIds[i]);
+              return;
+            }
+            relRecords.push({
+              sysId: relationshipSysIds[i],
+              parent: this.sn(relGr.getValue('parent')),
+              child: this.sn(relGr.getValue('child')),
+              type: this.sn(relGr.getValue('type')),
+            });
+          }
+
+          var peerA = relRecords[0].parent === sourceCi ? relRecords[0].child : relRecords[0].parent;
+          var peerB = relRecords[1].parent === sourceCi ? relRecords[1].child : relRecords[1].parent;
+          if (peerA !== peerB) {
+            this.jsonError(response, 400, 'Bidirectional relationships must share the same peer CI.');
+            return;
+          }
+          if (
+            relRecords[0].parent !== sourceCi
+            && relRecords[0].child !== sourceCi
+          ) {
+            this.jsonError(response, 400, 'Source CI is not part of this relationship');
+            return;
+          }
+          if (
+            relRecords[1].parent !== sourceCi
+            && relRecords[1].child !== sourceCi
+          ) {
+            this.jsonError(response, 400, 'Source CI is not part of this relationship');
+            return;
+          }
+
+          for (var j = 0; j < relationshipSysIds.length; j++) {
+            if (this.hasPendingDeleteForRel(relationshipSysIds[j])) {
+              this.jsonError(
+                response,
+                409,
+                'A pending delete request already exists for this relationship.',
+              );
+              return;
+            }
+          }
+
+          var relTypeBi = '';
+          var typeGrBi = new GlideRecord('cmdb_rel_type');
+          if (typeGrBi.get(relRecords[0].type)) {
+            relTypeBi = this.sn(typeGrBi.getValue('name'));
+          }
+
+          var biChange = new GlideRecord(this.CHANGE_TABLE);
+          biChange.initialize();
+          biChange.setValue('action', 'delete');
+          biChange.setValue('state', 'pending_approval');
+          biChange.setValue('relationship', this.relationshipListValue(relationshipSysIds));
+          biChange.setValue('rel_type', relTypeBi);
+          biChange.setValue('parent_ci', relRecords[0].parent);
+          biChange.setValue('child_ci', relRecords[0].child);
+          biChange.setValue('source_ci', sourceCi);
+          biChange.setValue('target_ci', peerA);
+          biChange.setValue('direction', 'bidirectional');
+          biChange.setValue('requested_by', currentUserId);
+          biChange.setValue('requested_at', new GlideDateTime());
+          var biSysId = biChange.insert();
+          if (!biSysId) {
+            this.jsonError(response, 500, 'Failed to create delete request');
+            return;
+          }
+
+          biChange.get(biSysId);
+          this.jsonOk(response, { result: this.serializeChangeRow(biChange) });
+          return;
+        }
+
+        var relationshipSysId = relationshipSysIds[0];
 
         var existingRel = new GlideRecord('cmdb_rel_ci');
         if (!existingRel.get(relationshipSysId)) {
@@ -414,7 +539,7 @@ RelationshipChangeHandler.prototype = {
           return;
         }
 
-        if (this.hasPendingDelete(relationshipSysId)) {
+        if (this.hasPendingDeleteForRel(relationshipSysId)) {
           this.jsonError(response, 409, 'A pending delete request already exists for this relationship.');
           return;
         }

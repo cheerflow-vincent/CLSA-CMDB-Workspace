@@ -6,6 +6,93 @@ axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest'
 
 const APP_SCOPE = 'x_citi4_clsa_cmd_0'
 
+function unwrapRestBody<T>(data: unknown): T {
+  const d = data as { result?: T } & T
+  if (d && typeof d === 'object' && 'result' in d && d.result !== undefined) {
+    return d.result as T
+  }
+  return d as T
+}
+
+export interface FilterOptionDto {
+  label: string
+  value: string
+}
+
+export interface PortalMetadataResponse {
+  hierarchy_mode: boolean
+  properties: Record<string, string>
+  filter_options: {
+    environment: FilterOptionDto[]
+    operational_status: FilterOptionDto[]
+    u_tier: FilterOptionDto[]
+  }
+  business_units: FilterOptionDto[]
+  departments: FilterOptionDto[]
+}
+
+let _portalMetadataCache: PortalMetadataResponse | null = null
+
+const EMPTY_PORTAL_METADATA: PortalMetadataResponse = {
+  hierarchy_mode: true,
+  properties: {},
+  filter_options: { environment: [], operational_status: [], u_tier: [] },
+  business_units: [],
+  departments: [],
+}
+
+/** Server-brokered portal metadata (choices, properties, reference lists). */
+export async function fetchPortalMetadata(force = false): Promise<PortalMetadataResponse> {
+  if (_portalMetadataCache && !force) return _portalMetadataCache
+  try {
+    const r = await axios.get(`/api/${APP_SCOPE}/portal/metadata`)
+    const payload = unwrapRestBody(unwrapRestBody(r.data)) as PortalMetadataResponse
+    _portalMetadataCache = payload?.properties ? payload : EMPTY_PORTAL_METADATA
+  } catch {
+    _portalMetadataCache = EMPTY_PORTAL_METADATA
+  }
+  return _portalMetadataCache
+}
+
+export type ViewLayoutType = 'form' | 'list' | 'form_layout'
+
+export interface ViewFieldDto {
+  element: string
+  label: string
+}
+
+export type ViewLayoutFormRowDto =
+  | { kind: 'full'; field: ViewFieldDto }
+  | { kind: 'columns'; left: ViewFieldDto[]; right: ViewFieldDto[] };
+
+export interface ViewLayoutSectionDto {
+  caption: string | null
+  rows: ViewLayoutFormRowDto[]
+}
+
+export interface ViewLayoutResponse {
+  fields?: ViewFieldDto[]
+  sections?: ViewLayoutSectionDto[]
+  resolved_table?: string
+  resolved_view?: 'named' | 'default'
+}
+
+/** Server-brokered form/list/form_layout field definitions. */
+export async function fetchViewLayout(params: {
+  table: string
+  view_title?: string
+  type: ViewLayoutType
+  default_limit?: number
+  parent_table?: string
+}): Promise<ViewLayoutResponse> {
+  try {
+    const r = await axios.get(`/api/${APP_SCOPE}/portal/view_layout`, { params })
+    return unwrapRestBody(unwrapRestBody(r.data)) as ViewLayoutResponse
+  } catch {
+    return {}
+  }
+}
+
 // ServiceNow injects a global `g_user` object into every UI page containing
 // the currently logged-in user's details. Read it directly — no HTTP call
 // needed and no risk of triggering an auth challenge.
@@ -155,13 +242,12 @@ export async function queryTableWithAccess<T>(params: TableQueryParams): Promise
  */
 export async function getSysProperties(names: string[]): Promise<Record<string, string>> {
   if (!names.length) return {}
-  const { result } = await queryTable<{ name: string; value: string }>({
-    table: 'sys_properties',
-    query: `nameIN${names.join(',')}`,
-    fields: ['name', 'value'],
-    limit: names.length,
-  })
-  return Object.fromEntries((result ?? []).map(r => [r.name, r.value]))
+  const meta = await fetchPortalMetadata()
+  const out: Record<string, string> = {}
+  for (const name of names) {
+    if (meta.properties[name] !== undefined) out[name] = meta.properties[name]
+  }
+  return out
 }
 
 const DEFAULT_CI_FILTER = 'install_status!=7'
@@ -564,7 +650,9 @@ export interface RelationshipChangeRequest {
   sys_id: string;
   action: RelationshipChangeAction;
   state: RelationshipChangeState;
+  /** Comma-separated cmdb_rel_ci sys_ids (list collector). */
   relationship_sys_id: string;
+  relationship_sys_ids?: string[];
   rel_type: string;
   parent_ci_sys_id: string;
   child_ci_sys_id: string;
@@ -618,14 +706,6 @@ export interface RelationshipChangeListResponse {
 export interface RelationshipApprovalListResponse {
   current_user_sys_id: string;
   result: RelationshipApprovalRecord[];
-}
-
-function unwrapRestBody<T>(data: unknown): T {
-  const d = data as { result?: T } & T;
-  if (d && typeof d === 'object' && 'result' in d && d.result !== undefined) {
-    return d.result as T;
-  }
-  return d as T;
 }
 
 export async function fetchRelationshipChangesForApp(
@@ -715,13 +795,21 @@ export async function createRelationshipChange(
 
 export async function requestRelationshipDelete(body: {
   source_ci_sys_id: string;
-  relationship_sys_id: string;
+  relationship_sys_id?: string;
+  relationship_sys_ids?: string[];
+  direction?: 'upstream' | 'downstream' | 'bidirectional';
 }): Promise<{ ok: true; change: RelationshipChangeRequest } | { ok: false; error: string }> {
   try {
+    const relationshipSysIds = body.relationship_sys_ids?.length
+      ? body.relationship_sys_ids
+      : body.relationship_sys_id
+        ? [body.relationship_sys_id]
+        : [];
     const r = await axios.post(`/api/${APP_SCOPE}/portal/relationship_change`, {
       action: 'delete',
       source_ci: body.source_ci_sys_id,
-      relationship_sys_id: body.relationship_sys_id,
+      relationship_sys_ids: relationshipSysIds.join(','),
+      direction: body.direction,
     });
     const change = unwrapRestBody<{ result?: RelationshipChangeRequest } & RelationshipChangeRequest>(r.data);
     const row = (change as { result?: RelationshipChangeRequest }).result ?? change;

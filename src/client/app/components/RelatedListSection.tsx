@@ -16,6 +16,7 @@ import {
   fetchRelatedTaskCount,
   fetchRelatedTaskPage,
   type RelatedTaskConfig,
+  type RelatedTaskRecordContext,
   type RelatedTaskRow,
 } from '../utils/relatedTasks';
 import type { TableAccess } from '../../api/servicenow';
@@ -295,7 +296,9 @@ export default function RelatedListSection({
   badgeText,
   badgeBorder,
   hoverRow,
-  emptyMessage = 'No related records found.',
+  emptyMessage,
+  recordContext,
+  refreshKey = 0,
   variant = 'table',
   embedded = false,
   responsiveLayout = true,
@@ -315,6 +318,10 @@ export default function RelatedListSection({
   badgeBorder: string;
   hoverRow?: string;
   emptyMessage?: string;
+  /** Resolves emptyMessage from task config when prop is omitted. */
+  recordContext?: RelatedTaskRecordContext;
+  /** Bump to refetch count and list data. */
+  refreshKey?: number;
   variant?: RelatedListVariant;
   embedded?: boolean;
   /** When false, keep table/compact layout even in narrow containers (e.g. app detail sidebar). */
@@ -335,6 +342,10 @@ export default function RelatedListSection({
   const [access, setAccess] = useState<TableAccess>('ok');
   const taskMode = isTaskConfig(config);
   const taskConfig = taskMode ? config : null;
+  const resolvedEmptyMessage =
+    emptyMessage ??
+    (recordContext && taskConfig?.emptyMessages?.[recordContext]) ??
+    'No related records found.';
   const isIncident = taskConfig?.taskClass === 'incident';
   const displayVariant = taskMode ? variant : 'table';
   const { ref: narrowRef, narrow } = useNarrowContainer();
@@ -364,7 +375,7 @@ export default function RelatedListSection({
         setTotalCount(0);
         setAccess('error');
       });
-  }, [recordSysId, config, taskMode]);
+  }, [recordSysId, config, taskMode, refreshKey]);
 
   useEffect(() => {
     if (!contentOpen || !recordSysId) return;
@@ -385,7 +396,7 @@ export default function RelatedListSection({
         setAccess('error');
       })
       .finally(() => setLoading(false));
-  }, [contentOpen, recordSysId, page, config, taskMode]);
+  }, [contentOpen, recordSysId, page, config, taskMode, refreshKey]);
 
   const pageSize = RELATED_CI_PAGE_SIZE;
   const start = totalCount === 0 ? 0 : page * pageSize + 1;
@@ -590,7 +601,7 @@ export default function RelatedListSection({
           <Loader2 className="w-4 h-4 animate-spin" /> Loading…
         </div>
       ) : totalCount === 0 ? (
-        <p className={`text-xs text-gray-400 italic text-center ${embedded ? 'py-10' : 'px-3 py-6'}`}>{emptyMessage}</p>
+        <p className={`text-xs text-gray-400 italic text-center ${embedded ? 'py-10' : 'px-3 py-6'}`}>{resolvedEmptyMessage}</p>
       ) : (
         <>
           {taskMode ? renderTaskList() : renderCIList()}

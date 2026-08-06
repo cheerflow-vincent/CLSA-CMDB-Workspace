@@ -1,4 +1,10 @@
 import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import {
+  CHANGE_TREND_CONFIG,
+  INCIDENT_TREND_CONFIG,
+  taskCiTrendQuery,
+  type TaskTrendQueryConfig,
+} from './relatedTasks';
 import { raw } from './viewFields';
 
 export interface TrendMonthBucket {
@@ -74,7 +80,7 @@ function buildTaskListUrl(
 
 async function fetchOpenedTasksForCi(
   ciSysId: string,
-  taskClass: 'incident' | 'change_request',
+  config: TaskTrendQueryConfig,
   rangeStart: Date,
 ): Promise<{ byMonth: Map<string, string[]>; access: TableAccess }> {
   const byMonth = new Map<string, string[]>();
@@ -88,7 +94,7 @@ async function fetchOpenedTasksForCi(
   while (true) {
     const { result, totalCount, access: pageAccess } = await queryTableWithAccess<Record<string, unknown>>({
       table: 'task_ci',
-      query: `ci_item.sys_id=${ciSysId}^task.sys_class_name=${taskClass}^task.opened_at>=${rangeStartStr}^ORDERBYtask.opened_at`,
+      query: taskCiTrendQuery(ciSysId, config, rangeStartStr),
       fields: ['task.sys_id', 'task.opened_at'],
       limit,
       offset,
@@ -145,8 +151,8 @@ export async function fetchCITaskTrend(ciSysId: string): Promise<CITaskTrendResu
 
   const rangeStart = buckets[0].start;
   const [incidentResult, changeResult] = await Promise.all([
-    fetchOpenedTasksForCi(ciSysId, 'incident', rangeStart),
-    fetchOpenedTasksForCi(ciSysId, 'change_request', rangeStart),
+    fetchOpenedTasksForCi(ciSysId, INCIDENT_TREND_CONFIG, rangeStart),
+    fetchOpenedTasksForCi(ciSysId, CHANGE_TREND_CONFIG, rangeStart),
   ]);
 
   const access =

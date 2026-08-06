@@ -30,15 +30,32 @@ export function emptyDirectionGroup(): DirectionGroup {
   return { existing: [], draftRemovals: [], draftAdds: [], serverPendingRemovals: [] };
 }
 
+/** Parse relationship list field (comma-separated sys_ids) from API row. */
+export function relationshipSysIdsFromChange(change: RelationshipChangeRequest): string[] {
+  if (change.relationship_sys_ids?.length) return change.relationship_sys_ids;
+  if (!change.relationship_sys_id) return [];
+  return change.relationship_sys_id.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function pendingDeleteRelIds(pendingChanges: RelationshipChangeRequest[]): Set<string> {
+  const ids = new Set<string>();
+  for (const c of pendingChanges) {
+    if (c.action !== 'delete' || c.state !== 'pending_approval') continue;
+    for (const id of relationshipSysIdsFromChange(c)) ids.add(id);
+  }
+  return ids;
+}
+
+function relMatchesPendingDelete(rel: LiveRelationship, pendingIds: Set<string>): boolean {
+  const relIds = rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId];
+  return relIds.some(id => pendingIds.has(id));
+}
+
 export function buildInitialGroups(
   live: LiveRelationship[],
   pendingChanges: RelationshipChangeRequest[],
 ): DirectionGroups {
-  const pendingDeleteRelIds = new Set(
-    pendingChanges
-      .filter(c => c.action === 'delete' && c.state === 'pending_approval' && c.relationship_sys_id)
-      .map(c => c.relationship_sys_id),
-  );
+  const pendingDeleteIds = pendingDeleteRelIds(pendingChanges);
 
   const groups: DirectionGroups = {
     upstream: emptyDirectionGroup(),
@@ -48,7 +65,7 @@ export function buildInitialGroups(
 
   for (const rel of live) {
     const bucket = groups[rel.direction];
-    if (pendingDeleteRelIds.has(rel.sysId)) {
+    if (relMatchesPendingDelete(rel, pendingDeleteIds)) {
       bucket.serverPendingRemovals.push(rel);
     } else {
       bucket.existing.push(rel);
@@ -81,17 +98,16 @@ function activeRelKeys(
   draftAdds: DraftAdd[],
   sourceCi: string,
 ): Set<string> {
-  const removalIds = new Set(draftRemovals.map(r => r.sysId));
-  const pendingDeleteIds = new Set(
-    pendingChanges
-      .filter(c => c.action === 'delete' && c.state === 'pending_approval')
-      .map(c => c.relationship_sys_id),
+  const removalIds = new Set(
+    draftRemovals.flatMap(r => (r.relationshipSysIds?.length ? r.relationshipSysIds : [r.sysId])),
   );
+  const pendingDeleteIds = pendingDeleteRelIds(pendingChanges);
 
   const keys = new Set<string>();
 
   for (const rel of live) {
-    if (removalIds.has(rel.sysId) || pendingDeleteIds.has(rel.sysId)) continue;
+    const relIds = rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId];
+    if (relIds.some(id => removalIds.has(id) || pendingDeleteIds.has(id))) continue;
     keys.add(relKey(rel.parentCi, rel.childCi, rel.relType));
   }
 
@@ -140,12 +156,8 @@ export function canRemoveRelationship(
   rel: LiveRelationship,
   pendingChanges: RelationshipChangeRequest[],
 ): string | null {
-  const pending = pendingChanges.some(
-    c => c.action === 'delete'
-      && c.state === 'pending_approval'
-      && c.relationship_sys_id === rel.sysId,
-  );
-  if (pending) return 'Already pending approval for removal.';
+  const pendingIds = pendingDeleteRelIds(pendingChanges);
+  if (relMatchesPendingDelete(rel, pendingIds)) return 'Already pending approval for removal.';
   return null;
 }
 
@@ -160,7 +172,8 @@ export interface SubmitItemCreate {
 export interface SubmitItemDelete {
   kind: 'delete';
   source_ci_sys_id: string;
-  relationship_sys_id: string;
+  relationship_sys_ids: string[];
+  direction: RelationshipDirection;
   rel: LiveRelationship;
 }
 
@@ -187,7 +200,8 @@ export function buildSubmitBatch(
       items.push({
         kind: 'delete',
         source_ci_sys_id: sourceCi,
-        relationship_sys_id: rel.sysId,
+        relationship_sys_ids: rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId],
+        direction: rel.direction,
         rel,
       });
     }

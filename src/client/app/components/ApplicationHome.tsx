@@ -7,9 +7,10 @@ import {
 } from 'lucide-react';
 import FlagDetailPanel, { type FlagType, type IncidentRecord, type ChangeRecord } from './FlagDetailPanel';
 import AppSearchHeader from './AppSearchHeader';
-import { queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { fetchPortalMetadata, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 import { isAccessDenied } from '../utils/acl';
 import { str } from '../utils/viewFields';
+import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG, taskCiQuery } from '../utils/relatedTasks';
 import {
   mockApplications, appIncidents, appChanges, appFamilies,
   type AppItem, type AppFamily,
@@ -160,20 +161,14 @@ function assembleThreeLevelHierarchy(
 }
 
 // ─── System property reader ───────────────────────────────────────────────────
-const HIERARCHY_PROP = 'x_citi4_clsa_cmd_0.enable.new.app.hierarchy';
 
 /** Returns true → 3-level hierarchy; false → 2-level hierarchy */
 async function readHierarchyMode(): Promise<boolean> {
   try {
-    const { result = [] } = await queryTable<{ value: string }>({
-      table:  'sys_properties',
-      query:  `name=${HIERARCHY_PROP}`,
-      fields: ['value'],
-      limit:  1,
-    });
-    return result[0]?.value?.toLowerCase() === 'true';
+    const meta = await fetchPortalMetadata();
+    return meta.hierarchy_mode;
   } catch {
-    return true; // default to 3-level if the property is unreadable
+    return true; // default to 3-level if metadata is unreadable
   }
 }
 
@@ -659,55 +654,20 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [filtersLoading, setFiltersLoading] = useState(true);
 
   useEffect(() => {
-    const fetchChoice = (element: string) =>
-      queryTable<{ value: string; label: string }>({
-        table:   'sys_choice',
-        query:   `nameINcmdb_ci_service_auto,cmdb_ci_service,cmdb_ci^element=${element}^language=en^inactive=false`,
-        fields:  ['value', 'label'],
-        limit:   50,
-        orderBy: 'sequence',
-      }).then(({ result }) => {
-        const seen = new Set<string>();
-        return (result ?? [])
-          .filter(r => r.label && r.value && !seen.has(r.value) && seen.add(r.value))
-          .map(r => ({ label: r.label, value: r.value }));
-      });
-
     const TIER_FALLBACK: FilterOption[] = [
       { label: 'Tier 0', value: '0' }, { label: 'Tier 1', value: '1' },
       { label: 'Tier 2', value: '2' }, { label: 'Tier 3', value: '3' },
     ];
 
-    Promise.all([
-      fetchChoice('environment'),
-      fetchChoice('operational_status'),
-      queryTable<{ sys_id: string; name: string }>({
-        table: 'business_unit', fields: ['sys_id', 'name'], limit: 100, orderBy: 'name',
-      }).then(({ result }) =>
-        (result ?? [])
-          .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-          .map(r => ({ label: r.name, value: r.sys_id }))
-      ),
-      queryTable<{ sys_id: string; name: string; description: string }>({
-        table: 'cmn_department', query: 'u_it_department=true',
-        fields: ['sys_id', 'name', 'description'], limit: 100, orderBy: 'name',
-      }).then(({ result }) =>
-        (result ?? [])
-          .sort((a, b) => {
-            const aLabel = (a.description ?? a.name ?? '').trim();
-            const bLabel = (b.description ?? b.name ?? '').trim();
-            return aLabel.localeCompare(bLabel);
-          })
-          .map(r => ({
-            label: (r.description ?? r.name ?? r.sys_id).trim(),
-            value: r.sys_id,
-          }))
-      ),
-      fetchChoice('u_tier').then(opts => opts.length ? opts : TIER_FALLBACK),
-    ])
-      .then(([envs, statuses, bizUnits, depts, tiers]) => {
-        setEnvOptions(envs); setStatusOptions(statuses);
-        setBizUnitOptions(bizUnits); setDeptOptions(depts); setTierOptions(tiers);
+    fetchPortalMetadata()
+      .then(meta => {
+        setEnvOptions(meta.filter_options.environment);
+        setStatusOptions(meta.filter_options.operational_status);
+        setTierOptions(
+          meta.filter_options.u_tier.length ? meta.filter_options.u_tier : TIER_FALLBACK,
+        );
+        setBizUnitOptions(meta.business_units);
+        setDeptOptions(meta.departments);
       })
       .catch(() => {})
       .finally(() => setFiltersLoading(false));
@@ -766,8 +726,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       Promise.all([
         count('cmdb_ci_service_auto'),
         count('cmdb_ci_service_auto', 'operational_status=1'),
-        count('task_ci', 'ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto^task.sys_class_name=incident^task.active=true'),
-        count('task_ci', 'ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto^task.sys_class_name=change_request^task.state=-2'),
+        count('task_ci', taskCiQuery('ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto', INCIDENT_TASK_CONFIG)),
+        count('task_ci', taskCiQuery('ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto', CHANGE_TASK_CONFIG)),
       ])
         .then(([totalR, operationalR, incidentsR, changesR]) => {
           setLiveStats({
@@ -788,8 +748,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       Promise.all([
         count('cmdb_ci_service', 'u_service_type=instance'),
         count('cmdb_ci_service', 'u_service_type=instance^operational_status=1'),
-        count('task_ci', 'ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance^task.sys_class_name=incident^task.active=true'),
-        count('task_ci', 'ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance^task.sys_class_name=change_request^task.state=-2'),
+        count('task_ci', taskCiQuery('ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance', INCIDENT_TASK_CONFIG)),
+        count('task_ci', taskCiQuery('ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance', CHANGE_TASK_CONFIG)),
       ])
         .then(([totalR, operationalR, incidentsR, changesR]) => {
           setLiveStats({

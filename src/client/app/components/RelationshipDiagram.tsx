@@ -746,9 +746,9 @@ function DiagramFlow({
       ]);
 
       const linkRels = rels.filter(r => r.otherAppSysId === partnerSysId);
-      const toRemove = linkRels.filter(r => !canRemoveRelationship(r, pending));
+      const removable = linkRels.filter(r => canRemoveRelationship(r, pending) === null);
 
-      if (!toRemove.length) {
+      if (!removable.length) {
         setMenuPermissions(prev => prev
           ? { ...prev, removing: false, removeError: 'No removable relationship found.' }
           : null,
@@ -757,10 +757,13 @@ function DiagramFlow({
       }
 
       const mutations: RelationshipMutation[] = [];
-      for (const rel of toRemove) {
+      const biRel = removable.find(r => r.direction === 'bidirectional');
+
+      if (biRel && biRel.relationshipSysIds.length >= 2) {
         const res = await requestRelationshipDelete({
           source_ci_sys_id: nodeId,
-          relationship_sys_id: rel.sysId,
+          relationship_sys_ids: biRel.relationshipSysIds,
+          direction: 'bidirectional',
         });
         if (!res.ok) {
           setMenuPermissions(prev => prev
@@ -770,6 +773,22 @@ function DiagramFlow({
           return;
         }
         mutations.push({ changeSysId: res.change.sys_id, action: 'delete' });
+      } else {
+        for (const rel of removable) {
+          const res = await requestRelationshipDelete({
+            source_ci_sys_id: nodeId,
+            relationship_sys_ids: rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId],
+            direction: rel.direction,
+          });
+          if (!res.ok) {
+            setMenuPermissions(prev => prev
+              ? { ...prev, removing: false, removeError: res.error }
+              : null,
+            );
+            return;
+          }
+          mutations.push({ changeSysId: res.change.sys_id, action: 'delete' });
+        }
       }
 
       closeMenu();

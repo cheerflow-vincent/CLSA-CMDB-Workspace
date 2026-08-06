@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   Edit2, MoreHorizontal, ExternalLink, MapPin,
   AlertCircle, Calendar, Activity, Server, Database,
   Network, Shield, User,
-  ArrowUpDown, Layers, Loader2,
+  ArrowUpDown, Layers, Loader2, RefreshCw,
 } from 'lucide-react';
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
@@ -241,7 +241,8 @@ export default function CIDetailView({
   const [canWriteRecord, setCanWriteRecord] = useState(false);
   const [recordSysId, setRecordSysId] = useState('');
   const [recordTable, setRecordTable] = useState('');
-  const [detailRefresh, setDetailRefresh] = useState(0);
+  const [pageRefreshKey, setPageRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [displayName, setDisplayName] = useState(ci.name);
   const [formSections, setFormSections] = useState<FormSectionLayout[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -339,7 +340,13 @@ export default function CIDetailView({
       });
 
     return () => { cancelled = true; };
-  }, [ci.id, ci.table, ci.class, ci.name, detailRefresh]);
+  }, [ci.id, ci.table, ci.class, ci.name, pageRefreshKey]);
+
+  const refreshPage = useCallback(() => {
+    setRefreshing(true);
+    setPageRefreshKey(n => n + 1);
+    window.setTimeout(() => setRefreshing(false), 600);
+  }, []);
 
   useEffect(() => {
     if (!ci.id) {
@@ -353,7 +360,7 @@ export default function CIDetailView({
     fetchRelatedTaskCount(ci.id, CHANGE_TASK_CONFIG)
       .then(r => { setChangeCount(r.totalCount); setChangeAccess(r.access); })
       .catch(() => { setChangeCount(0); setChangeAccess('error'); });
-  }, [ci.id]);
+  }, [ci.id, pageRefreshKey]);
 
   useEffect(() => {
     if (isAccessDenied(incidentAccess) && taskTab === 'incidents' && !isAccessDenied(changeAccess)) {
@@ -390,7 +397,7 @@ export default function CIDetailView({
       })
       .finally(() => { if (!cancelled) setTrendLoading(false); });
     return () => { cancelled = true; };
-  }, [ci.id]);
+  }, [ci.id, pageRefreshKey]);
 
   const showOverviewSection =
     !isAccessDenied(recordAccess)
@@ -452,6 +459,7 @@ export default function CIDetailView({
             embedded
             config={INCIDENT_TASK_CONFIG}
             recordSysId={ci.id}
+            refreshKey={pageRefreshKey}
             variant="cards"
             isOpen
             onToggle={() => {}}
@@ -462,13 +470,14 @@ export default function CIDetailView({
             badgeBg="bg-red-50"
             badgeText="text-red-700"
             badgeBorder="border-red-200"
-            emptyMessage="No active incidents linked to this CI."
+            recordContext="ci"
           />
         ) : (
           <RelatedListSection
             embedded
             config={CHANGE_TASK_CONFIG}
             recordSysId={ci.id}
+            refreshKey={pageRefreshKey}
             variant="cards"
             isOpen
             onToggle={() => {}}
@@ -479,7 +488,7 @@ export default function CIDetailView({
             badgeBg="bg-amber-50"
             badgeText="text-amber-700"
             badgeBorder="border-amber-200"
-            emptyMessage="No approved change requests linked to this CI."
+            recordContext="ci"
           />
         )}
       </div>
@@ -493,6 +502,7 @@ export default function CIDetailView({
         hierarchyMode={hierarchyMode}
         onSelectApp={onSelectApp}
         onAccessResolved={setRelatedAppsAccess}
+        refreshKey={pageRefreshKey}
       />
     </Section>
   );
@@ -500,7 +510,7 @@ export default function CIDetailView({
   const healthSection = !isAccessDenied(healthAccess) && (
     <Section title="CMDB Health Metrics" icon={<Shield className="w-4 h-4 text-blue-500" />} defaultOpen={false}>
       <div className="p-5">
-        <HealthResultsPanel ciSysId={ci.id} onAccessResolved={setHealthAccess} />
+        <HealthResultsPanel ciSysId={ci.id} onAccessResolved={setHealthAccess} refreshKey={pageRefreshKey} />
       </div>
     </Section>
   );
@@ -576,6 +586,14 @@ export default function CIDetailView({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              type="button"
+              onClick={refreshPage}
+              disabled={refreshing}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors disabled:opacity-60"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+            </button>
             {isServer && (
               <button className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-50 transition-colors">
                 <Activity className="w-4 h-4" /> Grafana
@@ -658,7 +676,7 @@ export default function CIDetailView({
           sysId={recordSysId}
           recordName={displayName}
           onClose={() => setShowRecordEditModal(false)}
-          onSaved={() => setDetailRefresh(n => n + 1)}
+          onSaved={() => setPageRefreshKey(n => n + 1)}
         />
       )}
     </div>

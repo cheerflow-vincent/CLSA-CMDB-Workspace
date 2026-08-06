@@ -51,9 +51,41 @@ declare global {
                         table: 'sys_module'
                         id: '555d9b4bb51e4be4b47e7529d4b0a91a'
                     }
+                    'portal-metadata-handler': {
+                        table: 'sys_script_include'
+                        id: '6afc2cb585d643a185aef3c314d44db2'
+                    }
+                    'portal-metadata-route': {
+                        table: 'sys_ws_operation'
+                        id: 'd7781f1ffa5f49b2b24d79d8f7081225'
+                    }
                     'portal-rest-api': {
                         table: 'sys_ws_definition'
                         id: '1127096dc55c4a5a98df6f7770ceb78b'
+                    }
+                    'portal-view-layout-param-limit': {
+                        table: 'sys_ws_query_parameter'
+                        id: '7d8408ce694c4c619e5522a64b92e641'
+                    }
+                    'portal-view-layout-param-parent': {
+                        table: 'sys_ws_query_parameter'
+                        id: 'bc96c6c301c44e5abf01d002381ee0ed'
+                    }
+                    'portal-view-layout-param-table': {
+                        table: 'sys_ws_query_parameter'
+                        id: '618d4e9c015f4964a1f4be472f868af3'
+                    }
+                    'portal-view-layout-param-type': {
+                        table: 'sys_ws_query_parameter'
+                        id: '60cdf68be4bc4acea9a1ae2a4ef243df'
+                    }
+                    'portal-view-layout-param-view': {
+                        table: 'sys_ws_query_parameter'
+                        id: '56cb139c0ed34ff38346b2cdd18f3533'
+                    }
+                    'portal-view-layout-route': {
+                        table: 'sys_ws_operation'
+                        id: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
                     }
                     'relationship-approval-handler': {
                         table: 'sys_script_include'
@@ -277,6 +309,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '2e011b56dc8148b3851d274c36fcc5f6'
+                        key: {
+                            web_service_operation: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
+                            web_service_query_parameter: '56cb139c0ed34ff38346b2cdd18f3533'
+                        }
+                    },
+                    {
                         table: 'sys_choice'
                         id: '2e04adc42c1f4318a124465b4029d768'
                         key: {
@@ -321,6 +361,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '3accf02cbcf6437f9f2fa7a491b048d2'
+                        key: {
+                            web_service_operation: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
+                            web_service_query_parameter: 'bc96c6c301c44e5abf01d002381ee0ed'
+                        }
+                    },
+                    {
                         table: 'sys_documentation'
                         id: '3bfba474a4ad4cfda87303c14e23977e'
                         key: {
@@ -360,6 +408,14 @@ declare global {
                         key: {
                             name: 'x_citi4_clsa_cmd_0_relationship_change'
                             element: 'direction'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '45f9cc52fddd4d3598b2c98bbdca8c9e'
+                        key: {
+                            web_service_operation: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
+                            web_service_query_parameter: '618d4e9c015f4964a1f4be472f868af3'
                         }
                     },
                     {
@@ -518,6 +574,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '9ba8273f3b524ffe95d896148424d3e0'
+                        key: {
+                            web_service_operation: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
+                            web_service_query_parameter: '7d8408ce694c4c619e5522a64b92e641'
+                        }
+                    },
+                    {
                         table: 'sys_ui_page'
                         id: '9dca87668740407c9f31d9848f061194'
                         deleted: true
@@ -572,6 +636,14 @@ declare global {
                         key: {
                             web_service_operation: '6b61f2525a1d4c67bf7cfd3bad2bc31b'
                             web_service_query_parameter: 'c078d267d8ed48868cd9b7feea9645fc'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: 'b25520729f3e44c7b1e77f07c097df8e'
+                        key: {
+                            web_service_operation: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
+                            web_service_query_parameter: '60cdf68be4bc4acea9a1ae2a4ef243df'
                         }
                     },
                     {

@@ -16,6 +16,8 @@ interface Props {
   onCancel?: () => void;
   /** inline = table column (inbox); panel = full-width sub-row (app detail) */
   variant?: 'inline' | 'panel';
+  /** Panel only: comment field above or below action buttons */
+  commentsPlacement?: 'above' | 'below';
   requestedByName?: string;
   requestedAt?: string;
 }
@@ -42,6 +44,7 @@ export default function RelationshipChangeActions({
   onDone,
   onCancel,
   variant = 'inline',
+  commentsPlacement = 'above',
   requestedByName,
   requestedAt,
 }: Props) {
@@ -103,6 +106,64 @@ export default function RelationshipChangeActions({
     : 'px-2 py-1 text-[11px] rounded border font-medium transition-colors';
 
   if (isPanel) {
+    const commentsField = (
+      <div>
+        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">
+          Comments <span className="font-normal normal-case text-gray-400">(required to reject)</span>
+        </label>
+        <textarea
+          value={comments}
+          onChange={e => setComments(e.target.value)}
+          placeholder="Explain why you are rejecting this removal request…"
+          rows={4}
+          className="w-full text-xs border border-gray-300 rounded-lg px-3 py-2 resize-y min-h-[96px] focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+        />
+      </div>
+    );
+
+    const actionButtons = (
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {onCancel && (
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={onCancel}
+            className={`${btnCls} border-gray-300 text-gray-600 hover:bg-gray-50`}
+          >
+            Close
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={!!busy}
+          onClick={() => run('reject')}
+          className={`${btnCls} border-red-300 text-red-700 hover:bg-red-50`}
+        >
+          {busy === 'reject' ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" /> : (
+            <>
+              <X className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
+              Reject
+            </>
+          )}
+        </button>
+        <button
+          type="button"
+          disabled={!!busy}
+          onClick={() => run('approve')}
+          className={`${btnCls} border-green-300 text-green-700 hover:bg-green-50`}
+        >
+          {busy === 'approve' ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin inline" />
+          ) : (
+            <>
+              <Check className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
+              Approve
+            </>
+          )}
+        </button>
+      </div>
+    );
+
     return (
       <div className="space-y-3 text-left">
         {(requestedByName || requestedAt) && (
@@ -112,58 +173,17 @@ export default function RelationshipChangeActions({
             {requestedAt && <span>{requestedAt}</span>}
           </p>
         )}
-        <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">
-            Comments <span className="font-normal normal-case text-gray-400">(required to reject)</span>
-          </label>
-          <textarea
-            value={comments}
-            onChange={e => setComments(e.target.value)}
-            placeholder="Explain why you are rejecting this removal request…"
-            rows={3}
-            className="w-full text-xs border border-gray-300 rounded-lg px-3 py-2 resize-y min-h-[72px] focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
-          />
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {onCancel && (
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={onCancel}
-              className={`${btnCls} border-gray-300 text-gray-600 hover:bg-gray-50`}
-            >
-              Close
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={() => run('reject')}
-            className={`${btnCls} border-red-300 text-red-700 hover:bg-red-50`}
-          >
-            {busy === 'reject' ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" /> : (
-              <>
-                <X className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
-                Reject
-              </>
-            )}
-          </button>
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={() => run('approve')}
-            className={`${btnCls} border-green-300 text-green-700 hover:bg-green-50`}
-          >
-            {busy === 'approve' ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin inline" />
-            ) : (
-              <>
-                <Check className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />
-                Approve
-              </>
-            )}
-          </button>
-        </div>
+        {commentsPlacement === 'above' ? (
+          <>
+            {commentsField}
+            {actionButtons}
+          </>
+        ) : (
+          <>
+            {actionButtons}
+            {commentsField}
+          </>
+        )}
         {error && <p className="text-xs text-red-600">{error}</p>}
         {timeoutMsg && <p className="text-xs text-amber-700">{timeoutMsg}</p>}
       </div>

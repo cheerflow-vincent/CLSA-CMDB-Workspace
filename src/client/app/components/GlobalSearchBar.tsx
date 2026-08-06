@@ -1,5 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, X, Loader2 } from 'lucide-react';
+import {
+  buildFieldAndLikeQuery,
+  hasSearchableTokens,
+  tokenizeSearchTerms,
+} from '../utils/searchQuery';
 import { queryTable, getSysProperties, APP_SCOPE } from '../../api/servicenow';
 import type { CIItem } from './CIDetailView';
 
@@ -90,18 +95,13 @@ function formatClassName(cls: string): string {
 }
 
 /**
- * Build a single encoded-query string that covers all configured tables via
- * INSTANCEOF. Each table's conditions form their own NQ group (OR between
- * groups) so that name/status filters are applied within every group.
- *
- *   (name LIKE x AND ciFilter AND INSTANCEOF server)
- *   OR
- *   (name LIKE x AND ciFilter AND INSTANCEOF database)
- *   OR ...
+ * Build encoded query with AND token matching on the configured search field.
+ * Each INSTANCEOF table group requires every token to match (e.g. nameLIKEcobra^nameLIKEhk).
  */
 function buildQuery(cfg: SearchConfig, term: string): string {
-  const likeCondition = `${cfg.searchField}LIKE${term}`;
-  const baseGroup = `${likeCondition}^${cfg.ciFilter}`;
+  const tokens = tokenizeSearchTerms(term);
+  const likeCondition = buildFieldAndLikeQuery(cfg.searchField, tokens);
+  const baseGroup = likeCondition ? `${likeCondition}^${cfg.ciFilter}` : cfg.ciFilter;
   if (cfg.tables.length === 0) return baseGroup;
   return cfg.tables
     .map(t => `${baseGroup}^sys_class_nameINSTANCEOF${t}`)
@@ -155,15 +155,44 @@ function parseConfig(props: Record<string, string>): SearchConfig {
 
 function Highlight({ text, query }: { text: string; query: string }) {
   if (!query || !text) return <>{text}</>;
-  const idx = text.toLowerCase().indexOf(query.toLowerCase());
-  if (idx === -1) return <>{text}</>;
+  const tokens = tokenizeSearchTerms(query);
+  if (!tokens.length) return <>{text}</>;
+
+  type Segment = { text: string; highlight: boolean };
+  let segments: Segment[] = [{ text, highlight: false }];
+
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    const next: Segment[] = [];
+    for (const seg of segments) {
+      if (seg.highlight) {
+        next.push(seg);
+        continue;
+      }
+      let rest = seg.text;
+      let restLower = rest.toLowerCase();
+      while (rest.length) {
+        const idx = restLower.indexOf(lower);
+        if (idx === -1) {
+          next.push({ text: rest, highlight: false });
+          break;
+        }
+        if (idx > 0) next.push({ text: rest.slice(0, idx), highlight: false });
+        next.push({ text: rest.slice(idx, idx + token.length), highlight: true });
+        rest = rest.slice(idx + token.length);
+        restLower = rest.toLowerCase();
+      }
+    }
+    segments = next;
+  }
+
   return (
     <>
-      {text.slice(0, idx)}
-      <mark className="bg-yellow-100 text-yellow-800 rounded px-0.5">
-        {text.slice(idx, idx + query.length)}
-      </mark>
-      {text.slice(idx + query.length)}
+      {segments.map((seg, i) => seg.highlight ? (
+        <mark key={i} className="bg-yellow-100 text-yellow-800 rounded px-0.5">{seg.text}</mark>
+      ) : (
+        <span key={i}>{seg.text}</span>
+      ))}
     </>
   );
 }
@@ -264,7 +293,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
   }, [query]);
 
   const search = useCallback(async (term: string) => {
-    if (!config || term.trim().length < 2) { setResults([]); setLoading(false); return; }
+    if (!config || !hasSearchableTokens(term)) { setResults([]); setLoading(false); return; }
     setLoading(true);
     try {
       const snQuery = buildQuery(config, term.trim());
@@ -305,7 +334,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
     if (e.key === 'Enter' && results.length > 0) handleSelect(results[0]);
   };
 
-  const showDropdown = open && query.trim().length >= 2;
+  const showDropdown = open && hasSearchableTokens(query);
 
   return (
     <div ref={containerRef} className="relative w-full max-w-xl">
@@ -321,7 +350,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
             placeholder="Search configuration items…"
             value={query}
             onChange={e => { setQuery(e.target.value); setOpen(true); }}
-            onFocus={() => { if (query.trim().length >= 2) setOpen(true); }}
+            onFocus={() => { if (hasSearchableTokens(query)) setOpen(true); }}
             onKeyDown={handleKeyDown}
             className="flex-1 py-2 px-3 text-sm bg-transparent text-gray-800 placeholder-gray-400 focus:outline-none"
           />

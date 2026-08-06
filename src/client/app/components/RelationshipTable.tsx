@@ -29,6 +29,7 @@ interface Props {
   nodeSearch?:   string;
   filters?:      DiagramFilters;
   onSelectApp?:  (app: AppItem) => void;
+  refreshKey?:   number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -276,7 +277,7 @@ function RelRowCard({
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function RelationshipTable({ selectedApp, nodeSearch = '', filters, onSelectApp }: Props) {
+export default function RelationshipTable({ selectedApp, nodeSearch = '', filters, onSelectApp, refreshKey = 0 }: Props) {
   const [rows,       setRows]       = useState<RelRow[]>([]);
   const [detailMap,  setDetailMap]  = useState<Map<string, CIDetail>>(new Map());
   const [loading,    setLoading]    = useState(false);
@@ -293,7 +294,7 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
       .then(r => { setRows(r); return r; })
       .catch(() => { setRows([]); return []; })
       .finally(() => setLoading(false));
-  }, [selectedApp?.sysId]);
+  }, [selectedApp?.sysId, refreshKey]);
 
   // Phase 2 — fetch CI details (after rows are ready)
   useEffect(() => {

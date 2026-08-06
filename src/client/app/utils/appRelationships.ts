@@ -7,6 +7,8 @@ export type RelationshipDirection = 'upstream' | 'downstream' | 'bidirectional';
 
 export interface LiveRelationship {
   sysId: string;
+  /** cmdb_rel_ci sys_ids — one for uni-directional, two for bi-directional. */
+  relationshipSysIds: string[];
   otherAppSysId: string;
   otherAppName: string;
   direction: RelationshipDirection;
@@ -60,15 +62,16 @@ export async function loadAppRelationships(centerSysId: string): Promise<LiveRel
 
   const upSet = new Set<string>();
   const dnSet = new Set<string>();
-  const rows: Omit<LiveRelationship, 'direction'>[] = [];
+  const rows: Omit<LiveRelationship, 'direction' | 'relationshipSysIds'>[] = [];
 
   for (const r of asParent) {
     const childId = sn(r['child.sys_id']);
     if (!childId || childId === centerSysId) continue;
     dnSet.add(childId);
     const relType = sn(r['type.name']);
+    const sysId = sn(r.sys_id);
     rows.push({
-      sysId: sn(r.sys_id),
+      sysId,
       otherAppSysId: childId,
       otherAppName: sn(r['child.name']),
       relType: (relType === RDF_TYPE ? RDF_TYPE : IMP_TYPE) as RelTypeChoice,
@@ -82,8 +85,9 @@ export async function loadAppRelationships(centerSysId: string): Promise<LiveRel
     if (!parentId || parentId === centerSysId) continue;
     upSet.add(parentId);
     const relType = sn(r['type.name']);
+    const sysId = sn(r.sys_id);
     rows.push({
-      sysId: sn(r.sys_id),
+      sysId,
       otherAppSysId: parentId,
       otherAppName: sn(r['parent.name']),
       relType: (relType === RDF_TYPE ? RDF_TYPE : IMP_TYPE) as RelTypeChoice,
@@ -92,10 +96,37 @@ export async function loadAppRelationships(centerSysId: string): Promise<LiveRel
     });
   }
 
-  return rows.map(row => ({
+  const classified = rows.map(row => ({
     ...row,
+    relationshipSysIds: [row.sysId],
     direction: classifyDirection(centerSysId, row.parentCi, row.childCi, upSet, dnSet),
   }));
+
+  return consolidateLiveRelationships(classified);
+}
+
+/** Merge bi-directional cmdb_rel_ci pairs into one logical row per peer + type. */
+export function consolidateLiveRelationships(rels: LiveRelationship[]): LiveRelationship[] {
+  const uni: LiveRelationship[] = [];
+  const biMap = new Map<string, LiveRelationship>();
+
+  for (const rel of rels) {
+    if (rel.direction !== 'bidirectional') {
+      uni.push({ ...rel, relationshipSysIds: rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId] });
+      continue;
+    }
+    const key = `${rel.otherAppSysId}\0${rel.relType}`;
+    const existing = biMap.get(key);
+    if (!existing) {
+      biMap.set(key, { ...rel, relationshipSysIds: [...rel.relationshipSysIds] });
+      continue;
+    }
+    for (const id of rel.relationshipSysIds) {
+      if (!existing.relationshipSysIds.includes(id)) existing.relationshipSysIds.push(id);
+    }
+  }
+
+  return [...uni, ...biMap.values()];
 }
 
 /** Collapsed peer list for diagram (one entry per peer CI). */

@@ -10,6 +10,7 @@ import CIFlagBadges from './CIFlagBadges';
 import FlagDetailPanel, { type FlagType } from './FlagDetailPanel';
 import { queryTableWithAccess, getCIFilter, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
 import { loadListFields, raw, str, type ViewField } from '../utils/viewFields';
+import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms } from '../utils/searchQuery';
 import { filterColumnsByRecords, isAccessDenied } from '../utils/acl';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
 import { enrichRowsWithTaskFlags } from '../utils/relatedCIFlags';
@@ -410,16 +411,16 @@ function ciTypeToTab(ciType: string): Tab | null {
 }
 
 /**
- * Build encoded query: (field1 LIKE kw OR field2 LIKE kw …) AND ciFilter.
- * Fields come from x_citi4_clsa_cmd_0.ci.search.filter.table.field.
+ * Build encoded query: each token must match at least one search field (AND across tokens).
+ * Per token: (field1 LIKE t OR field2 LIKE t …); fields from ci.search.filter.table.field.
  */
 function buildSnQuery(keyword: string, ciFilter: string, searchFields: string[]): string {
-  const trimmed = keyword.trim();
-  if (!trimmed) return ciFilter;
+  const tokens = tokenizeSearchTerms(keyword);
+  if (!tokens.length) return ciFilter;
 
   const fields = searchFields.length ? searchFields : DEFAULT_SEARCH_FIELDS;
-  const likeGroup = fields.map(f => `${f}LIKE${trimmed}`).join('^OR');
-  return `${likeGroup}^${ciFilter}`;
+  const likeGroup = buildMultiFieldAndLikeQuery(fields, tokens);
+  return likeGroup ? `${likeGroup}^${ciFilter}` : ciFilter;
 }
 
 function SearchResultCard({

@@ -1,8 +1,6 @@
 import { queryTableWithAccess } from '../../api/servicenow';
+import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG } from './relatedTasks';
 import { raw } from './viewFields';
-
-const ACTIVE_INCIDENT_QUERY = 'task.sys_class_name=incident^task.active=true';
-const APPROVED_CHANGE_QUERY = 'task.sys_class_name=change_request^task.state=-2';
 
 export interface CITaskFlagCounts {
   incidents: number;
@@ -27,7 +25,7 @@ function countTasksByCi(rows: Record<string, unknown>[]): Map<string, number> {
   return counts;
 }
 
-/** Active incident / approved change counts per CI (task_ci affected items). */
+/** Active incident / upcoming change counts per CI (task_ci affected items). */
 export async function fetchCITaskFlagCounts(
   ciSysIds: string[],
 ): Promise<Map<string, CITaskFlagCounts>> {
@@ -41,13 +39,13 @@ export async function fetchCITaskFlagCounts(
   const [incRes, chgRes] = await Promise.all([
     queryTableWithAccess<Record<string, unknown>>({
       table: 'task_ci',
-      query: `ci_item.sys_idIN${idsQuery}^${ACTIVE_INCIDENT_QUERY}`,
+      query: `ci_item.sys_idIN${idsQuery}^${INCIDENT_TASK_CONFIG.extraQuery}`,
       fields: ['ci_item.sys_id', 'task.sys_id'],
       limit: 500,
     }),
     queryTableWithAccess<Record<string, unknown>>({
       table: 'task_ci',
-      query: `ci_item.sys_idIN${idsQuery}^${APPROVED_CHANGE_QUERY}`,
+      query: `ci_item.sys_idIN${idsQuery}^${CHANGE_TASK_CONFIG.extraQuery}`,
       fields: ['ci_item.sys_id', 'task.sys_id'],
       limit: 500,
     }),

@@ -154,9 +154,11 @@ function HealthResultCard({
 export default function HealthResultsPanel({
   ciSysId,
   onAccessResolved,
+  refreshKey = 0,
 }: {
   ciSysId: string;
   onAccessResolved?: (access: TableAccess) => void;
+  refreshKey?: number;
 }) {
   const [rows, setRows] = useState<HealthResultRow[]>([]);
   const [columns, setColumns] = useState<ViewField[]>([]);
@@ -184,7 +186,7 @@ export default function HealthResultsPanel({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [ciSysId]);
+  }, [ciSysId, refreshKey]);
 
   useEffect(() => {
     onAccessResolved?.(access);

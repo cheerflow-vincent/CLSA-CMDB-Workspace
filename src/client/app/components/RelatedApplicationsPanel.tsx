@@ -161,11 +161,13 @@ export default function RelatedApplicationsPanel({
   hierarchyMode,
   onSelectApp,
   onAccessResolved,
+  refreshKey = 0,
 }: {
   ciSysId: string;
   hierarchyMode: boolean;
   onSelectApp?: (app: AppItem) => void;
   onAccessResolved?: (access: TableAccess) => void;
+  refreshKey?: number;
 }) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const { ref: narrowRef, narrow } = useNarrowContainer();
@@ -200,7 +202,7 @@ export default function RelatedApplicationsPanel({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [ciSysId, hierarchyMode, onAccessResolved]);
+  }, [ciSysId, hierarchyMode, onAccessResolved, refreshKey]);
 
   const hasData = hierarchyMode ? threeLevel.length > 0 : twoLevel.length > 0;
   const handleSelect = onSelectApp ?? (() => {});

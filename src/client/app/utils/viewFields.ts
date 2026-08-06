@@ -1,4 +1,4 @@
-import { queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { fetchViewLayout, queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 
 /** One field configured in a form view */
 export interface ViewField { element: string; label: string }
@@ -77,49 +77,17 @@ export async function loadViewFields(
   defaultFields: ViewField[] = [],
 ): Promise<ViewField[]> {
   try {
-    // Step 1: named view on the given table
-    // sys_ui_section.name = table name (API field; label is "Table")
-    // sys_ui_view.title   = view display name
-    // No type filter — elements without a field name (labels, spacers) are
-    // dropped later by the .filter(Boolean) on the element value.
-    // sys_ui_element.sys_ui_section is the reference field to sys_ui_section
-    const step1 = await resolveViewFields(
-      tableName,
-      `sys_ui_section.view.title=${viewTitle}^sys_ui_section.name=${tableName}^ORDERBYposition`,
-      50,
-    );
-    if (step1) return step1;
-
-    // Step 2: named view on cmdb_ci_service_auto
-    if (tableName !== INST_TABLE) {
-      const step2 = await resolveViewFields(
-        INST_TABLE,
-        `sys_ui_section.view.title=${viewTitle}^sys_ui_section.name=${INST_TABLE}^ORDERBYposition`,
-        50,
-      );
-      if (step2) return step2;
-    }
-
-    // Step 3: named view on cmdb_ci_service
-    if (tableName !== SVC_TABLE) {
-      const step3 = await resolveViewFields(
-        SVC_TABLE,
-        `sys_ui_section.view.title=${viewTitle}^sys_ui_section.name=${SVC_TABLE}^ORDERBYposition`,
-        50,
-      );
-      if (step3) return step3;
-    }
-
-    // Step 4: default view on the given table (default view has an empty name in sys_ui_view)
-    const step4 = await resolveViewFields(
-      tableName,
-      `sys_ui_section.view.name=^sys_ui_section.name=${tableName}^ORDERBYposition`,
-      defaultLimit,
-    );
-    return step4 ?? defaultFields;
+    const res = await fetchViewLayout({
+      table: tableName,
+      view_title: viewTitle,
+      type: 'form',
+      default_limit: defaultLimit,
+    });
+    if (res.fields?.length) return res.fields;
   } catch {
-    return defaultFields;
+    // fall through to defaults
   }
+  return defaultFields;
 }
 
 /** Resolve column labels for a set of field elements on a table. */
@@ -198,25 +166,16 @@ export async function loadListFields(
   defaultFields: ViewField[] = [],
 ): Promise<ViewField[]> {
   try {
-    const namedListId = await findListSysId(`name=${tableName}^view.title=${listTitle}`);
-    if (namedListId) {
-      const cols = await resolveListElementsByListId(tableName, namedListId, 50);
-      if (cols) return cols;
-    }
-
-    const defaultListId = await findListSysId(`name=${tableName}^view.name=`);
-    if (defaultListId) {
-      const cols = await resolveListElementsByListId(tableName, defaultListId, 20);
-      if (cols) return cols;
-    }
-
-    const dotWalk = await resolveListFieldsDotWalk(tableName, listTitle, 50);
-    if (dotWalk) return dotWalk;
-
-    return defaultFields;
+    const res = await fetchViewLayout({
+      table: tableName,
+      view_title: listTitle,
+      type: 'list',
+    });
+    if (res.fields?.length) return res.fields;
   } catch {
-    return defaultFields;
+    // fall through to defaults
   }
+  return defaultFields;
 }
 
 // ─── Form layout (sys_ui_form → sections → elements) ─────────────────────────
@@ -668,24 +627,23 @@ export async function loadFormLayout(
   viewTitle: string,
   resolveParent: (table: string) => Promise<string>,
 ): Promise<FormLayoutResult> {
-  const parentTable = await resolveParent(recordTable);
-  const attempts: { table: string; viewTitle: string | null }[] = [
-    { table: recordTable, viewTitle },
-    { table: parentTable, viewTitle },
-    { table: CMDB_CI_TABLE, viewTitle },
-    { table: recordTable, viewTitle: null },
-    { table: parentTable, viewTitle: null },
-    { table: CMDB_CI_TABLE, viewTitle: null },
-  ];
-
-  const seen = new Set<string>();
-  for (const { table, viewTitle: vt } of attempts) {
-    const key = `${table}:${vt ?? 'default'}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const result = await tryLoadFormLayout(table, vt);
-    if (result) return result;
+  try {
+    const parentTable = await resolveParent(recordTable);
+    const res = await fetchViewLayout({
+      table: recordTable,
+      view_title: viewTitle,
+      type: 'form_layout',
+      parent_table: parentTable,
+    });
+    if (res.sections?.length) {
+      return {
+        sections: res.sections as FormSectionLayout[],
+        resolvedTable: res.resolved_table ?? recordTable,
+        resolvedView: res.resolved_view ?? 'named',
+      };
+    }
+  } catch {
+    // fall through to empty layout
   }
 
   return {

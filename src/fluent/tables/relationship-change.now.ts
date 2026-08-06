@@ -37,6 +37,7 @@ export const x_citi4_clsa_cmd_0_relationship_change = Table({
     relationship: ReferenceColumn({
       label: 'Relationship',
       referenceTable: 'cmdb_rel_ci',
+      // On the instance this field is a list collector (multiple cmdb_rel_ci sys_ids).
     }),
     rel_type: StringColumn({
       label: 'Relationship type',

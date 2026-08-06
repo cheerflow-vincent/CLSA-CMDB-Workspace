@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Search, Server, Database, DollarSign, Network,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2,
@@ -81,7 +81,8 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [diagramRefreshKey, setDiagramRefreshKey] = useState(0);
   const [processingChangeIds, setProcessingChangeIds] = useState<string[]>([]);
   const [canWriteRecord, setCanWriteRecord] = useState(false);
-  const [overviewRefresh, setOverviewRefresh] = useState(0);
+  const [pageRefreshKey, setPageRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [nodeSearch, setNodeSearch] = useState('');
   const [filters, setFilters] = useState<DiagramFilters>({
     upstream: true, downstream: true, bidirectional: true,
@@ -119,7 +120,15 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     fetchFieldAccess(table, sysId, ['name'])
       .then(access => setCanWriteRecord(canEditRecord(access)))
       .catch(() => setCanWriteRecord(false));
-  }, [selectedApp?.sysId, selectedApp?.table, overviewRefresh]);
+  }, [selectedApp?.sysId, selectedApp?.table, pageRefreshKey]);
+
+  const refreshPage = useCallback(() => {
+    setRefreshing(true);
+    setPageRefreshKey(n => n + 1);
+    setRelRefreshKey(n => n + 1);
+    setDiagramRefreshKey(n => n + 1);
+    window.setTimeout(() => setRefreshing(false), 600);
+  }, []);
 
   const toggleFilter = (key: keyof DiagramFilters) =>
     setFilters(f => ({ ...f, [key]: !f[key] }));
@@ -163,13 +172,21 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
         onSelectApp={onSelectApp}
         onBackToHome={onBack}
         canEditRecord={canWriteRecord}
-        onEditRecord={() => {
+        onRefresh={refreshPage}
+        refreshing={refreshing}
+        onEditCi={() => {
           if (selectedApp?.sysId) {
             setRecordEditTarget({
               sysId: selectedApp.sysId,
               name: selectedApp.name,
               table: selectedApp.table ?? 'cmdb_ci_service',
             });
+          }
+        }}
+        onEditRelationships={() => {
+          if (selectedApp?.sysId) {
+            setRelationshipEditTarget({ sysId: selectedApp.sysId, name: selectedApp.name });
+            setShowEditModal(true);
           }
         }}
       />
@@ -325,7 +342,13 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-5">
-              <RelationshipTable selectedApp={selectedApp} nodeSearch={nodeSearch} filters={filters} onSelectApp={onSelectApp} />
+              <RelationshipTable
+                selectedApp={selectedApp}
+                nodeSearch={nodeSearch}
+                filters={filters}
+                onSelectApp={onSelectApp}
+                refreshKey={pageRefreshKey}
+              />
             </div>
           )}
         </div>
@@ -381,6 +404,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <RelatedListSection
                         config={SERVER_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        refreshKey={pageRefreshKey}
                         responsiveLayout={false}
                         showCIFlags
                         isOpen={expanded.servers}
@@ -399,6 +423,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <RelatedListSection
                         config={DATABASE_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        refreshKey={pageRefreshKey}
                         responsiveLayout={false}
                         showCIFlags
                         isOpen={expanded.databases}
@@ -417,6 +442,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <RelatedListSection
                         config={NETGEAR_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        refreshKey={pageRefreshKey}
                         responsiveLayout={false}
                         showCIFlags
                         isOpen={expanded.netgear}
@@ -465,6 +491,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       <RelatedListSection
                         config={INCIDENT_TASK_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        refreshKey={pageRefreshKey}
                         variant="compact"
                         responsiveLayout={false}
                         isOpen={expanded.incidents}
@@ -476,12 +503,13 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         badgeBg="bg-red-50"
                         badgeText="text-red-700"
                         badgeBorder="border-red-200"
-                        emptyMessage="No active incidents linked to this application."
+                        recordContext="application"
                       />
 
                       <RelatedListSection
                         config={CHANGE_TASK_CONFIG}
                         recordSysId={selectedApp?.sysId}
+                        refreshKey={pageRefreshKey}
                         variant="compact"
                         responsiveLayout={false}
                         isOpen={expanded.changes}
@@ -493,7 +521,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         badgeBg="bg-amber-50"
                         badgeText="text-amber-700"
                         badgeBorder="border-amber-200"
-                        emptyMessage="No approved change requests linked to this application."
+                        recordContext="application"
                       />
 
                     </div>
@@ -533,7 +561,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
           onClose={() => setRecordEditTarget(null)}
           onSaved={() => {
             if (recordEditTarget.sysId === selectedApp?.sysId) {
-              setOverviewRefresh(n => n + 1);
+              setPageRefreshKey(n => n + 1);
             }
           }}
         />

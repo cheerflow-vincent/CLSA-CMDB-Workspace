@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, X, ArrowRight, ChevronRight, Loader2, ExternalLink, Edit2 } from 'lucide-react';
+import { Search, X, ArrowRight, ChevronRight, ChevronDown, Loader2, ExternalLink, Edit2, RefreshCw, Network } from 'lucide-react';
 import { queryTable, getSysProperties, APP_SCOPE } from '../../api/servicenow';
 import { mockApplications, type AppItem } from '../data/appData';
 
@@ -10,9 +10,13 @@ interface AppSearchHeaderProps {
   mode: 'home' | 'detail';
   currentApp?: AppItem;
   onBackToHome?: () => void;
-  /** When set, shows Edit next to Open in ServiceNow (detail mode). */
+  /** When set, shows Edit dropdown next to Open in ServiceNow (detail mode). */
   canEditRecord?: boolean;
-  onEditRecord?: () => void;
+  onEditCi?: () => void;
+  onEditRelationships?: () => void;
+  /** Manual reload of the current detail page. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 interface Option {
@@ -100,8 +104,20 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function AppSearchHeader({
-  onSelectApp, mode, currentApp, onBackToHome, canEditRecord, onEditRecord,
+  onSelectApp, mode, currentApp, onBackToHome, canEditRecord, onEditCi, onEditRelationships, onRefresh, refreshing,
 }: AppSearchHeaderProps) {
+  const [editMenuOpen, setEditMenuOpen] = useState(false);
+  const editMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (editMenuRef.current && !editMenuRef.current.contains(e.target as Node)) {
+        setEditMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
   // true = 3-level hierarchy; false = 2-level hierarchy
   const [hierarchyMode, setHierarchyMode] = useState<boolean>(true);
 
@@ -238,14 +254,53 @@ export default function AppSearchHeader({
           </nav>
           {currentApp?.sysId && (
             <div className="shrink-0 flex items-center gap-2">
-              {canEditRecord && onEditRecord && (
+              {onRefresh && (
                 <button
                   type="button"
-                  onClick={onEditRecord}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg text-sm hover:bg-blue-50 transition-colors"
+                  onClick={onRefresh}
+                  disabled={refreshing}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors disabled:opacity-60"
                 >
-                  <Edit2 className="w-4 h-4" /> Edit
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
                 </button>
+              )}
+              {canEditRecord && onEditCi && onEditRelationships && (
+                <div ref={editMenuRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setEditMenuOpen(open => !open)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg text-sm hover:bg-blue-50 transition-colors"
+                  >
+                    <Edit2 className="w-4 h-4" /> Edit
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${editMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {editMenuOpen && (
+                    <div className="absolute right-0 top-full mt-1 z-50 min-w-[12rem] bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onEditCi();
+                          setEditMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                        Edit CI
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onEditRelationships();
+                          setEditMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <Network className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                        Edit Relationships
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
               <a
                 href={`/${currentApp.table || 'cmdb_ci_service'}.do?sys_id=${currentApp.sysId}`}

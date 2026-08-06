@@ -392,7 +392,9 @@ export function App() {
               <ApplicationHome onSelectApp={handleSelectApp} />
             )}
             {currentView === 'rel-approvals' && (
-              <RelationshipApprovalsView />
+              <RelationshipApprovalsView
+                onNavigateToApp={(sysId) => navigateToRecord('cmdb_ci_service', sysId, 'ci-search')}
+              />
             )}
             {currentView === 'app-details' && (
               <ApplicationDetails

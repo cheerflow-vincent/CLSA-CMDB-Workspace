@@ -19,7 +19,7 @@ Run `npm run deploy` to create/update the table on your instance.
 |---------|------|---------|
 | `action` | choice | `create`, `delete` |
 | `state` | choice | `pending_approval`, `completed`, `rejected`, `cancelled` |
-| `relationship` | reference → `cmdb_rel_ci` | Relationship row |
+| `relationship` | list → `cmdb_rel_ci` | One or more relationship rows (bi-directional delete uses two sys_ids) |
 | `rel_type` | string (255) | Exact relationship type name |
 | `parent_ci` | reference → `cmdb_ci` | Parent CI |
 | `child_ci` | reference → `cmdb_ci` | Child CI |

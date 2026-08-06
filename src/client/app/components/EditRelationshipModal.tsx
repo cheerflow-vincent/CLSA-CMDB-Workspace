@@ -221,7 +221,7 @@ function RelSection({
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {group.existing.map(rel => (
-              <span key={rel.sysId} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${meta.tagCls}`}>
+              <span key={`${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${meta.tagCls}`}>
                 <span className="truncate max-w-[180px]" title={rel.otherAppName}>
                   {rel.otherAppName}
                 </span>
@@ -249,7 +249,7 @@ function RelSection({
             ))}
 
             {group.draftRemovals.map(rel => (
-              <span key={`rm-${rel.sysId}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-red-50 text-red-400 border-red-200 line-through">
+              <span key={`rm-${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-red-50 text-red-400 border-red-200 line-through">
                 {rel.otherAppName}
                 <button type="button" className="ml-0.5 hover:bg-red-200 rounded-full p-px no-underline" onClick={() => onUndoRemove(rel)}>
                   <span className="text-red-500 not-italic">↩</span>
@@ -258,7 +258,7 @@ function RelSection({
             ))}
 
             {group.serverPendingRemovals.map(rel => (
-              <span key={`srv-${rel.sysId}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-amber-50 text-amber-700 border-amber-200">
+              <span key={`srv-${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-amber-50 text-amber-700 border-amber-200">
                 <Clock size={9} />
                 {rel.otherAppName}
                 <span className="text-[9px]">pending approval</span>
@@ -334,19 +334,28 @@ export default function EditRelationshipModal({
   const removeExisting = (dir: RelationshipDirection, rel: LiveRelationship) => {
     const err = canRemoveRelationship(rel, pendingChanges);
     if (err) return;
+    const relIds = new Set(rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId]);
     updateGroup(dir, g => ({
       ...g,
-      existing: g.existing.filter(r => r.sysId !== rel.sysId),
+      existing: g.existing.filter(r => {
+        const ids = r.relationshipSysIds?.length ? r.relationshipSysIds : [r.sysId];
+        return !ids.some(id => relIds.has(id));
+      }),
       draftRemovals: [...g.draftRemovals, rel],
     }));
   };
 
-  const undoRemove = (dir: RelationshipDirection, rel: LiveRelationship) =>
+  const undoRemove = (dir: RelationshipDirection, rel: LiveRelationship) => {
+    const relIds = new Set(rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId]);
     updateGroup(dir, g => ({
       ...g,
-      draftRemovals: g.draftRemovals.filter(r => r.sysId !== rel.sysId),
+      draftRemovals: g.draftRemovals.filter(r => {
+        const ids = r.relationshipSysIds?.length ? r.relationshipSysIds : [r.sysId];
+        return !ids.some(id => relIds.has(id));
+      }),
       existing: [...g.existing, rel],
     }));
+  };
 
   const addApp = (dir: RelationshipDirection, appSysId: string, appName: string, relType: RelTypeChoice) => {
     if (dir === 'bidirectional') {
@@ -393,7 +402,8 @@ export default function EditRelationshipModal({
       } else {
         const res = await requestRelationshipDelete({
           source_ci_sys_id: item.source_ci_sys_id,
-          relationship_sys_id: item.relationship_sys_id,
+          relationship_sys_ids: item.relationship_sys_ids,
+          direction: item.direction,
         });
         if (!res.ok) {
           setSubmitError(res.error);
@@ -496,7 +506,7 @@ export default function EditRelationshipModal({
                         </div>
                       ))}
                       {g.draftRemovals.map(rel => (
-                        <div key={rel.sysId} className="flex items-start gap-3 px-4 py-3 bg-amber-50/60">
+                        <div key={`${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="flex items-start gap-3 px-4 py-3 bg-amber-50/60">
                           <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
                           <div>
                             <p className="text-sm font-medium text-gray-800">{rel.otherAppName}</p>

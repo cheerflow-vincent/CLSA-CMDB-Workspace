@@ -1,5 +1,6 @@
 import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByProbe } from './acl';
+import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG } from './relatedTasks';
 import { loadViewFields, str, raw, type ViewField } from './viewFields';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
 
@@ -144,13 +145,13 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
     Promise.all(tableNames.map(t => loadViewFields(t, VIEW_TITLE, 5, DEFAULT_VIEW_FIELDS).then(vf => ({ table: t, vf })))),
     chunkedIN<Record<string, unknown>>(
       'task_ci', 'ci_item', instanceIds,
-      'task.sys_class_name=incident^task.active=true',
+      INCIDENT_TASK_CONFIG.extraQuery,
       ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.priority', 'task.state', 'task.opened_at', 'task.assigned_to'],
       500, { displayValue: true },
     ),
     chunkedIN<Record<string, unknown>>(
       'task_ci', 'ci_item', instanceIds,
-      'task.sys_class_name=change_request^task.state=-2',
+      CHANGE_TASK_CONFIG.extraQuery,
       ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.type', 'task.state', 'task.start_date', 'task.assigned_to'],
       500, { displayValue: true },
     ),
