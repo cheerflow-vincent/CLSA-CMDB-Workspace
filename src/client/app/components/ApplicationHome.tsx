@@ -142,7 +142,7 @@ function assembleThreeLevelHierarchy(
         totalIncidents: totals.incidents,
         totalChanges: totals.changes,
       };
-    }).filter(svc => !filteredInstIds || svc.instanceIds.length > 0);
+    }).filter(svc => svc.instanceIds.length > 0);
 
     const allInstIds = services.flatMap(s => s.instanceIds);
     const appTotals = sumFlagCounts(allInstIds, flagCounts, instCache);
@@ -156,7 +156,7 @@ function assembleThreeLevelHierarchy(
       totalChanges: appTotals.changes,
       totalInstances: allInstIds.length,
     };
-  }).filter(app => !filteredInstIds || app.services.length > 0);
+  }).filter(app => app.services.length > 0);
 }
 
 // ─── System property reader ───────────────────────────────────────────────────
@@ -207,7 +207,7 @@ function assembleTwoLevelFamilies(
         totalChanges: totals.changes,
       };
     })
-    .filter(s => !filteredInstIds || s.instanceIds.length > 0)
+    .filter(s => s.instanceIds.length > 0)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

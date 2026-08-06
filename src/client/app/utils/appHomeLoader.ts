@@ -273,8 +273,10 @@ export function buildRelCiInstanceEdgeQuery(
   ];
 
   const child = 'child.';
+  // u_service_type / u_tier exist only on specific CI tables — use ref_* dot-walk.
+  const childRef = twoLevel ? 'child.ref_cmdb_ci_service.' : 'child.ref_cmdb_ci_service_auto.';
   if (twoLevel) {
-    parts.push(`${child}u_service_type=instance`);
+    parts.push(`${childRef}u_service_type=instance`);
   }
 
   const q = criteria.search.trim();
@@ -283,7 +285,7 @@ export function buildRelCiInstanceEdgeQuery(
   if (criteria.status.length) parts.push(`${child}operational_statusIN${criteria.status.join(',')}`);
   if (criteria.dept.length) parts.push(`${child}departmentIN${criteria.dept.join(',')}`);
   if (criteria.bizUnit.length) parts.push(`${child}business_unitIN${criteria.bizUnit.join(',')}`);
-  if (criteria.tier.length) parts.push(`${child}u_tierIN${criteria.tier.join(',')}`);
+  if (criteria.tier.length) parts.push(`${childRef}u_tierIN${criteria.tier.join(',')}`);
 
   return parts.join('^');
 }
@@ -329,7 +331,7 @@ export async function resolveFilteredTwoLevelFromRelCi(
     'parent.name': unknown; 'parent.short_description': unknown;
   }>(
     'cmdb_rel_ci', 'child.sys_id', [...intermediateIds],
-    'type.name=Connects to::Connected by^parent.u_service_type=service',
+    'type.name=Connects to::Connected by^parent.ref_cmdb_ci_service.u_service_type=service',
     ['parent', 'parent.name', 'parent.short_description', 'child'], 5000,
   );
 
@@ -522,13 +524,11 @@ async function buildTwoLevelMappingForFamilies(
   }
 
   const intermediateIds = [...new Set(hop1Res.rows.map(r => refId(r.child)).filter(Boolean))];
-  if (!intermediateIds.length) {
-    return { appFamilyMeta, appToInstances: new Map(), instanceSvcIds: [] };
-  }
+  if (!intermediateIds.length) return null;
 
   const hop2Res = await chunkedINParallel<{ parent: unknown; child: unknown }>(
     'cmdb_rel_ci', 'parent.sys_id', intermediateIds,
-    'type.name=Connects to::Connected by^child.u_service_type=instance',
+    'type.name=Connects to::Connected by^child.ref_cmdb_ci_service.u_service_type=instance',
     ['parent', 'child'], 5000,
   );
   if (hop2Res.access === 'denied') return null;
@@ -555,7 +555,11 @@ async function buildTwoLevelMappingForFamilies(
   }
 
   const instanceSvcIds = [...new Set([...appToInstances.values()].flatMap(s => [...s]))];
-  return { appFamilyMeta, appToInstances, instanceSvcIds };
+  const prunedMeta = new Map(
+    [...appToInstances.keys()].map(id => [id, appFamilyMeta.get(id)!]),
+  );
+  if (!appToInstances.size) return null;
+  return { appFamilyMeta: prunedMeta, appToInstances, instanceSvcIds };
 }
 
 export async function resolveTwoLevelMatchingFamilies(
@@ -580,7 +584,7 @@ export async function resolveTwoLevelMatchingFamilies(
     'parent.name': unknown; 'parent.short_description': unknown;
   }>(
     'cmdb_rel_ci', 'child.sys_id', intermediateIds,
-    'type.name=Connects to::Connected by^parent.u_service_type=service',
+    'type.name=Connects to::Connected by^parent.ref_cmdb_ci_service.u_service_type=service',
     ['parent', 'parent.name', 'parent.short_description', 'child'], 5000,
   );
   if (hop1Res.access === 'denied') return { families: [], access: 'denied' };
@@ -702,7 +706,15 @@ async function buildThreeLevelMappingForApps(
     [...svcToInstIds.values()].flatMap(ids => ids),
   )];
 
-  return { bApps, svcMap, bAppToSvcs, svcToInstIds, instanceIds };
+  const visibleBApps = bApps.filter(app => {
+    const svcs = (bAppToSvcs.get(app.sys_id) ?? []).filter(sId => (svcToInstIds.get(sId) ?? []).length > 0);
+    if (!svcs.length) return false;
+    bAppToSvcs.set(app.sys_id, svcs);
+    return true;
+  });
+  if (!visibleBApps.length) return null;
+
+  return { bApps: visibleBApps, svcMap, bAppToSvcs, svcToInstIds, instanceIds };
 }
 
 export async function resolveThreeLevelMatchingFamilies(

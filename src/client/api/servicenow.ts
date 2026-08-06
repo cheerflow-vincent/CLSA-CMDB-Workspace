@@ -306,7 +306,8 @@ export async function fetchApplicationHomePage(
 ): Promise<ApplicationHomeResponse> {
   try {
     const r = await axios.post(`/api/${APP_SCOPE}/portal/application_home`, body)
-    const result = r.data?.result ?? r.data
+    // Scripted REST wraps { result: handlerBody }; SN API wraps again → result.result.
+    const result = unwrapRestBody(unwrapRestBody(r.data)) as Record<string, unknown>
     if (!result || typeof result !== 'object') return EMPTY_APPLICATION_HOME
     return {
       access: result.access === 'denied' ? 'denied' : result.access === 'error' ? 'error' : 'ok',
@@ -314,9 +315,9 @@ export async function fetchApplicationHomePage(
       page: Number(result.page) || 0,
       page_size: Number(result.page_size) || 50,
       total_families: Number(result.total_families) || 0,
-      filter_token: result.filter_token ?? null,
-      instance_ids: Array.isArray(result.instance_ids) ? result.instance_ids : [],
-      mapping: result.mapping ?? null,
+      filter_token: (result.filter_token as string | null) ?? null,
+      instance_ids: Array.isArray(result.instance_ids) ? result.instance_ids as string[] : [],
+      mapping: (result.mapping as ApplicationHomeResponse['mapping']) ?? null,
       truncated: Boolean(result.truncated),
     }
   } catch (err) {
