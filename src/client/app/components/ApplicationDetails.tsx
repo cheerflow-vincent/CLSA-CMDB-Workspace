@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Search, Server, Database, DollarSign, Network,
+  Search, Server, Database, DollarSign, Network, CircuitBoard,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE, PENDING_EDGE_DASH } from './RelationshipDiagram';
 import type { DiagramFilters } from './RelationshipDiagram';
 import RelationshipTable from './RelationshipTable';
+import InfrastructureDiagram, { type InfraDiagramFilters } from './InfrastructureDiagram';
+import InfrastructureRelationshipTable from './InfrastructureRelationshipTable';
 import EditRelationshipModal, { type RelationshipMutation } from './EditRelationshipModal';
+import EditInfrastructureRelationshipModal from './EditInfrastructureRelationshipModal';
 import RelationshipChangesList from './RelationshipChangesList';
 import RecordEditDialog from './recordEdit/RecordEditDialog';
 import AppSearchHeader from './AppSearchHeader';
@@ -17,7 +20,9 @@ import {
   SERVER_REL_CONFIG,
   DATABASE_REL_CONFIG,
   NETGEAR_REL_CONFIG,
+  CIRCUIT_REL_CONFIG,
 } from '../utils/relatedCIs';
+import { INFRA_CI_STYLE, type InfraCIType } from '../utils/infraCiStyles';
 import {
   INCIDENT_TASK_CONFIG,
   CHANGE_TASK_CONFIG,
@@ -68,13 +73,16 @@ interface ApplicationDetailsProps {
 }
 
 type ViewMode = 'map' | 'table';
-type ExpandKey = 'servers' | 'databases' | 'netgear' | 'incidents' | 'changes' | 'relChanges';
+type RelationshipTab = 'app' | 'infra';
+type ExpandKey = 'servers' | 'databases' | 'netgear' | 'circuits' | 'incidents' | 'changes' | 'relChanges';
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp, hierarchyMode = true }: ApplicationDetailsProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('map');
+  const [relationshipTab, setRelationshipTab] = useState<RelationshipTab>('app');
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showInfraEditModal, setShowInfraEditModal] = useState(false);
   const [relationshipEditTarget, setRelationshipEditTarget] = useState<{ sysId: string; name: string } | null>(null);
   const [recordEditTarget, setRecordEditTarget] = useState<{ sysId: string; name: string; table: string } | null>(null);
   const [relRefreshKey, setRelRefreshKey] = useState(0);
@@ -88,8 +96,12 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     upstream: true, downstream: true, bidirectional: true,
     platform: true, infrastructure: true, business: true,
   });
+  const [infraFilters, setInfraFilters] = useState<InfraDiagramFilters>({
+    server: true, netgear: true, circuit: true, database: true,
+  });
   const [expanded, setExpanded] = useState<Record<ExpandKey, boolean>>({
-    servers: false, databases: false, netgear: false, incidents: false, changes: false, relChanges: false,
+    servers: false, databases: false, netgear: false, circuits: false,
+    incidents: false, changes: false, relChanges: false,
   });
 
   // ── Overview panel: dynamic view fields ──────────────────────────────────
@@ -132,6 +144,19 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
   const toggleFilter = (key: keyof DiagramFilters) =>
     setFilters(f => ({ ...f, [key]: !f[key] }));
+
+  const toggleInfraFilter = (key: InfraCIType) =>
+    setInfraFilters(f => ({ ...f, [key]: !f[key] }));
+
+  const openEditRelationships = () => {
+    if (!selectedApp?.sysId) return;
+    setRelationshipEditTarget({ sysId: selectedApp.sysId, name: selectedApp.name });
+    if (relationshipTab === 'infra') {
+      setShowInfraEditModal(true);
+    } else {
+      setShowEditModal(true);
+    }
+  };
 
   const toggleExpand = (key: ExpandKey) =>
     setExpanded(e => ({ ...e, [key]: !e[key] }));
@@ -183,12 +208,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
             });
           }
         }}
-        onEditRelationships={() => {
-          if (selectedApp?.sysId) {
-            setRelationshipEditTarget({ sysId: selectedApp.sysId, name: selectedApp.name });
-            setShowEditModal(true);
-          }
-        }}
+        onEditRelationships={openEditRelationships}
       />
 
       {/* ── Main content: fills remaining viewport height ── */}
@@ -200,10 +220,36 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
           {/* Sticky toolbar */}
           <div className="flex-shrink-0 border-b border-gray-200 bg-white px-5 py-3">
 
-            {/* Title + Search */}
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-base font-semibold text-gray-900">Upstream / Downstream Relationships</h3>
-              <div className="relative">
+            {/* Relationship tab + Search */}
+            <div className="flex items-center justify-between mb-3 gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setRelationshipTab('app')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      relationshipTab === 'app' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    App Relationships
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRelationshipTab('infra')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 ${
+                      relationshipTab === 'infra' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Infrastructure
+                  </button>
+                </div>
+                <h3 className="text-base font-semibold text-gray-900 truncate">
+                  {relationshipTab === 'app'
+                    ? 'Upstream / Downstream Relationships'
+                    : 'Infrastructure Relationships'}
+                </h3>
+              </div>
+              <div className="relative flex-shrink-0">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
@@ -218,6 +264,8 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
             {/* Filters + View Toggle */}
             <div className="flex items-center flex-wrap gap-2">
 
+              {relationshipTab === 'app' ? (
+                <>
               {/* Direction filters */}
               <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Direction</span>
 
@@ -294,6 +342,34 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 </button>
               ))}
 
+                </>
+              ) : (
+                <>
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">CI Type</span>
+                  {(Object.keys(INFRA_CI_STYLE) as InfraCIType[]).map(ciType => {
+                    const style = INFRA_CI_STYLE[ciType];
+                    const active = infraFilters[ciType];
+                    return (
+                      <button
+                        key={ciType}
+                        type="button"
+                        onClick={() => toggleInfraFilter(ciType)}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                          active ? 'text-gray-800' : 'bg-white border-gray-200 text-gray-400'
+                        }`}
+                        style={active ? { backgroundColor: style.bg, borderColor: style.border } : {}}
+                      >
+                        <span
+                          className="inline-block w-2.5 h-2.5 rounded-sm"
+                          style={{ backgroundColor: active ? style.border : '#E5E7EB' }}
+                        />
+                        {style.label}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+
               {/* View toggle — pushed to the right */}
               <div className="flex items-center gap-2 ml-auto">
                 <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">View</span>
@@ -324,31 +400,56 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
           {/* ── Canvas / table — fills all remaining height ── */}
           {viewMode === 'map' ? (
             <div className="flex-1 min-h-0">
-              <RelationshipDiagram
-                key={diagramRefreshKey}
-                filters={filters}
-                nodeSearch={nodeSearch}
-                selectedApp={selectedApp}
-                onSelectApp={onSelectApp}
-                pendingRefreshKey={relRefreshKey}
-                canEditCenterRecord={canWriteRecord}
-                onEditRelationships={app => {
-                  setRelationshipEditTarget(app);
-                  setShowEditModal(true);
-                }}
-                onEditCiDetails={app => setRecordEditTarget(app)}
-                onRelationshipMutations={handleRelationshipMutations}
-              />
+              {relationshipTab === 'app' ? (
+                <RelationshipDiagram
+                  key={diagramRefreshKey}
+                  filters={filters}
+                  nodeSearch={nodeSearch}
+                  selectedApp={selectedApp}
+                  onSelectApp={onSelectApp}
+                  pendingRefreshKey={relRefreshKey}
+                  canEditCenterRecord={canWriteRecord}
+                  onEditRelationships={app => {
+                    setRelationshipEditTarget(app);
+                    setShowEditModal(true);
+                  }}
+                  onEditCiDetails={app => setRecordEditTarget(app)}
+                  onRelationshipMutations={handleRelationshipMutations}
+                />
+              ) : (
+                <InfrastructureDiagram
+                  key={`infra-${diagramRefreshKey}`}
+                  filters={infraFilters}
+                  nodeSearch={nodeSearch}
+                  selectedApp={selectedApp}
+                  onViewCI={onViewCI}
+                  refreshKey={pageRefreshKey}
+                  canEditCenterRecord={canWriteRecord}
+                  onEditRelationships={app => {
+                    setRelationshipEditTarget(app);
+                    setShowInfraEditModal(true);
+                  }}
+                  onEditCiDetails={app => setRecordEditTarget(app)}
+                />
+              )}
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-5">
-              <RelationshipTable
-                selectedApp={selectedApp}
-                nodeSearch={nodeSearch}
-                filters={filters}
-                onSelectApp={onSelectApp}
-                refreshKey={pageRefreshKey}
-              />
+              {relationshipTab === 'app' ? (
+                <RelationshipTable
+                  selectedApp={selectedApp}
+                  nodeSearch={nodeSearch}
+                  filters={filters}
+                  onSelectApp={onSelectApp}
+                  refreshKey={pageRefreshKey}
+                />
+              ) : (
+                <InfrastructureRelationshipTable
+                  recordSysId={selectedApp?.sysId}
+                  refreshKey={pageRefreshKey}
+                  onViewCI={onViewCI}
+                />
+              )}
             </div>
           )}
         </div>
@@ -458,6 +559,25 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         hoverRow="cursor-pointer"
                       />
 
+                      <RelatedListSection
+                        config={CIRCUIT_REL_CONFIG}
+                        recordSysId={selectedApp?.sysId}
+                        refreshKey={pageRefreshKey}
+                        responsiveLayout={false}
+                        showCIFlags
+                        isOpen={expanded.circuits}
+                        onToggle={() => toggleExpand('circuits')}
+                        onViewCI={onViewCI}
+                        title="Circuits powering the application"
+                        Icon={CircuitBoard}
+                        iconBg="bg-orange-100"
+                        iconColor="text-orange-600"
+                        badgeBg="bg-orange-50"
+                        badgeText="text-orange-700"
+                        badgeBorder="border-orange-200"
+                        hoverRow="cursor-pointer"
+                      />
+
                       {/* Total cost — static */}
                       <div className="bg-white rounded-lg border border-gray-200 px-3 py-2.5 flex items-center gap-3">
                         <div className="p-1.5 bg-emerald-100 rounded flex-shrink-0">
@@ -550,6 +670,19 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
             setRelationshipEditTarget(null);
           }}
           onSubmitted={handleRelationshipMutations}
+        />
+      )}
+      {showInfraEditModal && relationshipEditTarget && (
+        <EditInfrastructureRelationshipModal
+          selectedApp={relationshipEditTarget}
+          onClose={() => {
+            setShowInfraEditModal(false);
+            setRelationshipEditTarget(null);
+          }}
+          onSaved={() => {
+            setPageRefreshKey(n => n + 1);
+            setDiagramRefreshKey(n => n + 1);
+          }}
         />
       )}
       {recordEditTarget && (

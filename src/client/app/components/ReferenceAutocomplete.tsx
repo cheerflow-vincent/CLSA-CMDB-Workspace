@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, X, Loader2 } from 'lucide-react';
 import { searchReferenceTable, getTableLabel, resolveReferenceList, type ReferenceOption } from '../../api/servicenow';
 import type { EditFieldValue } from '../utils/viewFields';
@@ -23,6 +24,7 @@ export interface ReferenceAutocompleteProps {
   value: EditFieldValue;
   disabled?: boolean;
   onChange: (value: EditFieldValue) => void;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export default function ReferenceAutocomplete({
@@ -32,6 +34,7 @@ export default function ReferenceAutocomplete({
   value,
   disabled = false,
   onChange,
+  onOpenChange,
 }: ReferenceAutocompleteProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -39,11 +42,30 @@ export default function ReferenceAutocomplete({
   const [loading, setLoading] = useState(false);
   const [tableLabel, setTableLabel] = useState('');
   const [resolvedLabel, setResolvedLabel] = useState('');
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedId = editRawValue(value);
   const selectedLabel = resolvedLabel || editDisplayValue(value);
+
+  const setDropdownOpen = useCallback((next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  }, [onOpenChange]);
+
+  const updateMenuPosition = useCallback(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    setMenuStyle({
+      position: 'fixed',
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      zIndex: 10050,
+    });
+  }, []);
 
   useEffect(() => {
     setResolvedLabel('');
@@ -77,12 +99,27 @@ export default function ReferenceAutocomplete({
   }, [referenceTable]);
 
   useEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    const onReposition = () => updateMenuPosition();
+    window.addEventListener('scroll', onReposition, true);
+    window.addEventListener('resize', onReposition);
+    return () => {
+      window.removeEventListener('scroll', onReposition, true);
+      window.removeEventListener('resize', onReposition);
+    };
+  }, [open, updateMenuPosition]);
+
+  useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setDropdownOpen(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
-  }, []);
+  }, [setDropdownOpen]);
 
   const runSearch = useCallback((text: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -107,7 +144,7 @@ export default function ReferenceAutocomplete({
   const pick = (opt: ReferenceOption) => {
     onChange({ value: opt.sys_id, display_value: opt.display });
     setQuery('');
-    setOpen(false);
+    setDropdownOpen(false);
     setOptions([]);
   };
 
@@ -118,6 +155,38 @@ export default function ReferenceAutocomplete({
   };
 
   const placeholder = tableLabel ? `Search ${tableLabel}…` : 'Search…';
+
+  const dropdownMenu = open ? (
+    <div
+      ref={menuRef}
+      style={menuStyle}
+      className="bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1"
+    >
+      {loading && (
+        <p className="px-3 py-2 text-xs text-gray-400 flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching…
+        </p>
+      )}
+      {!loading && options.length === 0 && query.trim() && (
+        <p className="px-3 py-2 text-xs text-gray-400">No matches</p>
+      )}
+      {!loading && !query.trim() && (
+        <p className="px-3 py-2 text-xs text-gray-400">Type to search by name</p>
+      )}
+      {options.map(opt => (
+        <button
+          key={opt.sys_id}
+          type="button"
+          className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition-colors ${
+            opt.sys_id === selectedId ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-800'
+          }`}
+          onClick={() => pick(opt)}
+        >
+          {opt.display}
+        </button>
+      ))}
+    </div>
+  ) : null;
 
   if (disabled) {
     return (
@@ -144,12 +213,12 @@ export default function ReferenceAutocomplete({
           value={open ? query : selectedLabel}
           onChange={e => {
             setQuery(e.target.value);
-            setOpen(true);
+            setDropdownOpen(true);
             runSearch(e.target.value);
           }}
           onFocus={() => {
             setQuery('');
-            setOpen(true);
+            setDropdownOpen(true);
           }}
         />
         {selectedId && !open && (
@@ -159,33 +228,7 @@ export default function ReferenceAutocomplete({
         )}
       </div>
 
-      {open && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-[60] bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1">
-          {loading && (
-            <p className="px-3 py-2 text-xs text-gray-400 flex items-center gap-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching…
-            </p>
-          )}
-          {!loading && options.length === 0 && query.trim() && (
-            <p className="px-3 py-2 text-xs text-gray-400">No matches</p>
-          )}
-          {!loading && !query.trim() && (
-            <p className="px-3 py-2 text-xs text-gray-400">Type to search by name</p>
-          )}
-          {options.map(opt => (
-            <button
-              key={opt.sys_id}
-              type="button"
-              className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition-colors ${
-                opt.sys_id === selectedId ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-800'
-              }`}
-              onClick={() => pick(opt)}
-            >
-              {opt.display}
-            </button>
-          ))}
-        </div>
-      )}
+      {dropdownMenu && createPortal(dropdownMenu, document.body)}
     </div>
   );
 }

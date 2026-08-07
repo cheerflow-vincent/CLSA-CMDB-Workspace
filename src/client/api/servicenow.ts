@@ -854,6 +854,90 @@ function extractRelationshipChangeError(err: unknown): string {
   return 'Request failed. Please try again.';
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// cmdb_rel_ci direct CRUD (infrastructure relationships)
+// ──────────────────────────────────────────────────────────────────────────────
+
+const _relTypeSysIdCache = new Map<string, string>();
+
+export async function resolveRelTypeSysId(relTypeName: string): Promise<string | null> {
+  const cached = _relTypeSysIdCache.get(relTypeName);
+  if (cached) return cached;
+
+  const { result } = await queryTableWithAccess<{ sys_id: string }>({
+    table: 'cmdb_rel_type',
+    query: `name=${relTypeName}`,
+    fields: ['sys_id'],
+    limit: 1,
+  });
+  const sysId = result?.[0]?.sys_id ?? null;
+  if (sysId) _relTypeSysIdCache.set(relTypeName, sysId);
+  return sysId;
+}
+
+export async function createCmdbRelCi(body: {
+  parentSysId: string;
+  childSysId: string;
+  relTypeName: string;
+}): Promise<{ ok: true; relSysId: string } | { ok: false; error: string }> {
+  try {
+    const typeSysId = await resolveRelTypeSysId(body.relTypeName);
+    if (!typeSysId) {
+      return { ok: false, error: `Relationship type "${body.relTypeName}" was not found.` };
+    }
+
+    const r = await axios.post('/api/now/table/cmdb_rel_ci', {
+      parent: body.parentSysId,
+      child: body.childSysId,
+      type: typeSysId,
+    });
+    const row = r.data?.result as { sys_id?: string } | undefined;
+    return { ok: true, relSysId: row?.sys_id ?? '' };
+  } catch (err) {
+    if (isAxiosForbidden(err)) {
+      return { ok: false, error: 'You do not have permission to create this relationship.' };
+    }
+    const msg = extractTableApiError(err);
+    return { ok: false, error: msg };
+  }
+}
+
+export async function deleteCmdbRelCi(
+  relSysId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!relSysId) return { ok: false, error: 'Missing relationship record.' };
+  try {
+    await axios.delete(`/api/now/table/cmdb_rel_ci/${relSysId}`);
+    return { ok: true };
+  } catch (err) {
+    if (isAxiosForbidden(err)) {
+      return { ok: false, error: 'You do not have permission to delete this relationship.' };
+    }
+    const msg = extractTableApiError(err);
+    return { ok: false, error: msg };
+  }
+}
+
+function extractTableApiError(err: unknown): string {
+  if (typeof err !== 'object' || err === null || !('response' in err)) {
+    return 'Request failed. Please try again.';
+  }
+  const resp = (err as { response?: { status?: number; data?: unknown } }).response;
+  const data = resp?.data;
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+    if (typeof d.error === 'object' && d.error !== null) {
+      const nested = d.error as { message?: string; detail?: string };
+      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message;
+      if (typeof nested.detail === 'string' && nested.detail.trim()) return nested.detail;
+    }
+    if (typeof d.error === 'string' && d.error.trim()) return d.error;
+  }
+  if (resp?.status === 404) return 'Record not found.';
+  if (resp?.status) return `Request failed (HTTP ${resp.status}). Please try again.`;
+  return 'Request failed. Please try again.';
+}
+
 export async function decideRelationshipApproval(
   approvalSysId: string,
   decision: RelationshipApprovalDecision,
