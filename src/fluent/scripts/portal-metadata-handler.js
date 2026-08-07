@@ -131,6 +131,13 @@ PortalMetadataHandler.prototype = {
     while (gr.next()) {
       map[String(gr.getValue('name'))] = String(gr.getValue('value') || '');
     }
+    var grafanaPrefix = this.APP_SCOPE + '.grafana.url.';
+    var grafanaGr = new GlideRecord('sys_properties');
+    grafanaGr.addQuery('name', 'STARTSWITH', grafanaPrefix);
+    grafanaGr.query();
+    while (grafanaGr.next()) {
+      map[String(grafanaGr.getValue('name'))] = String(grafanaGr.getValue('value') || '');
+    }
     return map;
   },
 

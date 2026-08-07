@@ -9,7 +9,7 @@ import {
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
 import { type AppItem } from '../data/appData';
-import { queryTable, fetchFieldAccess, type TableAccess } from '../../api/servicenow';
+import { queryTable, fetchFieldAccess, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
 import { filterFormSections, isAccessDenied, canEditRecord } from '../utils/acl';
 import RecordEditDialog from './recordEdit/RecordEditDialog';
 import {
@@ -79,6 +79,15 @@ function ReadonlyField({ label, value }: { label: string; value: string }) {
       <p className="text-sm font-medium text-gray-900 break-words whitespace-pre-line">{value || '—'}</p>
     </div>
   );
+}
+
+function grafanaPropertyName(table: string): string {
+  return `${APP_SCOPE}.grafana.url.${table}`;
+}
+
+/** Substitute `{0}` in a Grafana URL template with the CI name. */
+function buildGrafanaUrl(template: string, ciName: string): string {
+  return template.replace(/\{0\}/g, encodeURIComponent(ciName));
 }
 
 /** Pick the best CMDB table hint from URL params or CI props. */
@@ -231,7 +240,6 @@ export default function CIDetailView({
   sidebarCollapsed = false,
 }: CIDetailViewProps) {
   const detail  = getDetail(ci);
-  const isServer = ci.type === 'Server';
   const [taskTab, setTaskTab] = useState<'incidents' | 'changes'>('incidents');
   const [incidentCount, setIncidentCount] = useState(0);
   const [changeCount, setChangeCount] = useState(0);
@@ -244,6 +252,7 @@ export default function CIDetailView({
   const [pageRefreshKey, setPageRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [displayName, setDisplayName] = useState(ci.name);
+  const [grafanaUrl, setGrafanaUrl] = useState<string | null>(null);
   const [formSections, setFormSections] = useState<FormSectionLayout[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [overviewLoading, setOverviewLoading] = useState(true);
@@ -341,6 +350,26 @@ export default function CIDetailView({
 
     return () => { cancelled = true; };
   }, [ci.id, ci.table, ci.class, ci.name, pageRefreshKey]);
+
+  useEffect(() => {
+    const table = recordTable || resolveTableHint(ci);
+    if (!table || !displayName) {
+      setGrafanaUrl(null);
+      return;
+    }
+    let cancelled = false;
+    const propName = grafanaPropertyName(table);
+    getSysProperties([propName])
+      .then(props => {
+        if (cancelled) return;
+        const template = props[propName]?.trim();
+        setGrafanaUrl(template ? buildGrafanaUrl(template, displayName) : null);
+      })
+      .catch(() => {
+        if (!cancelled) setGrafanaUrl(null);
+      });
+    return () => { cancelled = true; };
+  }, [recordTable, displayName, ci, pageRefreshKey]);
 
   const refreshPage = useCallback(() => {
     setRefreshing(true);
@@ -594,14 +623,19 @@ export default function CIDetailView({
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
             </button>
-            {isServer && (
-              <button className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-50 transition-colors">
+            {grafanaUrl && (
+              <a
+                href={grafanaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-50 transition-colors"
+              >
                 <Activity className="w-4 h-4" /> Grafana
                 <ExternalLink className="w-3 h-3" />
-              </button>
+              </a>
             )}
             <a
-              href={`/${ci.table || 'cmdb_ci'}.do?sys_id=${ci.id}`}
+              href={`/${recordTable || resolveTableHint(ci)}.do?sys_id=${recordSysId || ci.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 transition-colors"
