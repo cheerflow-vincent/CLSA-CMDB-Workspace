@@ -87,6 +87,42 @@ declare global {
                         table: 'sys_ws_operation'
                         id: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
                     }
+                    'rel-change-mail-approval-body': {
+                        table: 'sys_script_email'
+                        id: '76a0f5c60b70490ba93ce6fdf41a015f'
+                    }
+                    'rel-change-mail-details': {
+                        table: 'sys_script_email'
+                        id: '54d965ef57a84f58b34fa8bc698fe9aa'
+                    }
+                    'rel-change-mail-portal-link': {
+                        table: 'sys_script_email'
+                        id: '34e3e0313d974346a89989a4239704ac'
+                    }
+                    'rel-change-mail-subject': {
+                        table: 'sys_script_email'
+                        id: '4c2e82fc77fd47148aa8244a29372aa4'
+                    }
+                    'rel-change-notif-approval': {
+                        table: 'sysevent_email_action'
+                        id: '4b16c30bebc34b43a79c87e48807df09'
+                    }
+                    'rel-change-notif-approved': {
+                        table: 'sysevent_email_action'
+                        id: '451342901d4e45deaaa18f802d358a3c'
+                    }
+                    'rel-change-notif-completed-create': {
+                        table: 'sysevent_email_action'
+                        id: 'a61274170ce843c19c1908a7ce387f7c'
+                    }
+                    'rel-change-notif-pending': {
+                        table: 'sysevent_email_action'
+                        id: 'beff68d90b8b41a588af0c1c39089532'
+                    }
+                    'rel-change-notif-rejected': {
+                        table: 'sysevent_email_action'
+                        id: '60807eee217c4eb18637658b1144ab9e'
+                    }
                     'relationship-approval-handler': {
                         table: 'sys_script_include'
                         id: '22d52944a24a45298aa0232ad5bdfbfa'
