@@ -2,18 +2,33 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Server, Database, CircuitBoard, Network, Search,
   ChevronDown, ArrowUpDown, ChevronLeft, ChevronRight,
-  Check, X,
+  X,
   Download, FileText, ExternalLink, Loader2
 } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
+import AppFamilyInstanceAutocomplete from './AppFamilyInstanceAutocomplete';
 import CIFlagBadges from './CIFlagBadges';
 import FlagDetailPanel, { type FlagType } from './FlagDetailPanel';
-import { queryTableWithAccess, getCIFilter, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
+import {
+  queryTableWithAccess,
+  getCIFilter,
+  getSysProperties,
+  fetchPortalMetadata,
+  APP_SCOPE,
+  type TableAccess,
+} from '../../api/servicenow';
 import { loadListFields, raw, str, type ViewField } from '../utils/viewFields';
-import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms } from '../utils/searchQuery';
 import { filterColumnsByRecords, isAccessDenied } from '../utils/acl';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
 import { enrichRowsWithTaskFlags } from '../utils/relatedCIFlags';
+import {
+  buildSnQueriesByTab,
+  fetchRelatedInfraCiIdsByTable,
+  resolveInstanceIdsForAppSelection,
+  fetchAllScopedCiRows,
+  type AppFilterSelection,
+  type AppRelatedIdsByTab,
+} from '../utils/ciSearchAppFilter';
 
 const PROP_CI_SEARCH_FIELDS = `${APP_SCOPE}.ci.search.filter.table.field`;
 const DEFAULT_SEARCH_FIELDS = ['name'];
@@ -215,7 +230,7 @@ async function fetchTabAll(
 }
 
 async function fetchAllForExport(
-  snQuery: string,
+  snQueriesByTab: Record<SpecificTab, string>,
   columns: ViewField[],
   tabCounts: Record<SpecificTab, number>,
   tabAccess: Record<SpecificTab, TableAccess>,
@@ -225,7 +240,7 @@ async function fetchAllForExport(
       if (isAccessDenied(tabAccess[cfg.tab])) return [] as SearchRow[];
       const count = tabCounts[cfg.tab];
       if (!count) return [] as SearchRow[];
-      const { rows } = await fetchTabAll(cfg, snQuery, columns, count);
+      const { rows } = await fetchTabAll(cfg, snQueriesByTab[cfg.tab], columns, count);
       return rows;
     }),
   );
@@ -237,7 +252,7 @@ async function fetchAllForExport(
 }
 
 async function fetchAllMerged(
-  snQuery: string,
+  snQueriesByTab: Record<SpecificTab, string>,
   columns: ViewField[],
 ): Promise<{ rows: SearchRow[]; totalCount: number; tabAccess: Record<SpecificTab, TableAccess> }> {
   const apiFields = apiFieldsForColumns(columns);
@@ -246,7 +261,7 @@ async function fetchAllMerged(
     V2_TABS.map(async cfg => {
       const { result, totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
         table: cfg.table,
-        query: `${snQuery}^ORDERBYname`,
+        query: `${snQueriesByTab[cfg.tab]}^ORDERBYname`,
         fields: apiFields,
         limit: MERGE_CAP,
         displayValue: true,
@@ -284,57 +299,6 @@ const buildPills = (c: PillCounts, access: PillAccess): PillDef[] => ([
   { tab: 'databases' as Tab, label: 'Databases', count: c.databases, icon: <Database     className="w-5 h-5 text-purple-600" />, accent: 'border-purple-500 bg-purple-50', iconBg: 'bg-purple-100' },
   { tab: 'circuits' as Tab,  label: 'Circuits',  count: c.circuits,  icon: <CircuitBoard className="w-5 h-5 text-orange-600" />, accent: 'border-orange-500 bg-orange-50', iconBg: 'bg-orange-100' },
 ] as PillDef[]).filter(p => !isAccessDenied(access[p.tab as keyof PillCounts]));
-const filterOptions: Record<string, string[]> = {
-  Environment:        ['Production', 'Non-production', 'DR'],
-  Location:           ['HKD', 'HKG', 'MUM', 'SHG', 'SNG', 'Global'],
-  'Business Service': ['Trading Platform', 'Risk Management', 'Settlement System', 'Data Analytics'],
-  'Support Group':    ['DS - TechOps Support Group', 'DS - Infra Support Group', 'DS - Network Support Group', 'DS - DB Support Group', 'DS - BizOps Support Group'],
-};
-
-// ─── Multi-select dropdown ────────────────────────────────────────────────────
-function MultiSelectDropdown({ label, options, selected, onChange }: {
-  label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
-  const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen(o => !o)}
-        className={`px-3 py-1.5 border rounded-md text-sm flex items-center gap-2 hover:bg-gray-50 transition-colors ${selected.length > 0 ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-700'}`}>
-        <span>{label}</span>
-        {selected.length > 0 && (
-          <>
-            <span className="bg-blue-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center shrink-0">{selected.length}</span>
-            <X className="w-3 h-3 shrink-0 hover:text-red-500" onClick={e => { e.stopPropagation(); onChange([]); }} />
-          </>
-        )}
-        <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[200px] py-1">
-          {options.map(opt => {
-            const checked = selected.includes(opt);
-            return (
-              <button key={opt} type="button" onClick={() => toggle(opt)}
-                className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 text-sm text-left">
-                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
-                  {checked && <Check className="w-3 h-3 text-white" />}
-                </span>
-                <span className={checked ? 'text-gray-900' : 'text-gray-700'}>{opt}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Export button ────────────────────────────────────────────────────────────
 function ExportButton({
@@ -391,16 +355,14 @@ function ExportButton({
 
 // ─── Filters state ────────────────────────────────────────────────────────────
 interface PendingFilters {
-  keyword: string; ciType: string;
-  environment: string[]; location: string[];
-  businessService: string[]; supportGroup: string[];
+  keyword: string;
+  ciType: string;
+  appFilter: AppFilterSelection | null;
 }
-const emptyPending = (): PendingFilters => ({ keyword: '', ciType: '', environment: [], location: [], businessService: [], supportGroup: [] });
+const emptyPending = (): PendingFilters => ({ keyword: '', ciType: '', appFilter: null });
 
 function isDefaultFilters(f: PendingFilters): boolean {
-  return !f.keyword.trim() && !f.ciType
-    && !f.environment.length && !f.location.length
-    && !f.businessService.length && !f.supportGroup.length;
+  return !f.keyword.trim() && !f.ciType && !f.appFilter;
 }
 
 /** Map CI Type dropdown label → results tab. */
@@ -408,19 +370,6 @@ function ciTypeToTab(ciType: string): Tab | null {
   const entry = (Object.entries(tabTypeMap) as [Tab, string | null][])
     .find(([, label]) => label === ciType);
   return entry?.[0] ?? null;
-}
-
-/**
- * Build encoded query: each token must match at least one search field (AND across tokens).
- * Per token: (field1 LIKE t OR field2 LIKE t …); fields from ci.search.filter.table.field.
- */
-function buildSnQuery(keyword: string, ciFilter: string, searchFields: string[]): string {
-  const tokens = tokenizeSearchTerms(keyword);
-  if (!tokens.length) return ciFilter;
-
-  const fields = searchFields.length ? searchFields : DEFAULT_SEARCH_FIELDS;
-  const likeGroup = buildMultiFieldAndLikeQuery(fields, tokens);
-  return likeGroup ? `${likeGroup}^${ciFilter}` : ciFilter;
 }
 
 function SearchResultCard({
@@ -517,7 +466,13 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const { ref: narrowRef, narrow } = useNarrowContainer(720);
   const [ciFilter, setCiFilter]     = useState<string | null>(null);
   const [searchFields, setSearchFields] = useState<string[]>(DEFAULT_SEARCH_FIELDS);
+  const [hierarchyMode, setHierarchyMode] = useState(true);
+  const [appRelatedIdsByTab, setAppRelatedIdsByTab] = useState<AppRelatedIdsByTab | null>(null);
+  const [appFilterLoading, setAppFilterLoading] = useState(false);
+  const [appFilterError, setAppFilterError] = useState<string | null>(null);
   const columnsCache = useRef<Map<string, ViewField[]>>(new Map());
+
+  const appFilterActive = !!applied.appFilter;
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -532,16 +487,31 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   }, []);
 
   const queryKey = useMemo(
-    () => JSON.stringify({ applied, ciFilter, searchFields }),
-    [applied, ciFilter, searchFields],
+    () => JSON.stringify({ applied, ciFilter, searchFields, appRelatedIdsByTab, hierarchyMode }),
+    [applied, ciFilter, searchFields, appRelatedIdsByTab, hierarchyMode],
   );
 
-  const snQuery = useMemo(() => {
-    if (ciFilter === null) return '';
-    return buildSnQuery(applied.keyword, ciFilter, searchFields);
-  }, [applied.keyword, ciFilter, searchFields]);
+  const snQueriesByTab = useMemo(() => {
+    if (ciFilter === null) {
+      return {
+        servers: '',
+        switches: '',
+        databases: '',
+        circuits: '',
+      } as Record<SpecificTab, string>;
+    }
+    return buildSnQueriesByTab(
+      appRelatedIdsByTab,
+      applied.keyword,
+      ciFilter,
+      searchFields,
+      appFilterActive,
+    );
+  }, [applied.keyword, ciFilter, searchFields, appRelatedIdsByTab, appFilterActive]);
 
-  // Load CI filter + searchable fields from sys_properties
+  const queriesReady = ciFilter !== null && (!appFilterActive || (!appFilterLoading && appRelatedIdsByTab !== null));
+
+  // Load CI filter, searchable fields, and hierarchy mode
   useEffect(() => {
     getCIFilter().then(setCiFilter);
     getSysProperties([PROP_CI_SEARCH_FIELDS])
@@ -551,7 +521,68 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         setSearchFields(fields.length ? fields : DEFAULT_SEARCH_FIELDS);
       })
       .catch(() => setSearchFields(DEFAULT_SEARCH_FIELDS));
+    fetchPortalMetadata()
+      .then(meta => setHierarchyMode(meta.hierarchy_mode))
+      .catch(() => setHierarchyMode(true));
   }, []);
+
+  // Resolve related infra CI IDs when an app filter is applied
+  useEffect(() => {
+    if (!applied.appFilter) {
+      setAppRelatedIdsByTab(null);
+      setAppFilterLoading(false);
+      setAppFilterError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAppFilterLoading(true);
+    setAppFilterError(null);
+    setAppRelatedIdsByTab(null);
+
+    (async () => {
+      try {
+        const instanceIds = await resolveInstanceIdsForAppSelection(applied.appFilter!, hierarchyMode);
+        if (cancelled) return;
+        if (!instanceIds.length) {
+          setAppRelatedIdsByTab({
+            servers: [],
+            switches: [],
+            databases: [],
+            circuits: [],
+          });
+          return;
+        }
+        const { idsByTab, access } = await fetchRelatedInfraCiIdsByTable(instanceIds);
+        if (cancelled) return;
+        if (access === 'denied') {
+          setAppFilterError('Access denied while loading application relationships.');
+          setAppRelatedIdsByTab({
+            servers: [],
+            switches: [],
+            databases: [],
+            circuits: [],
+          });
+          return;
+        }
+        setAppRelatedIdsByTab(idsByTab);
+      } catch (e) {
+        if (!cancelled) {
+          setAppFilterError(String((e as Error)?.message ?? e));
+          setAppRelatedIdsByTab({
+            servers: [],
+            switches: [],
+            databases: [],
+            circuits: [],
+          });
+        }
+      } finally {
+        if (!cancelled) setAppFilterLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [applied.appFilter, hierarchyMode]);
 
   // Inventory pill counts (top cards)
   useEffect(() => {
@@ -577,13 +608,13 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
 
   // Fetch result counts for all tabs when query changes
   useEffect(() => {
-    if (!snQuery) return;
+    if (!queriesReady) return;
     let cancelled = false;
     Promise.all(
       V2_TABS.map(async cfg => {
         const { totalCount, access } = await queryTableWithAccess({
           table: cfg.table,
-          query: snQuery,
+          query: snQueriesByTab[cfg.tab],
           fields: ['sys_id'],
           limit: 1,
         });
@@ -603,18 +634,18 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [queryKey, snQuery]);
+  }, [queryKey, snQueriesByTab, queriesReady]);
 
   // Load All Results merged data when query changes
   useEffect(() => {
-    if (!snQuery) return;
+    if (!queriesReady) return;
     let cancelled = false;
     setAllLoading(true);
     getColumns('cmdb_ci', ALL_DEFAULT_COLUMNS)
       .then(cols => {
         if (cancelled) return null;
         setAllColumns(cols);
-        return fetchAllMerged(snQuery, cols);
+        return fetchAllMerged(snQueriesByTab, cols);
       })
       .then(async result => {
         if (cancelled || !result) return;
@@ -638,11 +669,11 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       })
       .finally(() => { if (!cancelled) setAllLoading(false); });
     return () => { cancelled = true; };
-  }, [queryKey, snQuery, getColumns]);
+  }, [queryKey, snQueriesByTab, queriesReady, getColumns]);
 
-  // Load specific tab page when query, tab, page, or page size changes
+  // Load specific tab rows when app filter is active (client-side pagination)
   useEffect(() => {
-    if (!snQuery || activeTab === 'all') return;
+    if (!queriesReady || activeTab === 'all' || !appFilterActive || !appRelatedIdsByTab) return;
     let cancelled = false;
     const cfg = V2_TABS.find(t => t.tab === activeTab);
     if (!cfg) return;
@@ -653,9 +684,34 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     }));
 
     getColumns(cfg.table, cfg.defaultColumns)
-      .then(cols => {
+      .then(async cols => {
         if (cancelled) return null;
-        return fetchTabPage(cfg, snQuery, cols, page, pageSize).then(res => res);
+        const relatedIds = appRelatedIdsByTab[activeTab];
+        const { rows: records, access } = await fetchAllScopedCiRows<Record<string, unknown>>(
+          cfg.table,
+          relatedIds,
+          applied.keyword,
+          ciFilter!,
+          searchFields,
+          apiFieldsForColumns(cols),
+        );
+        if (cancelled) return null;
+        if (access === 'denied') {
+          return {
+            rows: [] as SearchRow[],
+            totalCount: 0,
+            access,
+            columns: cols,
+          };
+        }
+        const readableColumns = filterColumnsByRecords(cols, records);
+        const rows = records.map(r => mapApiRow(r, readableColumns, cfg));
+        return {
+          rows,
+          totalCount: rows.length,
+          access,
+          columns: readableColumns,
+        };
       })
       .then(async result => {
         if (cancelled || !result) return;
@@ -682,7 +738,70 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       });
 
     return () => { cancelled = true; };
-  }, [queryKey, snQuery, activeTab, page, pageSize, getColumns]);
+  }, [
+    queryKey,
+    queriesReady,
+    activeTab,
+    getColumns,
+    appFilterActive,
+    appRelatedIdsByTab,
+    applied.keyword,
+    ciFilter,
+    searchFields,
+  ]);
+
+  // Load specific tab page with server-side pagination when no app filter
+  useEffect(() => {
+    if (!queriesReady || activeTab === 'all' || appFilterActive) return;
+    let cancelled = false;
+    const cfg = V2_TABS.find(t => t.tab === activeTab);
+    if (!cfg) return;
+
+    setTabData(prev => ({
+      ...prev,
+      [activeTab]: { ...prev[activeTab], loading: true },
+    }));
+
+    getColumns(cfg.table, cfg.defaultColumns)
+      .then(cols => {
+        if (cancelled) return null;
+        return fetchTabPage(cfg, snQueriesByTab[activeTab], cols, page, pageSize);
+      })
+      .then(async result => {
+        if (cancelled || !result) return;
+        const enriched = await enrichRowsWithTaskFlags(result.rows);
+        if (cancelled) return;
+        setTabData(prev => ({
+          ...prev,
+          [activeTab]: {
+            columns: result.columns,
+            rows: enriched,
+            totalCount: result.totalCount,
+            loading: false,
+            access: result.access,
+          },
+        }));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTabData(prev => ({
+            ...prev,
+            [activeTab]: { ...prev[activeTab], rows: [], loading: false },
+          }));
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [
+    queryKey,
+    snQueriesByTab,
+    queriesReady,
+    activeTab,
+    page,
+    pageSize,
+    getColumns,
+    appFilterActive,
+  ]);
 
   const handleSearch = () => {
     const next = { ...pending };
@@ -713,13 +832,17 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     : (tabData[activeTab].columns.length
       ? tabData[activeTab].columns
       : (V2_TABS.find(t => t.tab === activeTab)?.defaultColumns ?? []));
-  const loading = activeTab === 'all' ? allLoading : tabData[activeTab].loading;
+  const loading = appFilterLoading || (activeTab === 'all' ? allLoading : tabData[activeTab].loading);
   const totalCount = activeTab === 'all'
     ? allTotalCount
     : tabData[activeTab].totalCount;
 
-  const pageRows = activeTab === 'all'
-    ? allMergedRows.slice(page * pageSize, (page + 1) * pageSize)
+  const tabFullRows = activeTab === 'all'
+    ? allMergedRows
+    : tabData[activeTab].rows;
+
+  const pageRows = (activeTab === 'all' || appFilterActive)
+    ? tabFullRows.slice(page * pageSize, (page + 1) * pageSize)
     : tabData[activeTab].rows;
 
   const displayRows = pageRows.filter(row =>
@@ -735,7 +858,9 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     return tabData[tab].totalCount;
   };
 
-  const paginationTotal = activeTab === 'all' ? allMergedRows.length : totalCount;
+  const paginationTotal = activeTab === 'all'
+    ? allMergedRows.length
+    : (appFilterActive ? tabData[activeTab].rows.length : totalCount);
   const start = paginationTotal === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, paginationTotal);
   const canPrev = page > 0;
@@ -759,18 +884,27 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   }), [tabData]);
 
   const handleExportRows = useCallback(async (): Promise<SearchRow[]> => {
-    if (!snQuery) return [];
+    if (!queriesReady) return [];
     if (activeTab === 'all') {
-      return fetchAllForExport(snQuery, columns, tabCounts, tabAccess);
+      return fetchAllForExport(snQueriesByTab, columns, tabCounts, tabAccess);
     }
     const cfg = V2_TABS.find(t => t.tab === activeTab);
     if (!cfg || isAccessDenied(tabData[activeTab].access)) return [];
-    const { rows } = await fetchTabAll(cfg, snQuery, columns, tabData[activeTab].totalCount);
+    if (appFilterActive) {
+      return tabData[activeTab].rows;
+    }
+    const { rows } = await fetchTabAll(cfg, snQueriesByTab[activeTab], columns, tabData[activeTab].totalCount);
     return rows;
-  }, [snQuery, activeTab, columns, tabCounts, tabAccess, tabData]);
-
-  const activeFilterCount = [pending.environment, pending.location, pending.businessService, pending.supportGroup]
-    .reduce((n, arr) => n + arr.length, 0);
+  }, [
+    queriesReady,
+    snQueriesByTab,
+    activeTab,
+    columns,
+    tabCounts,
+    tabAccess,
+    tabData,
+    appFilterActive,
+  ]);
 
   function renderCell(row: SearchRow, col: ViewField, colIdx: number) {
     if (!(col.element in row.values)) return null;
@@ -861,56 +995,84 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       </div>
 
       {/* Search Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-        <div className="flex gap-3 mb-4">
-          <div className="flex-1 relative">
-            <select className="w-full px-4 py-2.5 border border-gray-300 rounded-lg appearance-none bg-white pr-10"
-              value={pending.ciType} onChange={e => setPending(p => ({ ...p, ciType: e.target.value }))}>
-              <option value="">CI Type</option>
-              <option value="Server">Server</option>
-              <option value="Network Gear">Network Gear</option>
-              <option value="Database">Database</option>
-              <option value="Circuit">Circuit</option>
-            </select>
-            <ChevronDown className="w-5 h-5 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
+        <div className="flex flex-col xl:flex-row xl:items-end gap-3">
+          <div className="flex-1 min-w-0 xl:min-w-[220px]">
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Application</label>
+            <AppFamilyInstanceAutocomplete
+              value={pending.appFilter}
+              onChange={v => setPending(p => ({ ...p, appFilter: v }))}
+              hierarchyMode={hierarchyMode}
+              disabled={appFilterLoading}
+              compact
+              className="w-full"
+            />
           </div>
-          <div className="flex-[2] relative">
-            <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input type="text" placeholder="Search Keywords"
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg"
-              value={pending.keyword}
-              onChange={e => setPending(p => ({ ...p, keyword: e.target.value }))}
-              onKeyDown={e => e.key === 'Enter' && handleSearch()} />
+
+          <div className="w-full xl:w-44 shrink-0">
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">CI Type</label>
+            <div className="relative">
+              <select
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg appearance-none bg-white pr-10 text-sm"
+                value={pending.ciType}
+                onChange={e => setPending(p => ({ ...p, ciType: e.target.value }))}
+              >
+                <option value="">All types</option>
+                <option value="Server">Server</option>
+                <option value="Network Gear">Network Gear</option>
+                <option value="Database">Database</option>
+                <option value="Circuit">Circuit</option>
+              </select>
+              <ChevronDown className="w-5 h-5 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
-          <button onClick={handleSearch} className="px-8 py-2.5 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition-colors">
-            Search
-          </button>
-          <button
-            type="button"
-            onClick={handleReset}
-            disabled={isAtDefault}
-            className="px-6 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Reset
-          </button>
+
+          <div className="flex-[1.5] min-w-0">
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">Keywords</label>
+            <div className="relative">
+              <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search keywords…"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+                value={pending.keyword}
+                onChange={e => setPending(p => ({ ...p, keyword: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 shrink-0 xl:pb-0">
+            <button
+              type="button"
+              onClick={handleSearch}
+              className="flex-1 xl:flex-none px-6 py-2.5 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
+            >
+              Search
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              disabled={isAtDefault}
+              className="flex-1 xl:flex-none px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              Reset
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-sm text-gray-600 font-medium">
-            Filters {activeFilterCount > 0 && <span className="ml-1 text-xs text-blue-600">({activeFilterCount} selected)</span>}
-          </span>
-          <MultiSelectDropdown label="Environment"      options={filterOptions['Environment']}      selected={pending.environment}     onChange={v => setPending(p => ({ ...p, environment: v }))} />
-          <MultiSelectDropdown label="Location"         options={filterOptions['Location']}         selected={pending.location}        onChange={v => setPending(p => ({ ...p, location: v }))} />
-          <MultiSelectDropdown label="Business Service" options={filterOptions['Business Service']} selected={pending.businessService}  onChange={v => setPending(p => ({ ...p, businessService: v }))} />
-          <MultiSelectDropdown label="Support Group"    options={filterOptions['Support Group']}    selected={pending.supportGroup}    onChange={v => setPending(p => ({ ...p, supportGroup: v }))} />
-          {activeFilterCount > 0 && (
-            <button onClick={() => setPending(emptyPending())} className="text-xs text-gray-500 hover:text-red-500 underline">Clear all filters</button>
-          )}
-        </div>
+        {appFilterError && (
+          <p className="text-sm text-red-600 mt-3">{appFilterError}</p>
+        )}
 
-        <p className="text-sm text-gray-500 mt-3 flex items-center gap-2">
-          <span className="w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-xs">i</span>
-          Select a CI Type and enter keywords to search that class using configured filter fields.
+        {applied.appFilter && !appFilterLoading && appRelatedIdsByTab && allTotalCount === 0 && !applied.keyword.trim() && (
+          <p className="text-sm text-amber-700 mt-3">
+            No infrastructure CIs are linked to the selected application.
+          </p>
+        )}
+
+        <p className="text-xs text-gray-500 mt-3">
+          Filter by application, keywords, or both. CI Type switches the results tab.
         </p>
       </div>
 

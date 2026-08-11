@@ -795,6 +795,25 @@ export async function fetchThreeLevelFamilyPage(
   return { mapping, totalFamilies, page, access };
 }
 
+/** Resolve all instance sys_ids under a single app family / business app (2- or 3-level). */
+export async function resolveInstanceIdsForFamily(
+  familySysId: string,
+  hierarchyMode: boolean,
+): Promise<string[]> {
+  if (!familySysId) return [];
+
+  const family: FamilyMeta = { sys_id: familySysId, name: '', short_description: '' };
+
+  if (hierarchyMode) {
+    const mapping = await buildThreeLevelMappingForApps([family], null);
+    return mapping?.instanceIds ?? [];
+  }
+
+  const mapping = await buildTwoLevelMappingForFamilies([family], null);
+  const instSet = mapping?.appToInstances.get(familySysId);
+  return instSet ? [...instSet] : [];
+}
+
 export function hydrateTwoLevelMapping(dto: TwoLevelMappingDto): TwoLevelMapping {
   const appFamilyMeta = new Map<string, { name: string; short_description: string }>();
   for (const [id, meta] of Object.entries(dto.app_family_meta ?? {})) {
