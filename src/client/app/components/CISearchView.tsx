@@ -400,7 +400,7 @@ function SearchResultCard({
   return (
     <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
       <div className="mb-3">
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
+        <div className="flex flex-col gap-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             <button
               type="button"
@@ -421,7 +421,7 @@ function SearchResultCard({
             href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="typo-link shrink-0"
+            className="typo-link self-start"
             title="Open in ServiceNow"
           >
             <ExternalLink className="w-3 h-3 shrink-0" />
@@ -1016,7 +1016,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       };
       return (
         <td key={col.element} className="px-6 py-4 max-w-[280px]">
-          <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap min-w-0">
               <button
                 type="button"
@@ -1037,7 +1037,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="typo-link shrink-0"
+              className="typo-link self-start"
               title="Open in ServiceNow"
             >
               <ExternalLink className="w-3 h-3 shrink-0" />
