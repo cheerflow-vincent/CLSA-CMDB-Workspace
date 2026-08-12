@@ -10,7 +10,7 @@ import RelationshipChangeActions, {
   RelationshipChangeStateBadge,
   RelationshipProcessingBadge,
 } from './RelationshipChangeActions';
-import { relTypeLabel } from '../utils/relationshipTypeMap';
+import { relTypeLabel } from '../utils/appRelationshipTypes';
 import { RELATED_CI_PAGE_SIZE } from '../utils/relatedCIs';
 
 interface Props {

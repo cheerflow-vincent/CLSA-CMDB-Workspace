@@ -5,7 +5,7 @@ import RelationshipChangeActions, {
   RelationshipChangeStateBadge,
   RelationshipProcessingBadge,
 } from './RelationshipChangeActions';
-import { relTypeLabel } from '../utils/relationshipTypeMap';
+import { relTypeLabel } from '../utils/appRelationshipTypes';
 
 interface Props {
   onNavigateToApp?: (sysId: string) => void;

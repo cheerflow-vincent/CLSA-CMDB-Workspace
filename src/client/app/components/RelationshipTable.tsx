@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ArrowUp, ArrowDown, ArrowLeftRight, ExternalLink, Loader2, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 import { queryTable } from '../../api/servicenow';
+import { loadAppRelationshipPeers } from '../utils/appRelationships';
 import { type ViewField, str, loadViewFields as loadViewFieldsUtil, raw } from '../utils/viewFields';
 import type { AppItem } from '../data/appData';
 import type { DiagramFilters } from './RelationshipDiagram';
@@ -32,9 +33,20 @@ interface Props {
   refreshKey?:   number;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const IMP_TYPE     = 'impacts::impacted by';
-const RDF_TYPE     = 'Receives data from::Sends data to';
+// ─── CMDB fetch — L1 relationships ───────────────────────────────────────────
+async function fetchRelationships(sysId: string): Promise<RelRow[]> {
+  const peers = await loadAppRelationshipPeers(sysId);
+  const rows: RelRow[] = peers.map(peer => ({
+    sysId: peer.sysId,
+    name: peer.name,
+    sysClass: peer.sysClass,
+    departmentDescription: peer.departmentDescription,
+    direction: peer.direction,
+  }));
+  const ORDER: Record<Direction, number> = { upstream: 0, downstream: 1, bidirectional: 2 };
+  rows.sort((a, b) => ORDER[a.direction] - ORDER[b.direction] || a.name.localeCompare(b.name));
+  return rows;
+}
 const VIEW_TITLE   = 'CLSA CMDB Workspace';
 const DEFAULT_VIEW_FIELDS: ViewField[] = [
   { element: 'department',         label: 'Department'        },
@@ -100,47 +112,6 @@ function opStatusBadge(status: string) {
   if (s.includes('repair') || s.includes('degraded') || s.includes('maintenance'))
     return { cls: 'bg-yellow-100 text-yellow-700', icon: <Clock className="w-3 h-3" /> };
   return { cls: 'bg-red-100 text-red-700', icon: <AlertCircle className="w-3 h-3" /> };
-}
-
-// ─── CMDB fetch — L1 relationships ───────────────────────────────────────────
-async function fetchRelationships(sysId: string): Promise<RelRow[]> {
-  const TYPE_Q = `type.nameIN${IMP_TYPE},${RDF_TYPE}`;
-  const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
-    queryTable<Record<string, unknown>>({ table: 'cmdb_rel_ci', query: `${TYPE_Q}^parent.sys_id=${sysId}`, fields: ['child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'], limit: 300, displayValue: 'all' }),
-    queryTable<Record<string, unknown>>({ table: 'cmdb_rel_ci', query: `${TYPE_Q}^child.sys_id=${sysId}`,  fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'], limit: 300, displayValue: 'all' }),
-  ]);
-
-  const upSet = new Set<string>(), dnSet = new Set<string>();
-  const ciMap = new Map<string, { name: string; cls: string; deptDesc: string }>();
-
-  for (const r of asParent) {
-    const id = raw(r['child.sys_id']);
-    if (!id || id === sysId) continue;
-    ciMap.set(id, {
-      name: str(r['child.name']),
-      cls: raw(r['child.sys_class_name']),
-      deptDesc: str(r['child.department.description']),
-    });
-    dnSet.add(id);
-  }
-  for (const r of asChild) {
-    const id = raw(r['parent.sys_id']);
-    if (!id || id === sysId) continue;
-    ciMap.set(id, {
-      name: str(r['parent.name']),
-      cls: raw(r['parent.sys_class_name']),
-      deptDesc: str(r['parent.department.description']),
-    });
-    upSet.add(id);
-  }
-
-  const rows: RelRow[] = [...ciMap.entries()].map(([id, { name, cls, deptDesc }]) => ({
-    sysId: id, name, sysClass: cls, departmentDescription: deptDesc,
-    direction: upSet.has(id) && dnSet.has(id) ? 'bidirectional' : upSet.has(id) ? 'upstream' : 'downstream',
-  }));
-  const ORDER: Record<Direction, number> = { upstream: 0, downstream: 1, bidirectional: 2 };
-  rows.sort((a, b) => ORDER[a.direction] - ORDER[b.direction] || a.name.localeCompare(b.name));
-  return rows;
 }
 
 // ─── CMDB fetch — CI details (view fields) per table ─────────────────────────

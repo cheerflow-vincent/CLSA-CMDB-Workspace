@@ -24,10 +24,10 @@ import {
   type DirectionGroup,
 } from '../utils/relationshipEdit';
 import {
-  REL_TYPE_OPTIONS,
+  getAppRelationshipTypes,
   relTypeLabel,
-  type RelTypeChoice,
-} from '../utils/relationshipTypeMap';
+  type AppRelationshipTypeConfig,
+} from '../utils/appRelationshipTypes';
 import { getApplicationReferenceSearch } from '../utils/applicationReferenceSearch';
 import type { EditFieldValue } from '../utils/viewFields';
 import { editDisplayValue, editRawValue } from '../utils/editValues';
@@ -73,6 +73,7 @@ function emptyRefValue(): EditFieldValue {
 function AddRelationshipRow({
   direction,
   defaultRelType,
+  relTypeOptions,
   referenceTable,
   referenceQuery,
   onAdd,
@@ -80,15 +81,20 @@ function AddRelationshipRow({
   error,
 }: {
   direction: RelationshipDirection;
-  defaultRelType: RelTypeChoice;
+  defaultRelType: string;
+  relTypeOptions: { value: string; label: string }[];
   referenceTable: string;
   referenceQuery: string;
-  onAdd: (appSysId: string, appName: string, relType: RelTypeChoice) => void;
+  onAdd: (appSysId: string, appName: string, relType: string) => void;
   disabled?: boolean;
   error?: string;
 }) {
   const [refValue, setRefValue] = useState<EditFieldValue>(emptyRefValue());
-  const [relType, setRelType] = useState<RelTypeChoice>(defaultRelType);
+  const [relType, setRelType] = useState(defaultRelType);
+
+  useEffect(() => {
+    setRelType(defaultRelType);
+  }, [defaultRelType]);
 
   const handleAdd = () => {
     const sysId = editRawValue(refValue);
@@ -97,6 +103,8 @@ function AddRelationshipRow({
     onAdd(sysId, name, relType);
     setRefValue(emptyRefValue());
   };
+
+  const noTypes = relTypeOptions.length === 0;
 
   return (
     <div className="space-y-2">
@@ -107,7 +115,7 @@ function AddRelationshipRow({
             referenceTable={referenceTable}
             referenceQuery={referenceQuery}
             value={refValue}
-            disabled={disabled}
+            disabled={disabled || noTypes}
             onChange={setRefValue}
           />
         </div>
@@ -115,24 +123,27 @@ function AddRelationshipRow({
           <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Type</label>
           <select
             value={relType}
-            disabled={disabled}
-            onChange={e => setRelType(e.target.value as RelTypeChoice)}
+            disabled={disabled || noTypes}
+            onChange={e => setRelType(e.target.value)}
             className="w-full text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white"
           >
-            {REL_TYPE_OPTIONS.map(opt => (
+            {relTypeOptions.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
         </div>
         <button
           type="button"
-          disabled={disabled || !editRawValue(refValue)}
+          disabled={disabled || noTypes || !editRawValue(refValue)}
           onClick={handleAdd}
           className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
         >
           Add
         </button>
       </div>
+      {noTypes && (
+        <p className="text-xs text-amber-700">No relationship types are configured. Set system property app.to.app.relationship.types.</p>
+      )}
       {direction === 'bidirectional' && (
         <p className="text-[10px] text-gray-400">
           Bidirectional adds create two relationship rows (upstream and downstream) with the selected type.
@@ -153,6 +164,7 @@ function RelSection({
   sourceCi,
   referenceTable,
   referenceQuery,
+  relTypeOptions,
   onRemoveExisting,
   onUndoRemove,
   onAdd,
@@ -167,15 +179,16 @@ function RelSection({
   sourceCi: string;
   referenceTable: string;
   referenceQuery: string;
+  relTypeOptions: { value: string; label: string }[];
   onRemoveExisting: (rel: LiveRelationship) => void;
   onUndoRemove: (rel: LiveRelationship) => void;
-  onAdd: (appSysId: string, appName: string, relType: RelTypeChoice) => void;
+  onAdd: (appSysId: string, appName: string, relType: string) => void;
   onRemoveAdded: (id: string) => void;
 }) {
   const meta = DIR_META[direction];
   const [addError, setAddError] = useState('');
 
-  const handleAdd = (appSysId: string, appName: string, relType: RelTypeChoice) => {
+  const handleAdd = (appSysId: string, appName: string, relType: string) => {
     if (direction === 'bidirectional') {
       const upDraft: DraftAdd = { id: nextDraftId(), otherAppSysId: appSysId, otherAppName: appName, direction: 'upstream', relType };
       const dnDraft: DraftAdd = { id: nextDraftId(), otherAppSysId: appSysId, otherAppName: appName, direction: 'downstream', relType };
@@ -270,7 +283,8 @@ function RelSection({
 
       <AddRelationshipRow
         direction={direction}
-        defaultRelType={REL_TYPE_OPTIONS[0].value}
+        defaultRelType={relTypeOptions[0]?.value ?? ''}
+        relTypeOptions={relTypeOptions}
         referenceTable={referenceTable}
         referenceQuery={referenceQuery}
         onAdd={handleAdd}
@@ -293,6 +307,15 @@ export default function EditRelationshipModal({
   const [liveRels, setLiveRels] = useState<LiveRelationship[]>([]);
   const [pendingChanges, setPendingChanges] = useState<RelationshipChangeRequest[]>([]);
   const [groups, setGroups] = useState<DirectionGroups>(() => buildInitialGroups([], []));
+  const [relTypeConfig, setRelTypeConfig] = useState<AppRelationshipTypeConfig | null>(null);
+
+  useEffect(() => {
+    getAppRelationshipTypes()
+      .then(setRelTypeConfig)
+      .catch(() => setRelTypeConfig(null));
+  }, []);
+
+  const relTypeOptions = relTypeConfig?.options ?? [];
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -357,7 +380,7 @@ export default function EditRelationshipModal({
     }));
   };
 
-  const addApp = (dir: RelationshipDirection, appSysId: string, appName: string, relType: RelTypeChoice) => {
+  const addApp = (dir: RelationshipDirection, appSysId: string, appName: string, relType: string) => {
     if (dir === 'bidirectional') {
       const upDraft: DraftAdd = { id: nextDraftId(), otherAppSysId: appSysId, otherAppName: appName, direction: 'upstream', relType };
       const dnDraft: DraftAdd = { id: nextDraftId(), otherAppSysId: appSysId, otherAppName: appName, direction: 'downstream', relType };
@@ -456,7 +479,7 @@ export default function EditRelationshipModal({
             <div>
               <p className="text-xs text-gray-500 mb-4 leading-relaxed">
                 Add or remove applications from each relationship direction.
-                Select <strong>Impact</strong> or <strong>Data flow</strong> when adding.
+                Select a relationship type when adding.
                 <span className="text-amber-700 font-medium"> Removals require approval from the target app owner.</span>
               </p>
               {DIRS.map(dir => (
@@ -471,6 +494,7 @@ export default function EditRelationshipModal({
                   sourceCi={selectedApp.sysId}
                   referenceTable={appReferenceSearch.table}
                   referenceQuery={appReferenceSearch.referenceQuery}
+                  relTypeOptions={relTypeOptions}
                   onRemoveExisting={rel => removeExisting(dir, rel)}
                   onUndoRemove={rel => undoRemove(dir, rel)}
                   onAdd={(sysId, name, relType) => addApp(dir, sysId, name, relType)}

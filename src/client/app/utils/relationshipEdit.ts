@@ -1,6 +1,5 @@
 import type { RelationshipChangeRequest } from '../../api/servicenow';
 import type { LiveRelationship, RelationshipDirection } from './appRelationships';
-import type { RelTypeChoice } from './relationshipTypeMap';
 import { relKey, resolveParentChild } from './relationshipTypeMap';
 
 export interface DraftAdd {
@@ -8,7 +7,7 @@ export interface DraftAdd {
   otherAppSysId: string;
   otherAppName: string;
   direction: RelationshipDirection;
-  relType: RelTypeChoice;
+  relType: string;
 }
 
 export interface DirectionGroup {
@@ -166,7 +165,7 @@ export interface SubmitItemCreate {
   source_ci_sys_id: string;
   target_ci_sys_id: string;
   direction: RelationshipDirection;
-  rel_type: RelTypeChoice;
+  rel_type: string;
 }
 
 export interface SubmitItemDelete {

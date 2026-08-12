@@ -17,6 +17,7 @@ PortalMetadataHandler.prototype = {
     'x_citi4_clsa_cmd_0.global.search.filter.table.field',
     'x_citi4_clsa_cmd_0.global.search.result.field',
     'x_citi4_clsa_cmd_0.app.relationship.depth',
+    'x_citi4_clsa_cmd_0.app.to.app.relationship.types',
   ],
 
   ALLOWED_VIEW_TITLES: {

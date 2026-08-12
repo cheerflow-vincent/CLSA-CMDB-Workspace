@@ -32,6 +32,7 @@ import {
   type RelationshipChangeRequest,
 } from '../../api/servicenow';
 import { loadAppRelationshipPeers, loadAppRelationships, type RelCIPeer } from '../utils/appRelationships';
+import { getAppRelationshipTypes } from '../utils/appRelationshipTypes';
 import { canRemoveRelationship } from '../utils/relationshipEdit';
 import { isDirectCenterPeer } from '../utils/diagramLinkPartner';
 import { canEditRecord } from '../utils/acl';
@@ -90,9 +91,6 @@ const MAX_BI_PER_ROW  = 6;   // bidirectional nodes per horizontal row
 const BI_ROW_Y_GAP    = 85;  // vertical gap between bidir rows
 const BI_Y_OFFSET     = 220; // distance above center node for first bidir row
 
-const IMP_TYPE  = 'impacts::impacted by';
-const RDF_TYPE  = 'Receives data from::Sends data to';
-
 // ─── Data types ───────────────────────────────────────────────────────────────
 interface RelCI {
   sysId:     string;
@@ -144,24 +142,24 @@ async function fetchRelationships(sysId: string): Promise<RelCI[]> {
 async function fetchChildrenForNodes(
   nodeIds: string[],
   visited: Set<string>,
+  typeQuery: string,
 ): Promise<Map<string, RelCI[]>> {
-  if (!nodeIds.length) return new Map();
+  if (!nodeIds.length || !typeQuery) return new Map();
 
   const nodeIdSet = new Set(nodeIds);
-  const TYPE_Q = `type.nameIN${IMP_TYPE},${RDF_TYPE}`;
   const ids = nodeIds.join(',');
 
   const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^parent.sys_idIN${ids}`,
+      query: `${typeQuery}^parent.sys_idIN${ids}`,
       fields: ['parent.sys_id', 'child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'],
       limit: 500,
       displayValue: 'all',
     }),
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^child.sys_idIN${ids}`,
+      query: `${typeQuery}^child.sys_idIN${ids}`,
       fields: ['child.sys_id', 'parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'],
       limit: 500,
       displayValue: 'all',
@@ -604,6 +602,8 @@ function DiagramFlow({
   const [childrenByNode,  setChildrenByNode]  = useState<Map<string, RelCI[]>>(new Map());
   const [expandedLevels,  setExpandedLevels]  = useState<Record<string, number>>({});
   const [maxDepth,        setMaxDepth]        = useState<number>(DEFAULT_DEPTH);
+  const [typeQuery,       setTypeQuery]       = useState<string>('');
+  const [typeNames,       setTypeNames]       = useState<string[]>([]);
   const [loading,         setLoading]         = useState(false);
   const [pendingPeerIds,  setPendingPeerIds]  = useState<Set<string>>(new Set());
   const [nodes, setNodes, onNodesChange]      = useNodesState<Node>([]);
@@ -625,12 +625,19 @@ function DiagramFlow({
   const onRelationshipMutationsRef = useRef(onRelationshipMutations);
   useEffect(() => { onRelationshipMutationsRef.current = onRelationshipMutations; }, [onRelationshipMutations]);
 
-  // Fetch max depth from system property once on mount
+  // Fetch max depth and relationship types from system properties once on mount
   useEffect(() => {
     getSysProperties([DEPTH_PROP])
       .then(props => {
         const v = parseInt(props[DEPTH_PROP] ?? '', 10);
         if (!isNaN(v) && v > 0) setMaxDepth(v);
+      })
+      .catch(() => {});
+
+    getAppRelationshipTypes()
+      .then(config => {
+        setTypeQuery(config.typeQuery);
+        setTypeNames(config.typeNames);
       })
       .catch(() => {});
   }, []);
@@ -820,7 +827,7 @@ function DiagramFlow({
   // ── Fetch L1 relationships when selected app changes ─────────────────────
   useEffect(() => {
     const sysId = selectedApp?.sysId;
-    if (!sysId) { setRelCIs([]); setChildrenByNode(new Map()); setExpandedLevels({}); return; }
+    if (!sysId || !typeQuery) { setRelCIs([]); setChildrenByNode(new Map()); setExpandedLevels({}); return; }
 
     setLoading(true);
     setRelCIs([]);
@@ -842,7 +849,7 @@ function DiagramFlow({
 
         for (let depth = 2; depth <= maxDepth + 1; depth++) {
           if (!currentLevel.length) break;
-          const levelMap = await fetchChildrenForNodes(currentLevel, visited);
+          const levelMap = await fetchChildrenForNodes(currentLevel, visited, typeQuery);
           const nextLevel: string[] = [];
 
           for (const [parentId, children] of levelMap) {
@@ -860,7 +867,7 @@ function DiagramFlow({
       .finally(() => setLoading(false));
   // maxDepth intentionally included so deep levels are fetched if property loads after app
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedApp?.sysId, maxDepth]);
+  }, [selectedApp?.sysId, maxDepth, typeQuery]);
 
   // ── Rebuild diagram whenever data or expansion changes ────────────────────
   const prevSysIdRef = useRef('');
@@ -964,8 +971,16 @@ function DiagramFlow({
             <p className="text-sm font-medium text-gray-500">No relationships found</p>
             <p className="text-xs mt-1 leading-relaxed">
               No upstream or downstream connections of type<br />
-              <span className="font-medium text-gray-500 italic">impacts::impacted by</span> or{' '}
-              <span className="font-medium text-gray-500 italic">Receives data from::Sends data to</span>
+              {typeNames.length > 0 ? (
+                typeNames.map((name, i) => (
+                  <span key={name}>
+                    {i > 0 && (i === typeNames.length - 1 ? ' or ' : ', ')}
+                    <span className="font-medium text-gray-500 italic">{name}</span>
+                  </span>
+                ))
+              ) : (
+                <span className="font-medium text-gray-500 italic">configured relationship types</span>
+              )}
             </p>
           </div>
         </div>

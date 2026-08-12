@@ -1,6 +1,5 @@
 import { queryTable } from '../../api/servicenow';
-import type { RelTypeChoice } from './relationshipTypeMap';
-import { IMPACT_REL_TYPE, DATA_FLOW_REL_TYPE } from './relationshipTypeMap';
+import { getAppRelationshipTypes } from './appRelationshipTypes';
 import { raw, str } from './viewFields';
 
 export type RelationshipDirection = 'upstream' | 'downstream' | 'bidirectional';
@@ -12,15 +11,10 @@ export interface LiveRelationship {
   otherAppSysId: string;
   otherAppName: string;
   direction: RelationshipDirection;
-  relType: RelTypeChoice;
+  relType: string;
   parentCi: string;
   childCi: string;
 }
-
-export const IMP_TYPE = IMPACT_REL_TYPE;
-export const RDF_TYPE = DATA_FLOW_REL_TYPE;
-
-const TYPE_Q = `type.nameIN${IMP_TYPE},${RDF_TYPE}`;
 
 const sn = (v: unknown): string => {
   if (!v) return '';
@@ -45,16 +39,17 @@ function classifyDirection(
 
 /** Row-level relationships for edit modal and change tracking. */
 export async function loadAppRelationships(centerSysId: string): Promise<LiveRelationship[]> {
+  const { typeQuery } = await getAppRelationshipTypes();
   const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^parent.sys_id=${centerSysId}`,
+      query: `${typeQuery}^parent.sys_id=${centerSysId}`,
       fields: ['sys_id', 'child.sys_id', 'child.name', 'type.name', 'parent.sys_id', 'child.sys_id'],
       limit: 300,
     }),
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^child.sys_id=${centerSysId}`,
+      query: `${typeQuery}^child.sys_id=${centerSysId}`,
       fields: ['sys_id', 'parent.sys_id', 'parent.name', 'type.name', 'parent.sys_id', 'child.sys_id'],
       limit: 300,
     }),
@@ -74,7 +69,7 @@ export async function loadAppRelationships(centerSysId: string): Promise<LiveRel
       sysId,
       otherAppSysId: childId,
       otherAppName: sn(r['child.name']),
-      relType: (relType === RDF_TYPE ? RDF_TYPE : IMP_TYPE) as RelTypeChoice,
+      relType,
       parentCi: centerSysId,
       childCi: childId,
     });
@@ -90,7 +85,7 @@ export async function loadAppRelationships(centerSysId: string): Promise<LiveRel
       sysId,
       otherAppSysId: parentId,
       otherAppName: sn(r['parent.name']),
-      relType: (relType === RDF_TYPE ? RDF_TYPE : IMP_TYPE) as RelTypeChoice,
+      relType,
       parentCi: parentId,
       childCi: centerSysId,
     });
@@ -140,17 +135,18 @@ export interface RelCIPeer {
 }
 
 export async function loadAppRelationshipPeers(centerSysId: string): Promise<RelCIPeer[]> {
+  const { typeQuery } = await getAppRelationshipTypes();
   const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^parent.sys_id=${centerSysId}`,
+      query: `${typeQuery}^parent.sys_id=${centerSysId}`,
       fields: ['child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'],
       limit: 300,
       displayValue: 'all',
     }),
     queryTable<Record<string, unknown>>({
       table: 'cmdb_rel_ci',
-      query: `${TYPE_Q}^child.sys_id=${centerSysId}`,
+      query: `${typeQuery}^child.sys_id=${centerSysId}`,
       fields: ['parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'],
       limit: 300,
       displayValue: 'all',

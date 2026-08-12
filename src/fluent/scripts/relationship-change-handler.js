@@ -3,9 +3,8 @@ RelationshipChangeHandler.prototype = {
   initialize: function () {},
 
   CHANGE_TABLE: 'x_citi4_clsa_cmd_0_relationship_change',
-  IMP_TYPE: 'impacts::impacted by',
-  RDF_TYPE: 'Receives data from::Sends data to',
-  VALID_TYPES: ['impacts::impacted by', 'Receives data from::Sends data to'],
+  REL_TYPES_PROP: 'x_citi4_clsa_cmd_0.app.to.app.relationship.types',
+  DEFAULT_VALID_TYPES: ['impacts::impacted by', 'Receives data from::Sends data to'],
   VALID_DIRECTIONS: ['upstream', 'downstream', 'bidirectional'],
   VALID_ACTIONS: ['create', 'delete'],
 
@@ -137,6 +136,42 @@ RelationshipChangeHandler.prototype = {
       if (String(gr.getValue('name')) === relTypeName) return gr.getUniqueValue();
     }
     return '';
+  },
+
+  getValidRelTypeNames: function () {
+    var raw = String(gs.getProperty(this.REL_TYPES_PROP, '') || '').trim();
+    var sysIds = raw
+      ? raw.split(',').map(function (s) {
+          return s.replace(/^\s+|\s+$/g, '');
+        }).filter(function (s) {
+          return !!s;
+        })
+      : [];
+
+    if (sysIds.length) {
+      var names = [];
+      var seen = {};
+      var typeGr = new GlideRecord('cmdb_rel_type');
+      typeGr.addQuery('sys_id', 'IN', sysIds.join(','));
+      typeGr.query();
+      var byId = {};
+      while (typeGr.next()) {
+        byId[String(typeGr.getUniqueValue())] = String(typeGr.getValue('name') || '');
+      }
+      for (var i = 0; i < sysIds.length; i++) {
+        var name = byId[sysIds[i]];
+        if (!name || seen[name]) continue;
+        seen[name] = true;
+        names.push(name);
+      }
+      if (names.length) return names;
+    }
+
+    return this.DEFAULT_VALID_TYPES.slice();
+  },
+
+  isValidRelType: function (relType) {
+    return this.getValidRelTypeNames().indexOf(relType) !== -1;
   },
 
   getCiDisplay: function (sysId) {
@@ -356,7 +391,7 @@ RelationshipChangeHandler.prototype = {
           );
           return;
         }
-        if (this.VALID_TYPES.indexOf(relType) === -1) {
+        if (!this.isValidRelType(relType)) {
           this.jsonError(response, 400, 'Invalid rel_type');
           return;
         }
