@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Search, Server, Database, DollarSign, Network, Link,
+  Search, Server, Database, Network, Link,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE, PENDING_EDGE_DASH } from './RelationshipDiagram';
@@ -577,15 +577,6 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         badgeBorder="border-orange-200"
                         hoverRow="cursor-pointer"
                       />
-
-                      {/* Total cost — static */}
-                      <div className="bg-white rounded-lg border border-gray-200 px-3 py-2.5 flex items-center gap-3">
-                        <div className="p-1.5 bg-emerald-100 rounded flex-shrink-0">
-                          <DollarSign className="w-4 h-4 text-emerald-600" />
-                        </div>
-                        <span className="flex-1 text-xs text-gray-600 font-medium">Total Server Cost</span>
-                        <span className="text-sm font-semibold text-emerald-700">$1,250,000</span>
-                      </div>
                     </div>
                   </section>
 

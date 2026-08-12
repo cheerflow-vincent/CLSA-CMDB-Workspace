@@ -603,7 +603,6 @@ function DiagramFlow({
   const [expandedLevels,  setExpandedLevels]  = useState<Record<string, number>>({});
   const [maxDepth,        setMaxDepth]        = useState<number>(DEFAULT_DEPTH);
   const [typeQuery,       setTypeQuery]       = useState<string>('');
-  const [typeNames,       setTypeNames]       = useState<string[]>([]);
   const [loading,         setLoading]         = useState(false);
   const [pendingPeerIds,  setPendingPeerIds]  = useState<Set<string>>(new Set());
   const [nodes, setNodes, onNodesChange]      = useNodesState<Node>([]);
@@ -637,7 +636,6 @@ function DiagramFlow({
     getAppRelationshipTypes()
       .then(config => {
         setTypeQuery(config.typeQuery);
-        setTypeNames(config.typeNames);
       })
       .catch(() => {});
   }, []);
@@ -961,27 +959,6 @@ function DiagramFlow({
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
             <span className="text-sm text-gray-500">Loading relationships…</span>
-          </div>
-        </div>
-      )}
-
-      {!loading && relCIs.length === 0 && selectedApp?.sysId && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center">
-          <div className="text-center text-gray-400 px-6">
-            <p className="text-sm font-medium text-gray-500">No relationships found</p>
-            <p className="text-xs mt-1 leading-relaxed">
-              No upstream or downstream connections of type<br />
-              {typeNames.length > 0 ? (
-                typeNames.map((name, i) => (
-                  <span key={name}>
-                    {i > 0 && (i === typeNames.length - 1 ? ' or ' : ', ')}
-                    <span className="font-medium text-gray-500 italic">{name}</span>
-                  </span>
-                ))
-              ) : (
-                <span className="font-medium text-gray-500 italic">configured relationship types</span>
-              )}
-            </p>
           </div>
         </div>
       )}

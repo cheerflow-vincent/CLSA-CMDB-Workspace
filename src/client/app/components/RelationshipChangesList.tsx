@@ -152,8 +152,8 @@ export default function RelationshipChangesList({
   }, [appSysId, refreshKey]);
 
   useEffect(() => {
-    if (isOpen) reload();
-  }, [isOpen, reload]);
+    if (isOpen || refreshKey > 0) reload();
+  }, [isOpen, page, reload, refreshKey]);
 
   useEffect(() => {
     const maxPage = Math.max(0, Math.ceil(totalCount / pageSize) - 1);
