@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Server, Network, CircuitBoard, Database } from 'lucide-react';
+import { Server, Network, Link, Database } from 'lucide-react';
 import RelatedListSection from './RelatedListSection';
 import type { CIItem } from './CIDetailView';
 import {
   SERVER_REL_CONFIG,
   NETGEAR_REL_CONFIG,
-  CIRCUIT_REL_CONFIG,
+  NETWORK_LINK_REL_CONFIG,
   DATABASE_REL_CONFIG,
   fetchRelatedCICount,
   type RelatedCIConfig,
@@ -52,10 +52,10 @@ const SECTIONS: Array<{
     badgeBorder: 'border-teal-200',
   },
   {
-    config: CIRCUIT_REL_CONFIG,
-    title: 'Circuits powering the application',
-    emptyMessage: 'No linked circuits.',
-    Icon: CircuitBoard,
+    config: NETWORK_LINK_REL_CONFIG,
+    title: 'Network links connected to this application',
+    emptyMessage: 'No linked network links.',
+    Icon: Link,
     iconBg: 'bg-orange-100',
     iconColor: 'text-orange-600',
     badgeBg: 'bg-orange-50',

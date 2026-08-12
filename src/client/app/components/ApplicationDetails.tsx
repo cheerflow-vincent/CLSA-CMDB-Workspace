@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Search, Server, Database, DollarSign, Network, CircuitBoard,
+  Search, Server, Database, DollarSign, Network, Link,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE, PENDING_EDGE_DASH } from './RelationshipDiagram';
@@ -20,7 +20,7 @@ import {
   SERVER_REL_CONFIG,
   DATABASE_REL_CONFIG,
   NETGEAR_REL_CONFIG,
-  CIRCUIT_REL_CONFIG,
+  NETWORK_LINK_REL_CONFIG,
 } from '../utils/relatedCIs';
 import { INFRA_CI_STYLE, type InfraCIType } from '../utils/infraCiStyles';
 import {
@@ -74,7 +74,7 @@ interface ApplicationDetailsProps {
 
 type ViewMode = 'map' | 'table';
 type RelationshipTab = 'app' | 'infra';
-type ExpandKey = 'servers' | 'databases' | 'netgear' | 'circuits' | 'incidents' | 'changes' | 'relChanges';
+type ExpandKey = 'servers' | 'databases' | 'netgear' | 'network_links' | 'incidents' | 'changes' | 'relChanges';
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp, hierarchyMode = true }: ApplicationDetailsProps) {
@@ -97,10 +97,10 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     platform: true, infrastructure: true, business: true,
   });
   const [infraFilters, setInfraFilters] = useState<InfraDiagramFilters>({
-    server: true, netgear: true, circuit: true, database: true,
+    server: true, netgear: true, network_link: true, database: true,
   });
   const [expanded, setExpanded] = useState<Record<ExpandKey, boolean>>({
-    servers: false, databases: false, netgear: false, circuits: false,
+    servers: false, databases: false, netgear: false, network_links: false,
     incidents: false, changes: false, relChanges: false,
   });
 
@@ -560,16 +560,16 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                       />
 
                       <RelatedListSection
-                        config={CIRCUIT_REL_CONFIG}
+                        config={NETWORK_LINK_REL_CONFIG}
                         recordSysId={selectedApp?.sysId}
                         refreshKey={pageRefreshKey}
                         responsiveLayout={false}
                         showCIFlags
-                        isOpen={expanded.circuits}
-                        onToggle={() => toggleExpand('circuits')}
+                        isOpen={expanded.network_links}
+                        onToggle={() => toggleExpand('network_links')}
                         onViewCI={onViewCI}
-                        title="Circuits powering the application"
-                        Icon={CircuitBoard}
+                        title="Network links connected to this application"
+                        Icon={Link}
                         iconBg="bg-orange-100"
                         iconColor="text-orange-600"
                         badgeBg="bg-orange-50"

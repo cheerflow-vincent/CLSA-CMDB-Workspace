@@ -1,6 +1,7 @@
 import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByProbe } from './acl';
 import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG } from './relatedTasks';
+import { INFRA_REL_CONFIGS } from './relatedCIs';
 import { loadViewFields, str, raw, type ViewField } from './viewFields';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
 
@@ -16,7 +17,6 @@ const DEFAULT_VIEW_FIELDS: ViewField[] = [
   { element: 'support_group',      label: 'Support Group' },
 ];
 
-const APP_REL_TYPES = ['Runs on::Runs', 'Depends on::Used by'] as const;
 
 export interface LiveInstance {
   sys_id: string;
@@ -110,18 +110,30 @@ export async function fetchRelatedAppInstanceIds(
 
   const seen = new Set<string>();
   let access: TableAccess = 'ok';
-  for (const relType of APP_REL_TYPES) {
-    const { result = [], access: chunkAccess } = await queryTableWithAccess<{ parent: unknown }>({
+
+  // Dedupe rel types (e.g. Runs on::Runs used for server and netgear).
+  const queried = new Set<string>();
+  for (const config of INFRA_REL_CONFIGS) {
+    if (queried.has(config.relType)) continue;
+    queried.add(config.relType);
+
+    const appRole = config.appRole ?? 'parent';
+    const query = appRole === 'parent'
+      ? `type.name=${config.relType}^child.sys_id=${ciSysId}^parent.sys_class_nameINSTANCEOF${SVC_TABLE}`
+      : `type.name=${config.relType}^parent.sys_id=${ciSysId}^child.sys_class_nameINSTANCEOF${SVC_TABLE}`;
+
+    const { result = [], access: chunkAccess } = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
       table: 'cmdb_rel_ci',
-      query: `type.name=${relType}^child.sys_id=${ciSysId}^parent.sys_class_nameINSTANCEOF${SVC_TABLE}`,
-      fields: ['parent'],
+      query,
+      fields: [appRole === 'parent' ? 'parent' : 'child'],
       limit: 500,
       displayValue: false,
     });
     if (chunkAccess === 'denied') return { ids: [], access: 'denied' };
     if (chunkAccess === 'error') access = 'error';
+    const appField = appRole === 'parent' ? 'parent' : 'child';
     for (const r of result) {
-      const id = refId(r.parent);
+      const id = refId(r[appField as keyof typeof r]);
       if (id) seen.add(id);
     }
   }

@@ -28,7 +28,7 @@ import type { CIItem } from './CIDetailView';
 export interface InfraDiagramFilters {
   server: boolean;
   netgear: boolean;
-  circuit: boolean;
+  network_link: boolean;
   database: boolean;
 }
 
@@ -52,7 +52,7 @@ const ROW_GAP = 72;
 const COLUMN_X: Record<InfraCIType, number> = {
   server: 180,
   netgear: 380,
-  circuit: 620,
+  network_link: 620,
   database: 820,
 };
 const NW = 148;
@@ -390,7 +390,7 @@ function InfrastructureDiagramInner({
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="text-center text-gray-400 px-6">
             <p className="text-sm font-medium text-gray-500">No infrastructure relationships found</p>
-            <p className="text-xs mt-1">Servers, network gear, circuits, and databases linked to this application will appear here.</p>
+            <p className="text-xs mt-1">Servers, network gear, network links, and databases linked to this application will appear here.</p>
           </div>
         </div>
       )}

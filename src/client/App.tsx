@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Server, Database, CircuitBoard, Network, Layout,
+  Server, Database, Link, Network, Layout,
   Search, ChevronRight, ChevronLeft, Loader2,
   FileSearch, Home, ArrowLeft, Clock,
 } from 'lucide-react';
@@ -81,7 +81,7 @@ const INVENTORY_ICONS: Record<CISearchInventoryTab, React.ElementType> = {
   servers: Server,
   switches: Network,
   databases: Database,
-  circuits: CircuitBoard,
+  network_links: Link,
 };
 
 // ── Main component ────────────────────────────────────────────────────────────

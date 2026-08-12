@@ -1,5 +1,5 @@
 /** CI Search result tabs (matches CISearchView card tabs). */
-export type CISearchTab = 'all' | 'servers' | 'switches' | 'databases' | 'circuits';
+export type CISearchTab = 'all' | 'servers' | 'switches' | 'databases' | 'network_links';
 
 export type CISearchInventoryTab = Exclude<CISearchTab, 'all'>;
 
@@ -7,11 +7,12 @@ export const CI_INVENTORY_TABS: { tab: CISearchInventoryTab; label: string }[] =
   { tab: 'servers', label: 'Servers' },
   { tab: 'switches', label: 'Network Gear' },
   { tab: 'databases', label: 'Databases' },
-  { tab: 'circuits', label: 'Circuits' },
+  { tab: 'network_links', label: 'Network Links' },
 ];
 
 export function parseCISearchTab(value: string | null | undefined): CISearchTab | null {
-  if (value === 'all' || value === 'servers' || value === 'switches' || value === 'databases' || value === 'circuits') {
+  if (value === 'circuits') return 'network_links';
+  if (value === 'all' || value === 'servers' || value === 'switches' || value === 'databases' || value === 'network_links') {
     return value;
   }
   return null;

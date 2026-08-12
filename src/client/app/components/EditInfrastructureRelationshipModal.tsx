@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Loader2, Server, Network, CircuitBoard, Database } from 'lucide-react';
+import { X, Loader2, Server, Network, Link, Database } from 'lucide-react';
 import ReferenceAutocomplete from './ReferenceAutocomplete';
 import {
   fetchInfraRelationshipsForEdit,
@@ -21,7 +21,7 @@ interface Props {
 const SECTION_META: Record<InfraCIType, { title: string; Icon: typeof Server }> = {
   server:   { title: 'Servers',        Icon: Server },
   netgear:  { title: 'Network Gear',   Icon: Network },
-  circuit:  { title: 'Circuits',       Icon: CircuitBoard },
+  network_link: { title: 'Network Links', Icon: Link },
   database: { title: 'Databases',      Icon: Database },
 };
 

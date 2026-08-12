@@ -56,7 +56,7 @@ const getDetail = (ci: CIItem) => ({
     ci.type === 'Server'   ? (ci.class.includes('Windows') ? 'Windows Server' : 'Linux Server')
     : ci.type === 'Database' ? ci.class
     : ci.type === 'Switch'   ? 'Network Switch'
-    : ci.type === 'Circuit'  ? 'WAN Circuit'
+    : ci.type === 'Network Link' ? 'Network Link'
     : 'Business Service',
   serverOS:  ci.class.split(' ').slice(0, 2).join(' '),
   osVersion: ci.class.match(/[\d.]+/)?.[0] ?? 'N/A',

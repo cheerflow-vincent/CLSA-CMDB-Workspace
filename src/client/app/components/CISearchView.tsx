@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
-  Server, Database, CircuitBoard, Network, Search,
+  Server, Database, Link, Network, Search,
   ChevronDown, ArrowUpDown, ChevronLeft, ChevronRight,
   X,
   Download, FileText, ExternalLink, Loader2
@@ -43,16 +43,16 @@ interface CISearchViewProps {
   initialTab?: Tab;
 }
 
-type Tab = 'all' | 'servers' | 'switches' | 'databases' | 'circuits';
+type Tab = 'all' | 'servers' | 'switches' | 'databases' | 'network_links';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const tabTypeMap: Record<Tab, string | null> = {
   all: null, servers: 'Server', switches: 'Network Gear',
-  databases: 'Database', circuits: 'Circuit',
+  databases: 'Database', network_links: 'Network Link',
 };
 const tabLabels: Record<Tab, string> = {
   all: 'All Results', servers: 'Servers', switches: 'Network Gear',
-  databases: 'Databases', circuits: 'Circuits',
+  databases: 'Databases', network_links: 'Network Links',
 };
 // ─── v2 live-data config ──────────────────────────────────────────────────────
 type SpecificTab = Exclude<Tab, 'all'>;
@@ -96,10 +96,10 @@ const V2_TABS: V2TabCfg[] = [
     ],
   },
   {
-    tab: 'circuits', table: 'cmdb_ci_circuit', label: 'Circuit',
+    tab: 'network_links', table: 'cmdb_ci_network_link', label: 'Network Link',
     defaultColumns: [
-      { element: 'name', label: 'Name' }, { element: 'circuit_type', label: 'Type' },
-      { element: 'bandwidth', label: 'Bandwidth' }, { element: 'environment', label: 'Environment' },
+      { element: 'name', label: 'Name' }, { element: 'environment', label: 'Environment' },
+      { element: 'location', label: 'Location' },
     ],
   },
 ];
@@ -287,17 +287,17 @@ async function fetchAllMerged(
   return { rows, totalCount, tabAccess };
 }
 
-type PillCounts = { servers: number | null; switches: number | null; databases: number | null; circuits: number | null };
+type PillCounts = { servers: number | null; switches: number | null; databases: number | null; network_links: number | null };
 type PillAccess = Record<keyof PillCounts, TableAccess>;
-const EMPTY_COUNTS: PillCounts = { servers: null, switches: null, databases: null, circuits: null };
-const EMPTY_PILL_ACCESS: PillAccess = { servers: 'ok', switches: 'ok', databases: 'ok', circuits: 'ok' };
+const EMPTY_COUNTS: PillCounts = { servers: null, switches: null, databases: null, network_links: null };
+const EMPTY_PILL_ACCESS: PillAccess = { servers: 'ok', switches: 'ok', databases: 'ok', network_links: 'ok' };
 
 type PillDef = { tab: Tab; label: string; count: number | null; icon: JSX.Element; accent: string; iconBg: string };
 const buildPills = (c: PillCounts, access: PillAccess): PillDef[] => ([
   { tab: 'servers' as Tab,   label: 'Servers',   count: c.servers,   icon: <Server       className="w-5 h-5 text-blue-600"   />, accent: 'border-blue-500   bg-blue-50',   iconBg: 'bg-blue-100'   },
   { tab: 'switches' as Tab,  label: 'Network Gear', count: c.switches,  icon: <Network      className="w-5 h-5 text-green-600"  />, accent: 'border-green-500  bg-green-50',  iconBg: 'bg-green-100'  },
   { tab: 'databases' as Tab, label: 'Databases', count: c.databases, icon: <Database     className="w-5 h-5 text-purple-600" />, accent: 'border-purple-500 bg-purple-50', iconBg: 'bg-purple-100' },
-  { tab: 'circuits' as Tab,  label: 'Circuits',  count: c.circuits,  icon: <CircuitBoard className="w-5 h-5 text-orange-600" />, accent: 'border-orange-500 bg-orange-50', iconBg: 'bg-orange-100' },
+  { tab: 'network_links' as Tab,  label: 'Network Links',  count: c.network_links,  icon: <Link className="w-5 h-5 text-orange-600" />, accent: 'border-orange-500 bg-orange-50', iconBg: 'bg-orange-100' },
 ] as PillDef[]).filter(p => !isAccessDenied(access[p.tab as keyof PillCounts]));
 
 // ─── Export button ────────────────────────────────────────────────────────────
@@ -455,7 +455,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     servers: { ...EMPTY_TAB_DATA },
     switches: { ...EMPTY_TAB_DATA },
     databases: { ...EMPTY_TAB_DATA },
-    circuits: { ...EMPTY_TAB_DATA },
+    network_links: { ...EMPTY_TAB_DATA },
   });
   const [allColumns, setAllColumns] = useState<ViewField[]>(ALL_DEFAULT_COLUMNS);
   const [allMergedRows, setAllMergedRows] = useState<SearchRow[]>([]);
@@ -497,7 +497,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         servers: '',
         switches: '',
         databases: '',
-        circuits: '',
+        network_links: '',
       } as Record<SpecificTab, string>;
     }
     return buildSnQueriesByTab(
@@ -549,7 +549,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             servers: [],
             switches: [],
             databases: [],
-            circuits: [],
+            network_links: [],
           });
           return;
         }
@@ -561,7 +561,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             servers: [],
             switches: [],
             databases: [],
-            circuits: [],
+            network_links: [],
           });
           return;
         }
@@ -573,7 +573,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             servers: [],
             switches: [],
             databases: [],
-            circuits: [],
+            network_links: [],
           });
         }
       } finally {
@@ -591,7 +591,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       ['cmdb_ci_server',      'servers'],
       ['cmdb_ci_netgear',     'switches'],
       ['cmdb_ci_db_instance', 'databases'],
-      ['cmdb_ci_circuit',     'circuits'],
+      ['cmdb_ci_network_link', 'network_links'],
     ];
     entries.forEach(([table, key]) =>
       queryTableWithAccess<object>({ table, query: ciFilter, limit: 1 })
@@ -873,14 +873,14 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     servers:   tabData.servers.totalCount,
     switches:  tabData.switches.totalCount,
     databases: tabData.databases.totalCount,
-    circuits:  tabData.circuits.totalCount,
+    network_links:  tabData.network_links.totalCount,
   }), [tabData]);
 
   const tabAccess = useMemo((): Record<SpecificTab, TableAccess> => ({
     servers:   tabData.servers.access,
     switches:  tabData.switches.access,
     databases: tabData.databases.access,
-    circuits:  tabData.circuits.access,
+    network_links:  tabData.network_links.access,
   }), [tabData]);
 
   const handleExportRows = useCallback(async (): Promise<SearchRow[]> => {
@@ -1021,7 +1021,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                 <option value="Server">Server</option>
                 <option value="Network Gear">Network Gear</option>
                 <option value="Database">Database</option>
-                <option value="Circuit">Circuit</option>
+                <option value="Network Link">Network Link</option>
               </select>
               <ChevronDown className="w-5 h-5 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
@@ -1081,7 +1081,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         {/* Tabs */}
         <div className="border-b border-gray-200 px-6">
           <div className="flex gap-6 overflow-x-auto">
-            {(['all', 'servers', 'switches', 'databases', 'circuits'] as Tab[]).filter(tab => {
+            {(['all', 'servers', 'switches', 'databases', 'network_links'] as Tab[]).filter(tab => {
               if (tab === 'all') return true;
               return !isAccessDenied(tabData[tab].access) && !isAccessDenied(pillAccess[tab as keyof PillCounts]);
             }).map(tab => (

@@ -107,25 +107,23 @@ export const NETGEAR_REL_CONFIG: RelatedCIConfig = {
   ],
 };
 
-export const CIRCUIT_REL_CONFIG: RelatedCIConfig = {
-  relType: 'Powers::Powered by',
-  baseClass: 'cmdb_ci_circuit',
-  ciTable: 'cmdb_ci_circuit',
-  ciType: 'circuit',
-  appRole: 'child',
+export const NETWORK_LINK_REL_CONFIG: RelatedCIConfig = {
+  relType: 'Connects to::Connected by',
+  baseClass: 'cmdb_ci_network_link',
+  ciTable: 'cmdb_ci_network_link',
+  ciType: 'network_link',
   listTitle: LIST_VIEW_TITLE,
   defaultColumns: [
-    { element: 'name',         label: 'Name'        },
-    { element: 'circuit_type', label: 'Type'        },
-    { element: 'bandwidth',    label: 'Bandwidth'   },
-    { element: 'environment',  label: 'Environment' },
+    { element: 'name',        label: 'Name'        },
+    { element: 'environment', label: 'Environment' },
+    { element: 'location',    label: 'Location'    },
   ],
 };
 
 export const INFRA_REL_CONFIGS: RelatedCIConfig[] = [
   SERVER_REL_CONFIG,
   NETGEAR_REL_CONFIG,
-  CIRCUIT_REL_CONFIG,
+  NETWORK_LINK_REL_CONFIG,
   DATABASE_REL_CONFIG,
 ];
 

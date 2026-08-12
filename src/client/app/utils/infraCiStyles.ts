@@ -1,4 +1,4 @@
-export type InfraCIType = 'server' | 'netgear' | 'circuit' | 'database';
+export type InfraCIType = 'server' | 'netgear' | 'network_link' | 'database';
 
 export interface InfraCIStyle {
   border: string;
@@ -23,12 +23,12 @@ export const INFRA_CI_STYLE: Record<InfraCIType, InfraCIStyle> = {
     text: '#5B21B6',
     label: 'Network Gear',
   },
-  circuit: {
+  network_link: {
     border: '#EA580C',
     bg: '#FFF7ED',
     edge: '#EA580C',
     text: '#C2410C',
-    label: 'Circuits',
+    label: 'Network Links',
   },
   database: {
     border: '#059669',
@@ -40,4 +40,4 @@ export const INFRA_CI_STYLE: Record<InfraCIType, InfraCIStyle> = {
 };
 
 /** Column order left → right in the infrastructure diagram. */
-export const INFRA_COLUMN_ORDER: InfraCIType[] = ['server', 'netgear', 'circuit', 'database'];
+export const INFRA_COLUMN_ORDER: InfraCIType[] = ['server', 'netgear', 'network_link', 'database'];

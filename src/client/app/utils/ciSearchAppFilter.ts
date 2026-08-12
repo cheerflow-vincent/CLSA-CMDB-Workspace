@@ -24,7 +24,7 @@ export interface AppRelatedIdsByTab {
   servers: string[];
   switches: string[];
   databases: string[];
-  circuits: string[];
+  network_links: string[];
 }
 
 export interface AppFamilyInstanceOption {
@@ -37,14 +37,14 @@ const EMPTY_RELATED: AppRelatedIdsByTab = {
   servers: [],
   switches: [],
   databases: [],
-  circuits: [],
+  network_links: [],
 };
 
 const TAB_TO_CI_TYPE: Record<keyof AppRelatedIdsByTab, RelatedCIConfig['ciType']> = {
   servers: 'server',
   switches: 'netgear',
   databases: 'database',
-  circuits: 'circuit',
+  network_links: 'network_link',
 };
 
 function appRole(config: RelatedCIConfig): 'parent' | 'child' {
@@ -239,7 +239,7 @@ export function buildSnQueriesByTab(
       servers: keywordOnly,
       switches: keywordOnly,
       databases: keywordOnly,
-      circuits: keywordOnly,
+      network_links: keywordOnly,
     };
   }
 
@@ -251,7 +251,7 @@ export function buildSnQueriesByTab(
     servers: buildForTab('servers'),
     switches: buildForTab('switches'),
     databases: buildForTab('databases'),
-    circuits: buildForTab('circuits'),
+    network_links: buildForTab('network_links'),
   };
 }
 

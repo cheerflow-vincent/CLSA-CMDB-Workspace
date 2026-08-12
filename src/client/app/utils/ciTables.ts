@@ -6,7 +6,7 @@ export const CI_SEARCH_BASE_TABLES = [
   'cmdb_ci_server',
   'cmdb_ci_netgear',
   'cmdb_ci_db_instance',
-  'cmdb_ci_circuit',
+  'cmdb_ci_network_link',
 ] as const;
 
 export const CI_ALL_TABLE = 'cmdb_ci';
