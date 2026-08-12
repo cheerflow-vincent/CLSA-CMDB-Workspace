@@ -28,6 +28,250 @@ function buildHealthQuery(ciSysId: string): string {
   return `active=true^ci=${ciSysId}^ORDERBYname`;
 }
 
+function buildHealthQueryByPrefix(queryPrefix: string): string {
+  if (!queryPrefix) return 'active=true^sys_id=-1';
+  // Full encoded queries from CI search summary already include active=true per ^NQ branch.
+  if (queryPrefix.startsWith('active=true') || queryPrefix.includes('^NQ')) {
+    return queryPrefix;
+  }
+  return `active=true^${queryPrefix}`;
+}
+
+export async function fetchCmdbHealthCountByQuery(
+  queryPrefix: string,
+): Promise<{ totalCount: number; access: TableAccess }> {
+  if (!queryPrefix) return { totalCount: 0, access: 'ok' };
+  const { totalCount, access } = await queryTableWithAccess({
+    table: CMDB_HEALTH_TABLE,
+    query: buildHealthQueryByPrefix(queryPrefix),
+    fields: ['sys_id'],
+    limit: 1,
+  });
+  return { totalCount, access };
+}
+
+export async function fetchCmdbHealthPageByQuery(
+  queryPrefix: string,
+  page: number,
+  pageSize = 10,
+): Promise<HealthResultsPage> {
+  const columns = await loadListFields(
+    CMDB_HEALTH_TABLE,
+    LIST_VIEW_TITLE,
+    HEALTH_DEFAULT_COLUMNS,
+  );
+
+  if (!queryPrefix) {
+    return { rows: [], columns, totalCount: 0, access: 'ok' };
+  }
+
+  const fields = [...new Set(['sys_id', ...columns.map(c => c.element)])];
+
+  const { result = [], totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
+    table: CMDB_HEALTH_TABLE,
+    query: `${buildHealthQueryByPrefix(queryPrefix)}^ORDERBYname`,
+    fields,
+    limit: pageSize,
+    offset: page * pageSize,
+    displayValue: true,
+  });
+
+  if (access === 'denied') {
+    return { rows: [], columns, totalCount: 0, access };
+  }
+
+  const readableColumns = filterColumnsByRecords(columns, result);
+
+  const rows: HealthResultRow[] = result.map(rec => {
+    const sysId = raw(rec.sys_id);
+    const values: Record<string, string> = {};
+    for (const col of readableColumns) {
+      if (col.element in rec) {
+        values[col.element] = str(rec[col.element]);
+      }
+    }
+    return { sysId, values };
+  }).filter(r => r.sysId);
+
+  return { rows, columns: readableColumns, totalCount, access };
+}
+
+const HEALTH_BRANCH_FETCH_CAP = 500;
+
+function mergeHealthAccess(current: TableAccess, next: TableAccess): TableAccess {
+  if (next === 'denied' || current === 'denied') return 'denied';
+  if (next === 'error' || current === 'error') return 'error';
+  return 'ok';
+}
+
+function mapHealthResultRows(
+  records: Record<string, unknown>[],
+  columns: ViewField[],
+): { rows: HealthResultRow[]; columns: ViewField[] } {
+  const readableColumns = filterColumnsByRecords(columns, records);
+  const rows: HealthResultRow[] = records.map(rec => {
+    const sysId = raw(rec.sys_id);
+    const values: Record<string, string> = {};
+    for (const col of readableColumns) {
+      if (col.element in rec) {
+        values[col.element] = str(rec[col.element]);
+      }
+    }
+    return { sysId, values };
+  }).filter(r => r.sysId);
+  return { rows, columns: readableColumns };
+}
+
+/** Fetch health metrics for multiple query branches, merge, paginate client-side. */
+export async function fetchCmdbHealthFromBranches(
+  branches: string[],
+  page: number,
+  pageSize = 10,
+): Promise<HealthResultsPage> {
+  const columns = await loadListFields(
+    CMDB_HEALTH_TABLE,
+    LIST_VIEW_TITLE,
+    HEALTH_DEFAULT_COLUMNS,
+  );
+
+  if (!branches.length) {
+    return { rows: [], columns, totalCount: 0, access: 'ok' };
+  }
+
+  if (branches.length === 1) {
+    return fetchAllHealthForBranch(branches[0], columns, page, pageSize);
+  }
+
+  const fields = [...new Set(['sys_id', ...columns.map(c => c.element)])];
+  let access: TableAccess = 'ok';
+  const merged: HealthResultRow[] = [];
+  const seen = new Set<string>();
+  let readableColumns = columns;
+
+  for (const branchQuery of branches) {
+    const branchResult = await loadAllHealthForBranch(branchQuery, fields, columns);
+    access = mergeHealthAccess(access, branchResult.access);
+    if (branchResult.access === 'denied') {
+      return { rows: [], columns, totalCount: 0, access: 'denied' };
+    }
+    if (branchResult.columns.length) readableColumns = branchResult.columns;
+    for (const row of branchResult.rows) {
+      if (seen.has(row.sysId)) continue;
+      seen.add(row.sysId);
+      merged.push(row);
+    }
+  }
+
+  merged.sort((a, b) =>
+    (a.values.name || '').localeCompare(b.values.name || '', undefined, { sensitivity: 'base' }),
+  );
+
+  const totalCount = merged.length;
+  const rows = merged.slice(page * pageSize, (page + 1) * pageSize);
+  return { rows, columns: readableColumns, totalCount, access };
+}
+
+async function loadDistinctHealthIdsForBranch(
+  branchQuery: string,
+): Promise<{ ids: string[]; access: TableAccess }> {
+  const query = `${buildHealthQueryByPrefix(branchQuery)}^ORDERBYname`;
+  const countRes = await queryTableWithAccess({
+    table: CMDB_HEALTH_TABLE,
+    query,
+    fields: ['sys_id'],
+    limit: 1,
+  });
+  if (countRes.access === 'denied') {
+    return { ids: [], access: 'denied' };
+  }
+  if (!countRes.totalCount) {
+    return { ids: [], access: countRes.access };
+  }
+
+  const { result = [], access } = await queryTableWithAccess<Record<string, unknown>>({
+    table: CMDB_HEALTH_TABLE,
+    query,
+    fields: ['sys_id'],
+    limit: Math.min(countRes.totalCount, HEALTH_BRANCH_FETCH_CAP),
+    displayValue: true,
+  });
+
+  const seen = new Set<string>();
+  for (const r of result) {
+    const id = raw(r.sys_id);
+    if (id) seen.add(id);
+  }
+  return { ids: [...seen], access };
+}
+
+/** Count distinct health metrics across query branches (matches sidebar dedupe). */
+export async function countDistinctHealthFromBranches(
+  branches: string[],
+): Promise<{ totalCount: number; access: TableAccess }> {
+  if (!branches.length) return { totalCount: 0, access: 'ok' };
+
+  let access: TableAccess = 'ok';
+  const seen = new Set<string>();
+
+  for (const branchQuery of branches) {
+    const branchResult = await loadDistinctHealthIdsForBranch(branchQuery);
+    access = mergeHealthAccess(access, branchResult.access);
+    if (branchResult.access === 'denied') {
+      return { totalCount: 0, access: 'denied' };
+    }
+    for (const id of branchResult.ids) seen.add(id);
+  }
+
+  return { totalCount: seen.size, access };
+}
+
+async function loadAllHealthForBranch(
+  branchQuery: string,
+  fields: string[],
+  columns: ViewField[],
+): Promise<{ rows: HealthResultRow[]; columns: ViewField[]; access: TableAccess }> {
+  const query = `${buildHealthQueryByPrefix(branchQuery)}^ORDERBYname`;
+  const countRes = await queryTableWithAccess({
+    table: CMDB_HEALTH_TABLE,
+    query,
+    fields: ['sys_id'],
+    limit: 1,
+  });
+  if (countRes.access === 'denied') {
+    return { rows: [], columns, access: 'denied' };
+  }
+  if (!countRes.totalCount) {
+    return { rows: [], columns, access: countRes.access };
+  }
+
+  const { result = [], access } = await queryTableWithAccess<Record<string, unknown>>({
+    table: CMDB_HEALTH_TABLE,
+    query,
+    fields,
+    limit: Math.min(countRes.totalCount, HEALTH_BRANCH_FETCH_CAP),
+    displayValue: true,
+  });
+
+  const mapped = mapHealthResultRows(result, columns);
+  return { ...mapped, access };
+}
+
+async function fetchAllHealthForBranch(
+  branchQuery: string,
+  columns: ViewField[],
+  page: number,
+  pageSize: number,
+): Promise<HealthResultsPage> {
+  const fields = [...new Set(['sys_id', ...columns.map(c => c.element)])];
+  const branchResult = await loadAllHealthForBranch(branchQuery, fields, columns);
+  if (branchResult.access === 'denied') {
+    return { rows: [], columns, totalCount: 0, access: 'denied' };
+  }
+  const totalCount = branchResult.rows.length;
+  const rows = branchResult.rows.slice(page * pageSize, (page + 1) * pageSize);
+  return { rows, columns: branchResult.columns, totalCount, access: branchResult.access };
+}
+
 export async function fetchCmdbHealthResults(ciSysId: string): Promise<HealthResultsPage> {
   const columns = await loadListFields(
     CMDB_HEALTH_TABLE,

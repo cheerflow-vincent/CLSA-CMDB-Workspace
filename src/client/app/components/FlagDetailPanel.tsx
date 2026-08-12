@@ -1,17 +1,27 @@
 import { useState, useEffect } from 'react';
-import { AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react';
+import { AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2, Shield, X } from 'lucide-react';
 import { TaskCard } from './taskListCards';
+import { HealthResultCard } from './HealthResultsPanel';
 import {
   INCIDENT_TASK_CONFIG,
   CHANGE_TASK_CONFIG,
   fetchRelatedTaskPage,
+  fetchRelatedTaskPageByQuery,
+  fetchRelatedTasksFromBranches,
   RELATED_TASK_PAGE_SIZE,
+  taskCiQuery,
+  type RelatedTaskConfig,
   type RelatedTaskRow,
 } from '../utils/relatedTasks';
+import {
+  fetchCmdbHealthFromBranches,
+  fetchCmdbHealthResults,
+  type HealthResultRow,
+} from '../utils/cmdbHealthResults';
 import type { ViewField } from '../utils/viewFields';
 import { isAccessDenied } from '../utils/acl';
 
-export type FlagType = 'incident' | 'change';
+export type FlagType = 'incident' | 'change' | 'health';
 
 /** @deprecated Legacy mock/demo shape — live panel uses recordSysId + API fetch */
 export interface IncidentRecord {
@@ -39,6 +49,11 @@ interface FlagDetailPanelProps {
   flagType: FlagType;
   /** CI / instance sys_id — fetches live tasks via task_ci */
   recordSysId?: string;
+  /** Full encoded query (CI search summary) or CI-only prefix for legacy callers */
+  queryPrefix?: string;
+  encodedQuery?: string;
+  /** Per-tab/chunk encoded queries — merged client-side for All Results sidebar. */
+  encodedQueries?: string[];
   /** Demo/mock fallback when recordSysId is absent */
   records?: IncidentRecord[] | ChangeRecord[];
   onClose: () => void;
@@ -46,7 +61,7 @@ interface FlagDetailPanelProps {
 
 const priorityColor: Record<string, string> = {
   'P1 - Critical': 'bg-red-100 text-red-700',
-  'P2 - High':     'bg-orange-100 text-orange-700',
+  'P2 - High':     'bg-orange-100 text-red-700',
   'P3 - Medium':   'bg-yellow-100 text-yellow-700',
   'P4 - Low':      'bg-gray-100 text-gray-600',
 };
@@ -64,12 +79,77 @@ const changeTypeColor: Record<string, string> = {
   'Emergency': 'bg-red-100 text-red-700',
 };
 
+function PanelPaginationFooter({
+  loading,
+  totalCount,
+  page,
+  pageSize,
+  onPrev,
+  onNext,
+  footerLabel,
+}: {
+  loading: boolean;
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  onPrev: () => void;
+  onNext: () => void;
+  footerLabel: string;
+}) {
+  const start = totalCount === 0 ? 0 : page * pageSize + 1;
+  const end = Math.min((page + 1) * pageSize, totalCount);
+  const showPagination = totalCount > pageSize;
+  const canPrev = page > 0;
+  const canNext = (page + 1) * pageSize < totalCount;
+
+  return (
+    <div className="shrink-0 border-t border-gray-100 bg-gray-50">
+      {showPagination && (
+        <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-between">
+          <span className="text-[11px] text-gray-500">
+            {start}–{end} of {totalCount}
+          </span>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={onPrev}
+              disabled={!canPrev || loading}
+              className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="w-4 h-4 text-gray-600" />
+            </button>
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!canNext || loading}
+              className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Next page"
+            >
+              <ChevronRight className="w-4 h-4 text-gray-600" />
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="px-5 py-3">
+        <p className="text-xs text-gray-400">{footerLabel}</p>
+      </div>
+    </div>
+  );
+}
+
 function LiveFlagRecords({
   recordSysId,
+  queryPrefix,
+  encodedQuery,
+  encodedQueries,
   flagType,
 }: {
-  recordSysId: string;
-  flagType: FlagType;
+  recordSysId?: string;
+  queryPrefix?: string;
+  encodedQuery?: string;
+  encodedQueries?: string[];
+  flagType: 'incident' | 'change';
 }) {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<RelatedTaskRow[]>([]);
@@ -77,17 +157,27 @@ function LiveFlagRecords({
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
 
-  const config = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
+  const config: RelatedTaskConfig = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
   const pageSize = RELATED_TASK_PAGE_SIZE;
+  const scopeKey = encodedQueries?.join('|') ?? encodedQuery ?? queryPrefix ?? recordSysId ?? '';
 
   useEffect(() => {
     setPage(0);
-  }, [recordSysId, flagType]);
+  }, [scopeKey, flagType]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchRelatedTaskPage(recordSysId, config, page, pageSize)
+
+    const fetchPage = encodedQueries?.length
+      ? fetchRelatedTasksFromBranches(encodedQueries, config, page, pageSize)
+      : encodedQuery
+        ? fetchRelatedTasksFromBranches([encodedQuery], config, page, pageSize)
+        : queryPrefix
+          ? fetchRelatedTaskPageByQuery(taskCiQuery(queryPrefix, config), config, page, pageSize)
+          : fetchRelatedTaskPage(recordSysId!, config, page, pageSize);
+
+    fetchPage
       .then(({ rows: pageRows, columns: pageCols, totalCount: count, access }) => {
         if (cancelled) return;
         if (isAccessDenied(access)) {
@@ -111,18 +201,12 @@ function LiveFlagRecords({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [recordSysId, flagType, page, pageSize]);
+  }, [scopeKey, encodedQueries, encodedQuery, queryPrefix, recordSysId, flagType, page, pageSize, config]);
 
   useEffect(() => {
     const maxPage = Math.max(0, Math.ceil(totalCount / pageSize) - 1);
     if (page > maxPage) setPage(maxPage);
   }, [totalCount, page, pageSize]);
-
-  const start = totalCount === 0 ? 0 : page * pageSize + 1;
-  const end = Math.min((page + 1) * pageSize, totalCount);
-  const showPagination = totalCount > pageSize;
-  const canPrev = page > 0;
-  const canNext = (page + 1) * pageSize < totalCount;
 
   return (
     <>
@@ -140,42 +224,120 @@ function LiveFlagRecords({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-gray-100 bg-gray-50">
-        {showPagination && (
-          <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-between">
-            <span className="text-[11px] text-gray-500">
-              {start}–{end} of {totalCount}
-            </span>
-            <div className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => setPage(p => p - 1)}
-                disabled={!canPrev || loading}
-                className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="w-4 h-4 text-gray-600" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage(p => p + 1)}
-                disabled={!canNext || loading}
-                className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="Next page"
-              >
-                <ChevronRight className="w-4 h-4 text-gray-600" />
-              </button>
-            </div>
+      <PanelPaginationFooter
+        loading={loading}
+        totalCount={totalCount}
+        page={page}
+        pageSize={pageSize}
+        onPrev={() => setPage(p => p - 1)}
+        onNext={() => setPage(p => p + 1)}
+        footerLabel={
+          totalCount > 0
+            ? `${totalCount} linked task${totalCount !== 1 ? 's' : ''} from ServiceNow`
+            : 'Linked tasks from ServiceNow'
+        }
+      />
+    </>
+  );
+}
+
+function LiveHealthRecords({
+  recordSysId,
+  queryPrefix,
+  encodedQuery,
+  encodedQueries,
+}: {
+  recordSysId?: string;
+  queryPrefix?: string;
+  encodedQuery?: string;
+  encodedQueries?: string[];
+}) {
+  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<HealthResultRow[]>([]);
+  const [columns, setColumns] = useState<ViewField[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(0);
+
+  const pageSize = RELATED_TASK_PAGE_SIZE;
+  const scopeKey = encodedQueries?.join('|') ?? encodedQuery ?? queryPrefix ?? recordSysId ?? '';
+
+  useEffect(() => {
+    setPage(0);
+  }, [scopeKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    const fetchPage = encodedQueries?.length
+      ? fetchCmdbHealthFromBranches(encodedQueries, page, pageSize)
+      : (encodedQuery ?? queryPrefix)
+        ? fetchCmdbHealthFromBranches([encodedQuery ?? queryPrefix!], page, pageSize)
+        : fetchCmdbHealthResults(recordSysId!).then(result => ({
+            ...result,
+            totalCount: result.totalCount || result.rows.length,
+          }));
+
+    fetchPage
+      .then(({ rows: pageRows, columns: pageCols, totalCount: count, access }) => {
+        if (cancelled) return;
+        if (isAccessDenied(access)) {
+          setRows([]);
+          setColumns([]);
+          setTotalCount(0);
+          return;
+        }
+        setRows(pageRows);
+        setColumns(pageCols);
+        setTotalCount(count);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRows([]);
+          setColumns([]);
+          setTotalCount(0);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [scopeKey, encodedQueries, encodedQuery, queryPrefix, recordSysId, page, pageSize]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(totalCount / pageSize) - 1);
+    if (page > maxPage) setPage(maxPage);
+  }, [totalCount, page, pageSize]);
+
+  return (
+    <>
+      <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
+        {loading ? (
+          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
+            <Loader2 className="w-5 h-5 animate-spin" /> Loading…
           </div>
+        ) : !rows.length ? (
+          <p className="text-sm text-gray-400 text-center mt-10">No health metrics found.</p>
+        ) : (
+          rows.map(row => (
+            <HealthResultCard key={row.sysId} row={row} columns={columns} />
+          ))
         )}
-        <div className="px-5 py-3">
-          <p className="text-xs text-gray-400">
-            {totalCount > 0
-              ? `${totalCount} linked task${totalCount !== 1 ? 's' : ''} from ServiceNow`
-              : 'Linked tasks from ServiceNow'}
-          </p>
-        </div>
       </div>
+
+      <PanelPaginationFooter
+        loading={loading}
+        totalCount={totalCount}
+        page={page}
+        pageSize={pageSize}
+        onPrev={() => setPage(p => p - 1)}
+        onNext={() => setPage(p => p + 1)}
+        footerLabel={
+          totalCount > 0
+            ? `${totalCount} active health metric${totalCount !== 1 ? 's' : ''} from ServiceNow`
+            : 'Health metrics from ServiceNow'
+        }
+      />
     </>
   );
 }
@@ -184,7 +346,7 @@ function LegacyRecordList({
   flagType,
   records,
 }: {
-  flagType: FlagType;
+  flagType: 'incident' | 'change';
   records: IncidentRecord[] | ChangeRecord[];
 }) {
   const [page, setPage] = useState(0);
@@ -196,11 +358,6 @@ function LegacyRecordList({
 
   const totalCount = records.length;
   const pageRows = records.slice(page * pageSize, (page + 1) * pageSize);
-  const start = totalCount === 0 ? 0 : page * pageSize + 1;
-  const end = Math.min((page + 1) * pageSize, totalCount);
-  const showPagination = totalCount > pageSize;
-  const canPrev = page > 0;
-  const canNext = (page + 1) * pageSize < totalCount;
   const isIncident = flagType === 'incident';
 
   if (!records.length) {
@@ -264,42 +421,41 @@ function LegacyRecordList({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-gray-100 bg-gray-50">
-        {showPagination && (
-          <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-between">
-            <span className="text-[11px] text-gray-500">
-              {start}–{end} of {totalCount}
-            </span>
-            <div className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => setPage(p => p - 1)}
-                disabled={!canPrev}
-                className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="w-4 h-4 text-gray-600" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage(p => p + 1)}
-                disabled={!canNext}
-                className="p-1 hover:bg-gray-200 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="Next page"
-              >
-                <ChevronRight className="w-4 h-4 text-gray-600" />
-              </button>
-            </div>
-          </div>
-        )}
-        <div className="px-5 py-3">
-          <p className="text-xs text-gray-400">
-            {totalCount} record{totalCount !== 1 ? 's' : ''} linked
-          </p>
-        </div>
-      </div>
+      <PanelPaginationFooter
+        loading={false}
+        totalCount={totalCount}
+        page={page}
+        pageSize={pageSize}
+        onPrev={() => setPage(p => p - 1)}
+        onNext={() => setPage(p => p + 1)}
+        footerLabel={`${totalCount} record${totalCount !== 1 ? 's' : ''} linked`}
+      />
     </>
   );
+}
+
+function panelHeaderClass(flagType: FlagType): string {
+  switch (flagType) {
+    case 'incident': return 'bg-red-50 border-red-100';
+    case 'change':   return 'bg-yellow-50 border-yellow-100';
+    case 'health':   return 'bg-blue-50 border-blue-100';
+  }
+}
+
+function panelTitleClass(flagType: FlagType): string {
+  switch (flagType) {
+    case 'incident': return 'text-red-700';
+    case 'change':   return 'text-yellow-700';
+    case 'health':   return 'text-blue-700';
+  }
+}
+
+function panelLabel(flagType: FlagType): string {
+  switch (flagType) {
+    case 'incident': return 'Active Incidents';
+    case 'change':   return 'Scheduled Changes';
+    case 'health':   return 'Active Health Metrics';
+  }
 }
 
 export default function FlagDetailPanel({
@@ -307,11 +463,14 @@ export default function FlagDetailPanel({
   subtitle,
   flagType,
   recordSysId,
+  queryPrefix,
+  encodedQuery,
+  encodedQueries,
   records = [],
   onClose,
 }: FlagDetailPanelProps) {
-  const isIncident = flagType === 'incident';
-  const useLive = Boolean(recordSysId);
+  const useLive = Boolean(recordSysId || queryPrefix || encodedQuery || encodedQueries?.length);
+  const isSummary = Boolean(encodedQueries?.length || encodedQuery || queryPrefix);
 
   return (
     <>
@@ -321,19 +480,28 @@ export default function FlagDetailPanel({
         className="fixed right-0 top-0 h-full w-[420px] z-40 bg-white shadow-2xl flex flex-col"
         style={{ animation: 'slideIn 0.2s ease-out' }}
       >
-        <div className={`px-5 py-4 border-b flex items-start justify-between shrink-0 ${isIncident ? 'bg-red-50 border-red-100' : 'bg-yellow-50 border-yellow-100'}`}>
+        <div className={`px-5 py-4 border-b flex items-start justify-between shrink-0 ${panelHeaderClass(flagType)}`}>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              {isIncident
-                ? <AlertCircle className="w-5 h-5 text-red-600" />
-                : <Calendar    className="w-5 h-5 text-yellow-600" />}
-              <span className={`text-sm font-semibold ${isIncident ? 'text-red-700' : 'text-yellow-700'}`}>
-                {isIncident ? 'Active Incidents' : 'Scheduled Changes'}
+              {flagType === 'incident' && <AlertCircle className="w-5 h-5 text-red-600" />}
+              {flagType === 'change' && <Calendar className="w-5 h-5 text-yellow-600" />}
+              {flagType === 'health' && <Shield className="w-5 h-5 text-blue-600" />}
+              <span className={`text-sm font-semibold ${panelTitleClass(flagType)}`}>
+                {panelLabel(flagType)}
               </span>
             </div>
             <p className="text-xs text-gray-500">
-              {subtitle ? <>{subtitle}: </> : 'CI: '}
-              <span className="font-medium text-gray-800">{title}</span>
+              {isSummary ? (
+                <>
+                  {subtitle ?? 'Search results'}:{' '}
+                  <span className="font-medium text-gray-800">{title}</span>
+                </>
+              ) : (
+                <>
+                  {subtitle ? <>{subtitle}: </> : 'CI: '}
+                  <span className="font-medium text-gray-800">{title}</span>
+                </>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-black/10 text-gray-500 hover:text-gray-800">
@@ -341,8 +509,27 @@ export default function FlagDetailPanel({
           </button>
         </div>
 
-        {useLive ? (
-          <LiveFlagRecords recordSysId={recordSysId!} flagType={flagType} />
+        {flagType === 'health' ? (
+          useLive ? (
+            <LiveHealthRecords
+              recordSysId={recordSysId}
+              queryPrefix={queryPrefix}
+              encodedQuery={encodedQuery}
+              encodedQueries={encodedQueries}
+            />
+          ) : (
+            <div className="flex-1 overflow-y-auto p-5 min-h-0">
+              <p className="text-sm text-gray-400 text-center mt-10">No records found.</p>
+            </div>
+          )
+        ) : useLive ? (
+          <LiveFlagRecords
+            recordSysId={recordSysId}
+            queryPrefix={queryPrefix}
+            encodedQuery={encodedQuery}
+            encodedQueries={encodedQueries}
+            flagType={flagType}
+          />
         ) : (
           <LegacyRecordList flagType={flagType} records={records} />
         )}

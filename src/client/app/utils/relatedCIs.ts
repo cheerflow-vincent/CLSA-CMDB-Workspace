@@ -108,7 +108,7 @@ export const NETGEAR_REL_CONFIG: RelatedCIConfig = {
 };
 
 export const NETWORK_LINK_REL_CONFIG: RelatedCIConfig = {
-  relType: 'Connects to::Connected by',
+  relType: 'Runs on::Runs',
   baseClass: 'cmdb_ci_network_link',
   ciTable: 'cmdb_ci_network_link',
   ciType: 'network_link',

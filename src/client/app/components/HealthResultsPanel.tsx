@@ -94,7 +94,7 @@ function BodyField({
   );
 }
 
-function HealthResultCard({
+export function HealthResultCard({
   row,
   columns,
 }: {

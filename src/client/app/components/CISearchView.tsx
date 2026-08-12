@@ -9,6 +9,7 @@ import type { CIItem } from './CIDetailView';
 import AppFamilyInstanceAutocomplete from './AppFamilyInstanceAutocomplete';
 import CIFlagBadges from './CIFlagBadges';
 import FlagDetailPanel, { type FlagType } from './FlagDetailPanel';
+import CISearchSummaryBanner from './CISearchSummaryBanner';
 import {
   queryTableWithAccess,
   getCIFilter,
@@ -29,6 +30,13 @@ import {
   type AppFilterSelection,
   type AppRelatedIdsByTab,
 } from '../utils/ciSearchAppFilter';
+import {
+  buildSummaryContext,
+  buildSidebarQueryBranches,
+  fetchCiSearchSummaryCounts,
+  type CiSearchSummaryContext,
+  type SummaryFlagType,
+} from '../utils/ciSearchSummary';
 
 const PROP_CI_SEARCH_FIELDS = `${APP_SCOPE}.ci.search.filter.table.field`;
 const DEFAULT_SEARCH_FIELDS = ['name'];
@@ -444,11 +452,19 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const [pending, setPending]     = useState<PendingFilters>(emptyPending());
   const [applied, setApplied]     = useState<PendingFilters>(emptyPending());
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
-  const [panel, setPanel] = useState<{
-    recordSysId: string;
-    ciName: string;
-    flagType: FlagType;
-  } | null>(null);
+  const [panel, setPanel] = useState<
+    | { kind: 'ci'; recordSysId: string; ciName: string; flagType: 'incident' | 'change' }
+    | { kind: 'summary'; flagType: SummaryFlagType; encodedQueries: string[]; title: string; subtitle: string }
+    | null
+  >(null);
+  const [summary, setSummary] = useState<{
+    incidents: number;
+    changes: number;
+    health: number;
+    access: { incidents: TableAccess; changes: TableAccess; health: TableAccess };
+    loading: boolean;
+  }>({ incidents: 0, changes: 0, health: 0, access: { incidents: 'ok', changes: 'ok', health: 'ok' }, loading: false });
+  const summaryContextRef = useRef<CiSearchSummaryContext | null>(null);
   const [pillCounts, setPillCounts] = useState<PillCounts>(EMPTY_COUNTS);
   const [pillAccess, setPillAccess] = useState<PillAccess>(EMPTY_PILL_ACCESS);
   const [tabData, setTabData] = useState<Record<SpecificTab, TabData>>({
@@ -876,6 +892,83 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     network_links:  tabData.network_links.totalCount,
   }), [tabData]);
 
+  const summaryContext = useMemo((): CiSearchSummaryContext | null => {
+    if (ciFilter === null) return null;
+    return buildSummaryContext(
+      activeTab,
+      applied,
+      snQueriesByTab,
+      appRelatedIdsByTab,
+      tabCounts,
+      allTotalCount,
+      ciFilter,
+      searchFields,
+    );
+  }, [
+    activeTab,
+    applied,
+    snQueriesByTab,
+    appRelatedIdsByTab,
+    tabCounts,
+    allTotalCount,
+    ciFilter,
+    searchFields,
+  ]);
+
+  useEffect(() => {
+    summaryContextRef.current = summaryContext;
+  }, [summaryContext]);
+
+  useEffect(() => {
+    if (!queriesReady || !summaryContext) {
+      setSummary(prev => ({ ...prev, loading: false, incidents: 0, changes: 0, health: 0 }));
+      return;
+    }
+
+    let cancelled = false;
+    setSummary(prev => ({ ...prev, loading: true }));
+
+    fetchCiSearchSummaryCounts(summaryContext)
+      .then(result => {
+        if (cancelled) return;
+        setSummary({ ...result, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSummary({
+            incidents: 0,
+            changes: 0,
+            health: 0,
+            access: { incidents: 'error', changes: 'error', health: 'error' },
+            loading: false,
+          });
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [queryKey, activeTab, queriesReady, summaryContext]);
+
+  const handleSummaryChipClick = useCallback((flagType: SummaryFlagType) => {
+    const context = summaryContextRef.current;
+    if (!context) return;
+    const encodedQueries = buildSidebarQueryBranches(context, flagType);
+    if (!encodedQueries.length) return;
+
+    const titles: Record<SummaryFlagType, string> = {
+      incident: 'Active Incidents',
+      change: 'Upcoming Changes',
+      health: 'Active Health Metrics',
+    };
+
+    setPanel({
+      kind: 'summary',
+      flagType,
+      encodedQueries,
+      title: context.label,
+      subtitle: titles[flagType],
+    });
+  }, []);
+
   const tabAccess = useMemo((): Record<SpecificTab, TableAccess> => ({
     servers:   tabData.servers.access,
     switches:  tabData.switches.access,
@@ -913,9 +1006,10 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     if (colIdx === 0) {
       const openFlag = (type: FlagType) => {
         setPanel({
+          kind: 'ci',
           recordSysId: row.sysId,
           ciName: val !== '—' ? val : row.values.name || row.sysId,
-          flagType: type,
+          flagType: type as 'incident' | 'change',
         });
       };
       return (
@@ -1098,10 +1192,16 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           </div>
         </div>
 
-        {/* Alert */}
-        <div className="p-4 bg-blue-50 border-l-4 border-blue-500 mx-6 my-4">
-          <p className="text-sm text-blue-900">Notice / message / alert / warning are displayed here</p>
-        </div>
+        <CISearchSummaryBanner
+          incidents={summary.incidents}
+          changes={summary.changes}
+          health={summary.health}
+          access={summary.access}
+          loading={summary.loading}
+          matchingCiCount={totalCount}
+          showMergeCapNote={activeTab === 'all' && allTotalCount > allMergedRows.length}
+          onChipClick={handleSummaryChipClick}
+        />
 
         {/* Table toolbar */}
         <div className="px-6 pb-3 flex items-center justify-between">
@@ -1135,9 +1235,10 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                   columns={columns}
                   onViewDetails={onViewDetails}
                   onFlagClick={type => setPanel({
+                    kind: 'ci',
                     recordSysId: row.sysId,
                     ciName: row.values.name || row.sysId,
-                    flagType: type,
+                    flagType: type as 'incident' | 'change',
                   })}
                 />
               ))
@@ -1257,11 +1358,20 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       </div>
 
       {/* Right slide-out panel */}
-      {panel && (
+      {panel && panel.kind === 'ci' && (
         <FlagDetailPanel
           title={panel.ciName}
           flagType={panel.flagType}
           recordSysId={panel.recordSysId}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel && panel.kind === 'summary' && (
+        <FlagDetailPanel
+          title={panel.title}
+          subtitle={panel.subtitle}
+          flagType={panel.flagType}
+          encodedQueries={panel.encodedQueries}
           onClose={() => setPanel(null)}
         />
       )}

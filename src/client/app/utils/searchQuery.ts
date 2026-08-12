@@ -48,3 +48,43 @@ export function buildMultiFieldAndLikeQuery(fields: string[], tokens: string[]):
     })
     .join('^');
 }
+
+const FIELD_OP_RE = /^([a-z0-9_]+)(LIKE|=|!=|IN|STARTSWITH|ENDSWITH|>=|<=|>|<|INSTANCEOF)/i;
+
+function prefixQuerySegment(segment: string, prefix: string): string {
+  if (!segment || segment.startsWith('ORDERBY')) return segment;
+
+  if (segment.startsWith('sys_idIN')) {
+    return `${prefix}.${segment}`;
+  }
+
+  const applyPrefix = (field: string, rest: string) =>
+    field.includes('.') ? `${field}${rest}` : `${prefix}.${field}${rest}`;
+
+  if (segment.startsWith('OR')) {
+    const rest = segment.slice(2);
+    const match = rest.match(FIELD_OP_RE);
+    if (match) {
+      return `OR${applyPrefix(match[1], rest.slice(match[1].length))}`;
+    }
+    return segment;
+  }
+
+  const match = segment.match(FIELD_OP_RE);
+  if (match) {
+    return applyPrefix(match[1], segment.slice(match[1].length));
+  }
+
+  return segment;
+}
+
+/** Join independent encoded-query groups with logical OR (^NQ). */
+export function joinOrEncodedQueries(parts: string[]): string {
+  return parts.filter(Boolean).join('^NQ');
+}
+
+/** Prefix bare field names in an encoded query for dot-walking (e.g. ci_item / ci). */
+export function prefixEncodedQuery(query: string, prefix: string): string {
+  if (!query.trim()) return '';
+  return query.split('^').map(seg => prefixQuerySegment(seg, prefix)).join('^');
+}
