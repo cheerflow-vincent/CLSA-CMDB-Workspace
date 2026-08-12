@@ -74,9 +74,9 @@ const getDetail = (ci: CIItem) => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function ReadonlyField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-gray-900 break-words whitespace-pre-line">{value || '—'}</p>
+    <div className="rf-field-row min-w-0 mb-0">
+      <span className="rf-field-row__label">{label}</span>
+      <span className="rf-field-row__value font-medium text-gray-900">{value || '—'}</span>
     </div>
   );
 }
@@ -178,7 +178,7 @@ function FormOverviewBlock({
 
   if (loading) {
     return (
-      <div className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} flex items-center justify-center py-8 text-gray-400 gap-2 text-sm`}>
+      <div className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} flex items-center justify-center py-8 text-gray-400 gap-2 typo-body`}>
         <Loader2 className="w-4 h-4 animate-spin" /> {loadingMessage}
       </div>
     );
@@ -186,7 +186,7 @@ function FormOverviewBlock({
   const visibleSections = filterFormSections(sections, values);
   if (!visibleSections.length) {
     return (
-      <p className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} text-sm text-gray-400 italic`}>
+      <p className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} typo-body text-gray-400 italic`}>
         {emptyMessage}
       </p>
     );
@@ -216,7 +216,7 @@ function Section({ title, icon, defaultOpen = true, children }: {
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors"
       >
-        <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+        <div className="flex items-center gap-2 typo-section-title">
           <span className="w-1 h-4 bg-blue-600 rounded-full" />
           {icon}
           {title}
@@ -440,15 +440,15 @@ export default function CIDetailView({
     <Section title="Incident & Change Trend (Last 6 Months)" icon={<Activity className="w-4 h-4 text-blue-500" />}>
       <div className="p-5">
         {trendLoading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
+          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
           </div>
         ) : trendData.length === 0 ? (
-          <p className="text-sm text-gray-400 italic text-center py-16">No trend data available.</p>
+          <p className="typo-body text-gray-400 italic text-center py-16">No trend data available.</p>
         ) : (
           <>
             <TaskTrendChart data={trendData} />
-            <p className="text-xs text-gray-400 text-center mt-3">
+            <p className="typo-caption text-center mt-3">
               Click a data point to open the filtered list in ServiceNow.
             </p>
           </>
@@ -465,7 +465,7 @@ export default function CIDetailView({
             <button
               type="button"
               onClick={() => setTaskTab('incidents')}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
             >
               <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
               Incidents ({incidentCount})
@@ -475,7 +475,7 @@ export default function CIDetailView({
             <button
               type="button"
               onClick={() => setTaskTab('changes')}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
             >
               <Calendar className="w-3.5 h-3.5 inline mr-1" />
               Changes ({changeCount})
@@ -566,7 +566,7 @@ export default function CIDetailView({
     <div className="p-4 sm:p-6 space-y-4">
 
       {/* ── Breadcrumb ── */}
-      <div className="flex items-center gap-1.5 text-sm text-gray-500 flex-wrap">
+      <div className="flex items-center gap-1.5 typo-page-subtitle flex-wrap">
         <button onClick={onBack} className="hover:text-blue-600 transition-colors">Home</button>
         <ChevronRight className="w-4 h-4 flex-shrink-0" />
         {fromApp ? (
@@ -586,29 +586,29 @@ export default function CIDetailView({
       <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold text-gray-900 mb-2">{displayName}</h1>
+            <h1 className="typo-page-title mb-2">{displayName}</h1>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 typo-badge">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                 {detail.status}
               </span>
               {ci.hasIncident && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 typo-badge">
                   <AlertCircle className="w-3 h-3" /> Active Incident
                 </span>
               )}
               {ci.hasChange && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-xs">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 typo-badge">
                   <Calendar className="w-3 h-3" /> Upcoming Change
                 </span>
               )}
               {showTaskSection && !isAccessDenied(incidentAccess) && incidentCount > 0 && (
-                <span className={`${headerCountChipClass} items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 text-xs border border-red-200`}>
+                <span className={`${headerCountChipClass} items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 typo-badge border border-red-200`}>
                   <AlertCircle className="w-3 h-3" /> {incidentCount} incident{incidentCount !== 1 ? 's' : ''}
                 </span>
               )}
               {showTaskSection && !isAccessDenied(changeAccess) && changeCount > 0 && (
-                <span className={`${headerCountChipClass} items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-700 text-xs border border-yellow-200`}>
+                <span className={`${headerCountChipClass} items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-700 typo-badge border border-yellow-200`}>
                   <Calendar className="w-3 h-3" /> {changeCount} change{changeCount !== 1 ? 's' : ''}
                 </span>
               )}
@@ -619,7 +619,7 @@ export default function CIDetailView({
               type="button"
               onClick={refreshPage}
               disabled={refreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors disabled:opacity-60"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg typo-body hover:bg-gray-50 transition-colors disabled:opacity-60"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
             </button>
@@ -628,7 +628,7 @@ export default function CIDetailView({
                 href={grafanaUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-50 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg typo-body hover:bg-orange-50 transition-colors"
               >
                 <Activity className="w-4 h-4" /> Grafana
                 <ExternalLink className="w-3 h-3" />
@@ -638,7 +638,7 @@ export default function CIDetailView({
               href={`/${recordTable || resolveTableHint(ci)}.do?sys_id=${recordSysId || ci.id}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg typo-body hover:bg-indigo-50 transition-colors"
             >
               <ExternalLink className="w-4 h-4" /> Open in ServiceNow
             </a>
@@ -646,7 +646,7 @@ export default function CIDetailView({
               <button
                 type="button"
                 onClick={() => setShowRecordEditModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg typo-body hover:bg-gray-50 transition-colors"
               >
                 <Edit2 className="w-4 h-4" /> Edit
               </button>

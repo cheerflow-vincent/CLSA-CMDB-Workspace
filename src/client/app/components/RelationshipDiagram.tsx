@@ -501,7 +501,7 @@ const AppNode = memo(({ id, data }: NodeProps) => {
       <span style={{
         flex: 1,
         fontSize: 11, color: svc?.text ?? '#374151',
-        fontFamily: 'system-ui,-apple-system,sans-serif',
+        fontFamily: 'var(--font-sans)',
         whiteSpace: 'normal', wordBreak: 'break-word',
         lineHeight: '1.35', textAlign: 'center',
         pointerEvents: 'none',
@@ -555,7 +555,7 @@ const CenterNode = memo(({ id, data }: NodeProps) => {
       <span style={{
         flex: 1,
         fontSize: 12, fontWeight: 600, color: '#fff',
-        fontFamily: 'system-ui,-apple-system,sans-serif',
+        fontFamily: 'var(--font-sans)',
         whiteSpace: 'normal', wordBreak: 'break-word',
         lineHeight: '1.35', textAlign: 'center',
         pointerEvents: 'none',
@@ -958,7 +958,7 @@ function DiagramFlow({
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-            <span className="text-sm text-gray-500">Loading relationships…</span>
+            <span className="typo-page-subtitle">Loading relationships…</span>
           </div>
         </div>
       )}
@@ -987,8 +987,8 @@ function DiagramFlow({
           onClick={e => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b border-gray-100">
-            <p className="text-xs font-semibold text-gray-800 truncate">{nodeMenu.label}</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">
+            <p className="typo-panel-title truncate">{nodeMenu.label}</p>
+            <p className="typo-caption mt-0.5">
               {nodeMenu.isCenter ? 'Current Application (Hub)' : 'Related Application'}
             </p>
           </div>
@@ -1025,7 +1025,7 @@ function DiagramFlow({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={closeMenu}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-sm text-indigo-600 hover:bg-indigo-50 transition-colors"
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left typo-body text-indigo-600 hover:bg-indigo-50 transition-colors"
                 >
                   <ExternalLink size={14} className="flex-shrink-0" />
                   Open in ServiceNow
@@ -1056,7 +1056,7 @@ function DiagramFlow({
             ) : (
               <>
                 {menuPermissions?.loading && (
-                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400">
+                  <div className="flex items-center gap-2 px-3 py-2 typo-caption">
                     <Loader2 size={12} className="animate-spin" /> Checking permissions…
                   </div>
                 )}
@@ -1095,7 +1095,7 @@ function DiagramFlow({
                       danger
                     />
                     {menuPermissions.removeError && (
-                      <p className="px-3 py-1.5 text-[11px] text-red-600 leading-snug">{menuPermissions.removeError}</p>
+                      <p className="px-3 py-1.5 typo-caption text-red-600 leading-snug">{menuPermissions.removeError}</p>
                     )}
                   </>
                 )}
@@ -1110,7 +1110,7 @@ function DiagramFlow({
               <div className="px-3 py-3">
                 <div className="flex items-center gap-1.5 mb-2.5">
                   <Network size={13} className="text-blue-500 flex-shrink-0" />
-                  <span className="text-[11px] font-semibold text-gray-700">Expand Relationships</span>
+                  <span className="typo-panel-title text-gray-700">Expand Relationships</span>
                 </div>
 
                 <div
@@ -1121,7 +1121,7 @@ function DiagramFlow({
                     <button
                       key={i}
                       onClick={() => setLevel(nodeMenu.nodeId, i)}
-                      className="py-1.5 rounded-md border text-xs font-semibold transition-all"
+                      className="py-1.5 rounded-md border typo-badge font-semibold transition-all"
                       style={{
                         background:  menuNodeCurLvl === i ? '#2563EB' : '#F9FAFB',
                         color:       menuNodeCurLvl === i ? '#fff'    : '#374151',
@@ -1134,7 +1134,7 @@ function DiagramFlow({
                   ))}
                 </div>
 
-                <p className="text-[10px] text-gray-400 leading-snug">
+                <p className="typo-caption leading-snug">
                   {menuNodeCurLvl === 0
                     ? `Direct connection only · up to ${menuNodeMaxLvl} more level${menuNodeMaxLvl > 1 ? 's' : ''} available`
                     : `Showing ${menuNodeCurLvl} level${menuNodeCurLvl > 1 ? 's' : ''} of relationships`}
@@ -1146,7 +1146,7 @@ function DiagramFlow({
       )}
 
       <div className="absolute bottom-2 right-14 pointer-events-none">
-        <span className="text-[10px] text-gray-400 bg-white/80 px-2 py-0.5 rounded-full border border-gray-200 shadow-sm">
+        <span className="typo-caption bg-white/80 px-2 py-0.5 rounded-full border border-gray-200 shadow-sm">
           Drag to rearrange · Scroll to zoom
         </span>
       </div>
@@ -1168,7 +1168,7 @@ function MI({ icon, label, onClick, danger = false }: {
 }) {
   return (
     <button
-      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors
+      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left typo-body transition-colors
         ${danger ? 'text-red-600 hover:bg-red-50' : 'text-gray-700 hover:bg-gray-50'}`}
       onClick={onClick}
     >

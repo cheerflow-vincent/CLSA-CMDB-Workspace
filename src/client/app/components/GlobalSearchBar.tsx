@@ -202,7 +202,7 @@ function EnvBadge({ env }: { env: SnField }) {
   if (!envStr) return null;
   const isProd = /prod/i.test(envStr);
   return (
-    <span className={`shrink-0 text-xs font-medium px-2.5 py-0.5 rounded-full ${
+    <span className={`shrink-0 typo-badge px-2.5 py-0.5 rounded-full ${
       isProd
         ? 'bg-green-100 text-green-700 border border-green-200'
         : 'bg-amber-100 text-amber-700 border border-amber-200'
@@ -215,7 +215,7 @@ function EnvBadge({ env }: { env: SnField }) {
 function StatusDot({ value }: { value: SnField }) {
   const s = INSTALL_STATUS[rv(value)];
   if (!s) return null;
-  return <span className={`text-xs font-medium ${s.color}`}>{s.label}</span>;
+  return <span className={`typo-badge ${s.color}`}>{s.label}</span>;
 }
 
 function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
@@ -227,14 +227,14 @@ function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
     if (f === 'install_status') {
       const s = INSTALL_STATUS[rv(r.install_status)];
       if (s) items.push(
-        <span key="status" className={`text-xs font-medium ${s.color}`}>{s.label}</span>
+        <span key="status" className={`typo-badge ${s.color}`}>{s.label}</span>
       );
       continue;
     }
 
     if (f === 'sys_class_name') {
       items.push(
-        <span key="class" className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
+        <span key="class" className="typo-badge px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
           {formatClassName(dv(r.sys_class_name))}
         </span>
       );
@@ -252,7 +252,7 @@ function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
                 : f === 'assigned_to' ? 'Owner'
                 : f.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     items.push(
-      <span key={f} className="text-xs text-gray-500">{label}: <span className="text-gray-700">{display}</span></span>
+      <span key={f} className="typo-caption text-gray-500">{label}: <span className="text-gray-700">{display}</span></span>
     );
   }
 
@@ -352,7 +352,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
             onChange={e => { setQuery(e.target.value); setOpen(true); }}
             onFocus={() => { if (hasSearchableTokens(query)) setOpen(true); }}
             onKeyDown={handleKeyDown}
-            className="flex-1 py-2 px-3 text-sm bg-transparent text-gray-800 placeholder-gray-400 focus:outline-none"
+            className="flex-1 py-2 px-3 typo-body bg-transparent text-gray-800 placeholder-gray-400 focus:outline-none"
           />
           {query && (
             <button
@@ -368,7 +368,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
         {showDropdown && results.length > 0 && config && (
           <div className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden">
             <div className="px-4 pt-2.5 pb-1">
-              <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+              <p className="typo-label text-gray-400">
                 {results.length} result{results.length !== 1 ? 's' : ''} found
               </p>
             </div>
@@ -385,7 +385,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
                     >
                       {/* Left: Name + key info */}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
+                        <p className="typo-field-value-emphasis truncate">
                           <Highlight text={name} query={query} />
                         </p>
                         <KeyInfo r={r} cfg={config} />
@@ -401,7 +401,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
             </ul>
 
             <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
-              <p className="text-xs text-gray-400">Enter to open first result · Esc to close</p>
+              <p className="typo-caption">Enter to open first result · Esc to close</p>
             </div>
           </div>
         )}
@@ -410,7 +410,7 @@ export default function GlobalSearchBar({ onSelectCI }: GlobalSearchBarProps) {
         {showDropdown && !loading && results.length === 0 && (
           <div className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-white border border-gray-200 rounded-xl shadow-xl px-4 py-6 text-center">
             <Search className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-            <p className="text-sm text-gray-500">
+            <p className="typo-page-subtitle">
               No configuration items match <span className="font-medium">"{query}"</span>
             </p>
           </div>

@@ -120,12 +120,12 @@ function AddRelationshipRow({
           />
         </div>
         <div className="w-36">
-          <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Type</label>
+          <label className="block typo-label mb-1">Type</label>
           <select
             value={relType}
             disabled={disabled || noTypes}
             onChange={e => setRelType(e.target.value)}
-            className="w-full text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white"
+            className="w-full typo-body border border-gray-300 rounded-lg px-2 py-2 bg-white"
           >
             {relTypeOptions.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -136,20 +136,20 @@ function AddRelationshipRow({
           type="button"
           disabled={disabled || noTypes || !editRawValue(refValue)}
           onClick={handleAdd}
-          className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+          className="px-3 py-2 typo-body bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
         >
           Add
         </button>
       </div>
       {noTypes && (
-        <p className="text-xs text-amber-700">No relationship types are configured. Set system property app.to.app.relationship.types.</p>
+        <p className="typo-caption text-amber-700">No relationship types are configured. Set system property app.to.app.relationship.types.</p>
       )}
       {direction === 'bidirectional' && (
-        <p className="text-[10px] text-gray-400">
+        <p className="typo-caption">
           Bidirectional adds create two relationship rows (upstream and downstream) with the selected type.
         </p>
       )}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="typo-caption text-red-600">{error}</p>}
     </div>
   );
 }
@@ -219,9 +219,9 @@ function RelSection({
     <div className="mb-5">
       <div className="flex items-center gap-1.5 mb-2">
         {meta.icon}
-        <label className="text-sm font-semibold text-gray-800">{meta.label} Relationships</label>
+        <label className="typo-panel-title text-gray-800">{meta.label} Relationships</label>
         {pendingCount > 0 && (
-          <span className="ml-auto flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+          <span className="ml-auto flex items-center gap-1 typo-badge font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
             <Clock size={9} /> {pendingCount} pending removal
           </span>
         )}
@@ -230,15 +230,15 @@ function RelSection({
       <div className="border border-gray-200 rounded-lg p-3 mb-2 min-h-[52px] bg-gray-50/50">
         {group.existing.length === 0 && group.draftAdds.length === 0
           && group.draftRemovals.length === 0 && group.serverPendingRemovals.length === 0 ? (
-          <p className="text-xs text-gray-400 italic">No relationships</p>
+          <p className="typo-caption italic">No relationships</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {group.existing.map(rel => (
-              <span key={`${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${meta.tagCls}`}>
+              <span key={`${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className={`inline-flex items-center gap-1 px-2 py-1 rounded-full typo-badge border ${meta.tagCls}`}>
                 <span className="truncate max-w-[180px]" title={rel.otherAppName}>
                   {rel.otherAppName}
                 </span>
-                <span className="text-[9px] opacity-70">({relTypeLabel(rel.relType)})</span>
+                <span className="typo-caption opacity-70">({relTypeLabel(rel.relType)})</span>
                 <button
                   type="button"
                   className="ml-0.5 hover:bg-black/10 rounded-full p-px"
@@ -251,10 +251,10 @@ function RelSection({
             ))}
 
             {group.draftAdds.map(add => (
-              <span key={add.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-green-50 text-green-800 border-green-200">
-                <span className="text-green-500 font-bold text-[10px]">+</span>
+              <span key={add.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-full typo-badge border bg-green-50 text-green-800 border-green-200">
+                <span className="text-green-500 font-bold typo-badge">+</span>
                 {add.otherAppName}
-                <span className="text-[9px] opacity-70">({relTypeLabel(add.relType)})</span>
+                <span className="typo-caption opacity-70">({relTypeLabel(add.relType)})</span>
                 <button type="button" className="ml-0.5 hover:bg-green-200 rounded-full p-px" onClick={() => onRemoveAdded(add.id)}>
                   <X size={10} />
                 </button>
@@ -262,7 +262,7 @@ function RelSection({
             ))}
 
             {group.draftRemovals.map(rel => (
-              <span key={`rm-${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-red-50 text-red-400 border-red-200 line-through">
+              <span key={`rm-${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full typo-badge border bg-red-50 text-red-400 border-red-200 line-through">
                 {rel.otherAppName}
                 <button type="button" className="ml-0.5 hover:bg-red-200 rounded-full p-px no-underline" onClick={() => onUndoRemove(rel)}>
                   <span className="text-red-500 not-italic">↩</span>
@@ -271,10 +271,10 @@ function RelSection({
             ))}
 
             {group.serverPendingRemovals.map(rel => (
-              <span key={`srv-${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border bg-amber-50 text-amber-700 border-amber-200">
+              <span key={`srv-${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full typo-badge border bg-amber-50 text-amber-700 border-amber-200">
                 <Clock size={9} />
                 {rel.otherAppName}
-                <span className="text-[9px]">pending approval</span>
+                <span className="typo-caption">pending approval</span>
               </span>
             ))}
           </div>
@@ -447,8 +447,8 @@ export default function EditRelationshipModal({
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Edit Relationship</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{selectedApp.name}</p>
+            <h2 className="typo-section-title text-gray-900">Edit Relationship</h2>
+            <p className="typo-caption mt-0.5">{selectedApp.name}</p>
           </div>
           <button type="button" onClick={onClose} className="p-1.5 hover:bg-gray-200 rounded-lg">
             <X size={16} className="text-gray-500" />
@@ -458,11 +458,11 @@ export default function EditRelationshipModal({
         <div className="px-6 py-2.5 border-b border-gray-100 flex items-center gap-3">
           {(['edit', 'review', 'complete'] as ModalStep[]).map((s, i) => (
             <div key={s} className="flex items-center gap-1.5">
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center typo-badge font-bold
                 ${step === s ? 'bg-blue-600 text-white' : step === 'complete' || (step === 'review' && i === 0) ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
                 {(step === 'review' && i === 0) || step === 'complete' ? <Check size={10} /> : i + 1}
               </div>
-              <span className={`text-xs font-medium ${step === s ? 'text-blue-700' : 'text-gray-400'}`}>
+              <span className={`typo-badge ${step === s ? 'text-blue-700' : 'text-gray-400'}`}>
                 {s === 'edit' ? 'Edit' : s === 'review' ? 'Review' : 'Done'}
               </span>
               {i < 2 && <div className="w-6 h-px bg-gray-200" />}
@@ -477,7 +477,7 @@ export default function EditRelationshipModal({
             </div>
           ) : step === 'edit' ? (
             <div>
-              <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+              <p className="typo-caption text-gray-500 mb-4 leading-relaxed">
                 Add or remove applications from each relationship direction.
                 Select a relationship type when adding.
                 <span className="text-amber-700 font-medium"> Removals require approval from the target app owner.</span>
@@ -504,7 +504,7 @@ export default function EditRelationshipModal({
             </div>
           ) : step === 'review' ? (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600 mb-4">Please review the changes before confirming.</p>
+              <p className="typo-body text-gray-600 mb-4">Please review the changes before confirming.</p>
               {DIRS.map(dir => {
                 const g = groups[dir];
                 const meta = DIR_META[dir];
@@ -513,17 +513,17 @@ export default function EditRelationshipModal({
                   <div key={dir} className="rounded-xl border border-gray-200 overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200">
                       {meta.icon}
-                      <span className="text-sm font-semibold text-gray-700">{meta.label}</span>
+                      <span className="typo-panel-title text-gray-700">{meta.label}</span>
                     </div>
                     <div className="divide-y divide-gray-100">
                       {g.draftAdds.map(add => (
                         <div key={add.id} className="flex items-start gap-3 px-4 py-3">
                           <span className="mt-0.5 w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                            <span className="text-green-600 font-bold text-xs">+</span>
+                            <span className="text-green-600 font-bold typo-badge">+</span>
                           </span>
                           <div>
-                            <p className="text-sm font-medium text-gray-800">{add.otherAppName}</p>
-                            <p className="text-xs text-green-600 mt-0.5">
+                            <p className="typo-field-value-emphasis">{add.otherAppName}</p>
+                            <p className="typo-caption text-green-600 mt-0.5">
                               {relTypeLabel(add.relType)} — will be added immediately
                             </p>
                           </div>
@@ -533,8 +533,8 @@ export default function EditRelationshipModal({
                         <div key={`${rel.otherAppSysId}:${rel.relType}:${rel.direction}`} className="flex items-start gap-3 px-4 py-3 bg-amber-50/60">
                           <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
                           <div>
-                            <p className="text-sm font-medium text-gray-800">{rel.otherAppName}</p>
-                            <p className="text-xs text-amber-700 mt-0.5">
+                            <p className="typo-field-value-emphasis">{rel.otherAppName}</p>
+                            <p className="typo-caption text-amber-700 mt-0.5">
                               {relTypeLabel(rel.relType)} — requires target app owner approval
                             </p>
                           </div>
@@ -547,22 +547,22 @@ export default function EditRelationshipModal({
               {totalRemoved > 0 && (
                 <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl p-4">
                   <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-800">
+                  <p className="typo-caption text-amber-800">
                     <strong>{totalRemoved} removal request{totalRemoved > 1 ? 's' : ''}</strong> will be sent for approval.
                     Relationships stay active until approved.
                   </p>
                 </div>
               )}
-              {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+              {submitError && <p className="typo-body text-red-600">{submitError}</p>}
             </div>
           ) : (
             <div className="text-center py-6">
               <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Check size={24} className="text-green-600" />
               </div>
-              <h3 className="text-base font-semibold text-gray-900 mb-1">Changes Submitted</h3>
-              <p className="text-sm text-gray-500 mb-6">{selectedApp.name}</p>
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-left space-y-2 text-xs">
+              <h3 className="typo-section-title text-gray-900 mb-1">Changes Submitted</h3>
+              <p className="typo-page-subtitle mb-6">{selectedApp.name}</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-left space-y-2 typo-body">
                 {totalAdded > 0 && <p className="text-green-600">{totalAdded} relationship{totalAdded > 1 ? 's' : ''} added</p>}
                 {totalRemoved > 0 && <p className="text-amber-600">{totalRemoved} removal approval{totalRemoved > 1 ? 's' : ''} pending</p>}
               </div>
@@ -573,14 +573,14 @@ export default function EditRelationshipModal({
         <div className="px-6 py-3.5 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3">
           {step === 'edit' && (
             <>
-              <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
+              <button type="button" onClick={onClose} className="px-4 py-2 typo-body border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={() => setStep('review')}
                 disabled={!hasChanges || loading}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+                className="px-4 py-2 typo-body bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
               >
                 Review Changes
               </button>
@@ -588,14 +588,14 @@ export default function EditRelationshipModal({
           )}
           {step === 'review' && (
             <>
-              <button type="button" onClick={() => setStep('edit')} className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
+              <button type="button" onClick={() => setStep('edit')} className="px-4 py-2 typo-body border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">
                 Back
               </button>
               <button
                 type="button"
                 onClick={handleSubmit}
                 disabled={submitting}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-2"
+                className="px-4 py-2 typo-body bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 Confirm &amp; Submit
@@ -603,7 +603,7 @@ export default function EditRelationshipModal({
             </>
           )}
           {step === 'complete' && (
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            <button type="button" onClick={onClose} className="px-4 py-2 typo-body bg-blue-600 text-white rounded-lg hover:bg-blue-700">
               Close
             </button>
           )}

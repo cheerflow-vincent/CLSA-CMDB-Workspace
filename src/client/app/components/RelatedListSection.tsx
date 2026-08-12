@@ -38,7 +38,7 @@ function EnvBadge({ env }: { env: string }) {
                                'bg-yellow-100 text-yellow-700';
   const short = env === 'Non-production' ? 'Non-prod' : env;
   return (
-    <span className={`inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap ${cls}`}>
+    <span className={`inline-flex typo-badge px-1.5 py-0.5 rounded whitespace-nowrap ${cls}`}>
       {short}
     </span>
   );
@@ -64,11 +64,11 @@ function val(row: RelatedTaskRow, key: string): string {
 
 function renderTaskCell(element: string, valStr: string) {
   if (valStr === '—') {
-    return <span className="text-[11px] text-gray-400">—</span>;
+    return <span className="typo-caption">—</span>;
   }
   if (element === 'number') {
     return (
-      <span className="font-mono text-[11px] text-gray-700 truncate block max-w-full" title={valStr}>
+      <span className="font-mono typo-body text-gray-700 truncate block max-w-full" title={valStr}>
         {valStr}
       </span>
     );
@@ -78,13 +78,13 @@ function renderTaskCell(element: string, valStr: string) {
   if (element === 'type') return <ChangeTypeBadge type={valStr} />;
   if (element === 'short_description') {
     return (
-      <span className="text-[11px] text-gray-700 line-clamp-2 whitespace-pre-line" title={valStr}>
+      <span className="typo-body line-clamp-2 whitespace-pre-line" title={valStr}>
         {valStr}
       </span>
     );
   }
   return (
-    <span className="text-[11px] text-gray-600 truncate block max-w-[120px]" title={valStr}>
+    <span className="typo-body text-gray-600 truncate block max-w-[120px]" title={valStr}>
       {valStr}
     </span>
   );
@@ -117,7 +117,7 @@ function TaskCompactRow({
       <div className={`w-1 rounded-full shrink-0 self-stretch min-h-[2.5rem] ${railCls}`} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-          <span className="font-mono text-[11px] font-semibold text-blue-700 group-hover:underline break-words">
+          <span className="font-mono typo-body font-semibold text-blue-700 group-hover:underline break-words">
             {number}
           </span>
           {isIncident && priority && <PriorityBadge priority={priority} />}
@@ -125,10 +125,10 @@ function TaskCompactRow({
           {state && <StateBadge state={state} />}
         </div>
         {short && (
-          <p className="text-[11px] text-gray-600 break-words whitespace-pre-line">{short}</p>
+          <p className="typo-body text-gray-600 break-words whitespace-pre-line">{short}</p>
         )}
         {meta && (
-          <p className="text-[10px] text-gray-400 mt-1 break-words">{meta}</p>
+          <p className="typo-caption mt-1 break-words">{meta}</p>
         )}
       </div>
     </a>
@@ -187,12 +187,12 @@ function RelatedCICard({
             <button
               type="button"
               onClick={() => onViewCI(ciItem)}
-              className={`text-sm font-semibold text-blue-700 hover:underline text-left break-words ${hoverRow ?? ''}`}
+              className={`typo-panel-title text-blue-700 hover:underline text-left break-words ${hoverRow ?? ''}`}
             >
               {title}
             </button>
           ) : (
-            <span className="text-sm font-semibold text-gray-900 break-words">{title}</span>
+            <span className="typo-panel-title break-words">{title}</span>
           )}
           {showCIFlags && (
             <CIFlagBadges
@@ -255,7 +255,7 @@ function PaginationBar({
 }) {
   return (
     <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-      <span className="text-[11px] text-gray-400">
+      <span className="typo-caption">
         Showing {start}–{end} of {totalCount}
       </span>
       <div className="flex gap-1">
@@ -419,7 +419,7 @@ export default function RelatedListSection({
               href={taskHref(taskConfig, row.sysId)}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-mono text-[11px] text-blue-700 truncate block max-w-full hover:underline"
+              className="font-mono typo-body text-blue-700 truncate block max-w-full hover:underline"
               title={cellVal}
             >
               {cellVal}
@@ -450,13 +450,13 @@ export default function RelatedListSection({
               <button
                 type="button"
                 onClick={() => onViewCI(buildCIItem(ciRow))}
-                className={`font-mono text-[11px] text-blue-700 truncate text-left hover:underline min-w-0 ${hoverRow ?? ''}`}
+                className={`font-mono typo-body text-blue-700 truncate text-left hover:underline min-w-0 ${hoverRow ?? ''}`}
                 title={cellVal}
               >
                 {cellVal}
               </button>
             ) : (
-              <span className="font-mono text-[11px] text-gray-700 truncate min-w-0" title={cellVal}>
+              <span className="font-mono typo-body text-gray-700 truncate min-w-0" title={cellVal}>
                 {cellVal}
               </span>
             )}
@@ -479,7 +479,7 @@ export default function RelatedListSection({
       );
     }
     return (
-      <td key={col.element} className="px-2 py-1.5 text-[11px] text-gray-600 truncate max-w-[120px]" title={cellVal}>
+      <td key={col.element} className="px-2 py-1.5 typo-body text-gray-600 truncate max-w-[120px]" title={cellVal}>
         {cellVal}
       </td>
     );
@@ -526,13 +526,13 @@ export default function RelatedListSection({
             <tr className="bg-gray-50 border-b border-gray-100">
               {columns.map(col => (
                 <th key={col.element}
-                  className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide first:pl-3">
+                  className="px-2 py-1.5 text-left typo-label first:pl-3">
                   {col.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody className="divide-y divide-gray-50 typo-body">
             {taskRows.map((row, i) => (
               <tr key={row.sysId} className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}>
                 {columns.map((col, colIdx) => renderCell(row, col, colIdx))}
@@ -576,13 +576,13 @@ export default function RelatedListSection({
             <tr className="bg-gray-50 border-b border-gray-100">
               {columns.map(col => (
                 <th key={col.element}
-                  className="px-2 py-1.5 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wide first:pl-3">
+                  className="px-2 py-1.5 text-left typo-label first:pl-3">
                   {col.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody className="divide-y divide-gray-50 typo-body">
             {ciRows.map((row, i) => (
               <tr key={row.sysId} className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}>
                 {columns.map((col, colIdx) => renderCell(row, col, colIdx))}
@@ -597,11 +597,11 @@ export default function RelatedListSection({
   const listBody = (
     <>
       {loading ? (
-        <div className="flex items-center justify-center py-8 text-gray-400 gap-2 text-xs">
+        <div className="flex items-center justify-center py-8 text-gray-400 gap-2 typo-caption">
           <Loader2 className="w-4 h-4 animate-spin" /> Loading…
         </div>
       ) : totalCount === 0 ? (
-        <p className={`text-xs text-gray-400 italic text-center ${embedded ? 'py-10' : 'px-3 py-6'}`}>{resolvedEmptyMessage}</p>
+        <p className={`typo-caption italic text-center ${embedded ? 'py-10' : 'px-3 py-6'}`}>{resolvedEmptyMessage}</p>
       ) : (
         <>
           {taskMode ? renderTaskList() : renderCIList()}
@@ -650,8 +650,8 @@ export default function RelatedListSection({
         <div className={`p-1.5 ${iconBg} rounded flex-shrink-0`}>
           <Icon className={`w-4 h-4 ${iconColor}`} />
         </div>
-        <span className="flex-1 text-xs text-gray-600 font-medium">{title}</span>
-        <span className={`text-xs font-semibold ${badgeBg} ${badgeText} border ${badgeBorder} px-2.5 py-0.5 rounded-full`}>
+        <span className="flex-1 typo-panel-title text-gray-600">{title}</span>
+        <span className={`typo-badge font-semibold ${badgeBg} ${badgeText} border ${badgeBorder} px-2.5 py-0.5 rounded-full`}>
           {totalCount}
         </span>
         <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />

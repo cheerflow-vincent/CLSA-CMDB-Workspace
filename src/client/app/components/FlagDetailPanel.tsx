@@ -106,7 +106,7 @@ function PanelPaginationFooter({
     <div className="shrink-0 border-t border-gray-100 bg-gray-50">
       {showPagination && (
         <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-[11px] text-gray-500">
+          <span className="typo-caption text-gray-500">
             {start}–{end} of {totalCount}
           </span>
           <div className="flex gap-1">
@@ -132,7 +132,7 @@ function PanelPaginationFooter({
         </div>
       )}
       <div className="px-5 py-3">
-        <p className="text-xs text-gray-400">{footerLabel}</p>
+        <p className="typo-caption">{footerLabel}</p>
       </div>
     </div>
   );
@@ -212,11 +212,11 @@ function LiveFlagRecords({
     <>
       <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
+          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading…
           </div>
         ) : !rows.length ? (
-          <p className="text-sm text-gray-400 text-center mt-10">No records found.</p>
+          <p className="typo-body text-gray-400 text-center mt-10">No records found.</p>
         ) : (
           rows.map(row => (
             <TaskCard key={row.sysId} row={row} config={config} columns={columns} />
@@ -313,11 +313,11 @@ function LiveHealthRecords({
     <>
       <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 text-sm">
+          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
             <Loader2 className="w-5 h-5 animate-spin" /> Loading…
           </div>
         ) : !rows.length ? (
-          <p className="text-sm text-gray-400 text-center mt-10">No health metrics found.</p>
+          <p className="typo-body text-gray-400 text-center mt-10">No health metrics found.</p>
         ) : (
           rows.map(row => (
             <HealthResultCard key={row.sysId} row={row} columns={columns} />
@@ -364,10 +364,10 @@ function LegacyRecordList({
     return (
       <>
         <div className="flex-1 overflow-y-auto p-5 min-h-0">
-          <p className="text-sm text-gray-400 text-center mt-10">No records found.</p>
+          <p className="typo-body text-gray-400 text-center mt-10">No records found.</p>
         </div>
         <div className="shrink-0 px-5 py-3 border-t border-gray-100 bg-gray-50">
-          <p className="text-xs text-gray-400">0 records linked</p>
+          <p className="typo-caption">0 records linked</p>
         </div>
       </>
     );
@@ -380,18 +380,18 @@ function LegacyRecordList({
           (pageRows as IncidentRecord[]).map((rec, i) => (
             <div key={`${rec.number}-${i}`} className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-blue-700">{rec.number}</span>
+                <span className="typo-body font-semibold text-blue-700">{rec.number}</span>
                 <div className="flex gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColor[rec.priority] ?? 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`typo-badge px-2 py-0.5 rounded-full ${priorityColor[rec.priority] ?? 'bg-gray-100 text-gray-600'}`}>
                     {rec.priority}
                   </span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stateColor[rec.state] ?? 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`typo-badge px-2 py-0.5 rounded-full ${stateColor[rec.state] ?? 'bg-gray-100 text-gray-600'}`}>
                     {rec.state}
                   </span>
                 </div>
               </div>
-              <p className="text-sm text-gray-800 mb-3">{rec.short}</p>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              <p className="typo-body text-gray-800 mb-3">{rec.short}</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 typo-body">
                 <span className="text-gray-400">Opened</span>   <span className="text-gray-700">{rec.opened}</span>
                 <span className="text-gray-400">Assignee</span> <span className="text-gray-700">{rec.assignee}</span>
               </div>
@@ -401,18 +401,18 @@ function LegacyRecordList({
           (pageRows as ChangeRecord[]).map((rec, i) => (
             <div key={`${rec.number}-${i}`} className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-blue-700">{rec.number}</span>
+                <span className="typo-body font-semibold text-blue-700">{rec.number}</span>
                 <div className="flex gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${changeTypeColor[rec.type] ?? 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`typo-badge px-2 py-0.5 rounded-full ${changeTypeColor[rec.type] ?? 'bg-gray-100 text-gray-600'}`}>
                     {rec.type}
                   </span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stateColor[rec.state] ?? 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`typo-badge px-2 py-0.5 rounded-full ${stateColor[rec.state] ?? 'bg-gray-100 text-gray-600'}`}>
                     {rec.state}
                   </span>
                 </div>
               </div>
-              <p className="text-sm text-gray-800 mb-3">{rec.short}</p>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              <p className="typo-body text-gray-800 mb-3">{rec.short}</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 typo-body">
                 <span className="text-gray-400">Scheduled</span>   <span className="text-gray-700">{rec.scheduled}</span>
                 <span className="text-gray-400">Implementer</span> <span className="text-gray-700">{rec.implementer}</span>
               </div>
@@ -486,11 +486,11 @@ export default function FlagDetailPanel({
               {flagType === 'incident' && <AlertCircle className="w-5 h-5 text-red-600" />}
               {flagType === 'change' && <Calendar className="w-5 h-5 text-yellow-600" />}
               {flagType === 'health' && <Shield className="w-5 h-5 text-blue-600" />}
-              <span className={`text-sm font-semibold ${panelTitleClass(flagType)}`}>
+              <span className={`typo-body font-semibold ${panelTitleClass(flagType)}`}>
                 {panelLabel(flagType)}
               </span>
             </div>
-            <p className="text-xs text-gray-500">
+            <p className="typo-caption text-gray-500">
               {isSummary ? (
                 <>
                   {subtitle ?? 'Search results'}:{' '}
@@ -519,7 +519,7 @@ export default function FlagDetailPanel({
             />
           ) : (
             <div className="flex-1 overflow-y-auto p-5 min-h-0">
-              <p className="text-sm text-gray-400 text-center mt-10">No records found.</p>
+              <p className="typo-body text-gray-400 text-center mt-10">No records found.</p>
             </div>
           )
         ) : useLive ? (

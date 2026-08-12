@@ -26,7 +26,7 @@ export function RelationshipProcessingBadge({ compact = false }: { compact?: boo
   return (
     <span
       className={`inline-flex items-center gap-1 font-semibold rounded-full border bg-amber-100 text-amber-800 border-amber-200 ${
-        compact ? 'text-[10px] px-2 py-0.5' : 'text-xs px-2.5 py-1'
+        compact ? 'typo-badge px-2 py-0.5' : 'typo-badge px-2.5 py-1'
       }`}
     >
       <Loader2 className={`animate-spin ${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} />
@@ -102,13 +102,13 @@ export default function RelationshipChangeActions({
   }
 
   const btnCls = isPanel
-    ? 'px-3 py-1.5 text-xs rounded-lg border font-medium transition-colors'
-    : 'px-2 py-1 text-[11px] rounded border font-medium transition-colors';
+    ? 'px-3 py-1.5 typo-badge rounded-lg border font-medium transition-colors'
+    : 'px-2 py-1 typo-body rounded border font-medium transition-colors';
 
   if (isPanel) {
     const commentsField = (
       <div>
-        <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">
+        <label className="block typo-label mb-1">
           Comments <span className="font-normal normal-case text-gray-400">(required to reject)</span>
         </label>
         <textarea
@@ -116,7 +116,7 @@ export default function RelationshipChangeActions({
           onChange={e => setComments(e.target.value)}
           placeholder="Explain why you are rejecting this removal request…"
           rows={4}
-          className="w-full text-xs border border-gray-300 rounded-lg px-3 py-2 resize-y min-h-[96px] focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+          className="w-full typo-body border border-gray-300 rounded-lg px-3 py-2 resize-y min-h-[96px] focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
         />
       </div>
     );
@@ -167,7 +167,7 @@ export default function RelationshipChangeActions({
     return (
       <div className="space-y-3 text-left">
         {(requestedByName || requestedAt) && (
-          <p className="text-[11px] text-gray-600">
+          <p className="typo-body text-gray-600">
             {requestedByName && <span>Requested by {requestedByName}</span>}
             {requestedByName && requestedAt && <span className="mx-1.5 text-gray-300">·</span>}
             {requestedAt && <span>{requestedAt}</span>}
@@ -184,8 +184,8 @@ export default function RelationshipChangeActions({
             {commentsField}
           </>
         )}
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        {timeoutMsg && <p className="text-xs text-amber-700">{timeoutMsg}</p>}
+        {error && <p className="typo-caption text-red-600">{error}</p>}
+        {timeoutMsg && <p className="typo-caption text-amber-700">{timeoutMsg}</p>}
       </div>
     );
   }
@@ -199,7 +199,7 @@ export default function RelationshipChangeActions({
             value={comments}
             onChange={e => setComments(e.target.value)}
             placeholder="Rejection comments (required)"
-            className="w-full text-xs border border-gray-300 rounded px-2 py-1"
+            className="w-full typo-body border border-gray-300 rounded px-2 py-1"
           />
           <div className="flex gap-1 justify-end">
             <button
@@ -248,9 +248,9 @@ export default function RelationshipChangeActions({
           </button>
         </div>
       )}
-      {error && <p className="text-[10px] text-red-600 max-w-[200px] text-right">{error}</p>}
+      {error && <p className="typo-caption text-red-600 max-w-[200px] text-right">{error}</p>}
       {timeoutMsg && (
-        <p className="text-[10px] text-amber-700 max-w-[200px] text-right">{timeoutMsg}</p>
+        <p className="typo-caption text-amber-700 max-w-[200px] text-right">{timeoutMsg}</p>
       )}
     </div>
   );
@@ -275,7 +275,7 @@ export function RelationshipChangeStateBadge({ state }: { state: string }) {
                                       state;
 
   return (
-    <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>
+    <span className={`inline-flex typo-badge font-semibold px-2 py-0.5 rounded-full border ${cls}`}>
       {label}
     </span>
   );

@@ -234,20 +234,20 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }:
         className="w-full flex items-center gap-3 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-left"
       >
         <Package className="w-4 h-4 text-gray-500 shrink-0" />
-        <span className="text-sm font-semibold text-gray-800 flex-1">{svc.name}</span>
+        <span className="typo-panel-title text-gray-800 flex-1">{svc.name}</span>
         {svc.short_description && (
-          <span className="text-xs text-gray-400 hidden sm:block truncate max-w-xs">{svc.short_description}</span>
+          <span className="typo-caption hidden sm:block truncate max-w-xs">{svc.short_description}</span>
         )}
-        <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
+        <span className="typo-badge text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
           {instanceCount} instance{instanceCount !== 1 ? 's' : ''}
         </span>
         {svc.totalIncidents > 0 && (
-          <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full shrink-0">
+          <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full shrink-0">
             <AlertCircle className="w-3 h-3" />{svc.totalIncidents}
           </span>
         )}
         {svc.totalChanges > 0 && (
-          <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full shrink-0">
+          <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full shrink-0">
             <Calendar className="w-3 h-3" />{svc.totalChanges}
           </span>
         )}
@@ -302,7 +302,7 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }:
         </div>
       )}
       {open && !svc.instancesLoading && instanceCount === 0 && (
-        <p className="mt-2 pl-6 text-xs text-gray-400 italic">No instances found</p>
+        <p className="mt-2 pl-6 typo-caption italic">No instances found</p>
       )}
     </div>
   );
@@ -333,22 +333,22 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick, onExpan
           <Layers className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900">{appSvc.name}</p>
+          <p className="typo-panel-title">{appSvc.name}</p>
           {appSvc.short_description && (
-            <p className="text-xs text-gray-400 truncate">{appSvc.short_description}</p>
+            <p className="typo-caption truncate">{appSvc.short_description}</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+          <span className="typo-badge text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
             {instanceCount} instance{instanceCount !== 1 ? 's' : ''}
           </span>
           {appSvc.totalIncidents > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
               <AlertCircle className="w-3 h-3" />{appSvc.totalIncidents} inc
             </span>
           )}
           {appSvc.totalChanges > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
               <Calendar className="w-3 h-3" />{appSvc.totalChanges} chg
             </span>
           )}
@@ -426,25 +426,25 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick, onExpandS
           <Building2 className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900">{app.name}</p>
+          <p className="typo-panel-title">{app.name}</p>
           {app.short_description && (
-            <p className="text-xs text-gray-400 truncate">{app.short_description}</p>
+            <p className="typo-caption truncate">{app.short_description}</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+          <span className="typo-badge text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
             {app.services.length} service{app.services.length !== 1 ? 's' : ''}
           </span>
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+          <span className="typo-badge text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
             {app.totalInstances} instance{app.totalInstances !== 1 ? 's' : ''}
           </span>
           {app.totalIncidents > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
               <AlertCircle className="w-3 h-3" />{app.totalIncidents} inc
             </span>
           )}
           {app.totalChanges > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
               <Calendar className="w-3 h-3" />{app.totalChanges} chg
             </span>
           )}
@@ -457,7 +457,7 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick, onExpandS
       {open && (
         <div className="mt-3 pl-4 border-l-2 border-blue-200 ml-3">
           {app.services.length === 0
-            ? <p className="text-xs text-gray-400 italic py-2">No services linked</p>
+            ? <p className="typo-caption italic py-2">No services linked</p>
             : app.services.map(svc => (
                 <LiveServiceGroup
                   key={svc.sys_id}
@@ -483,7 +483,7 @@ function FilterSection({ title, children, defaultOpen = true }: {
   return (
     <div className="border-b border-gray-100 pb-4 mb-4 last:border-0 last:mb-0 last:pb-0">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between py-1 mb-2">
-        <span className="text-sm font-semibold text-gray-800">{title}</span>
+        <span className="typo-panel-title text-gray-800">{title}</span>
         {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
       </button>
       {open && <div className="space-y-1.5">{children}</div>}
@@ -510,17 +510,17 @@ function AppGroup({ appName, instances, viewMode, onSelectApp, onFlagClick }: {
         className="w-full flex items-center gap-3 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-left"
       >
         <Package className="w-4 h-4 text-gray-500 shrink-0" />
-        <span className="text-sm font-semibold text-gray-800 flex-1">{appName}</span>
-        <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">
+        <span className="typo-panel-title text-gray-800 flex-1">{appName}</span>
+        <span className="typo-badge text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">
           {instances.length} instance{instances.length !== 1 ? 's' : ''}
         </span>
         {totalIncidents > 0 && (
-          <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+          <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
             <AlertCircle className="w-3 h-3" />{totalIncidents} Incident{totalIncidents > 1 ? 's' : ''}
           </span>
         )}
         {totalChanges > 0 && (
-          <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+          <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
             <Calendar className="w-3 h-3" />{totalChanges} Change{totalChanges > 1 ? 's' : ''}
           </span>
         )}
@@ -579,23 +579,23 @@ function FamilySection({ family, appGroups, viewMode, onSelectApp, onFlagClick }
           <Box className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900">{family.name}</p>
-          <p className="text-xs text-gray-400 truncate">{family.description}</p>
+          <p className="typo-panel-title">{family.name}</p>
+          <p className="typo-caption truncate">{family.description}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+          <span className="typo-badge text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
             {appCount} app{appCount !== 1 ? 's' : ''}
           </span>
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+          <span className="typo-badge text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
             {totalInst} instance{totalInst !== 1 ? 's' : ''}
           </span>
           {totalInc > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
               <AlertCircle className="w-3 h-3" />{totalInc}
             </span>
           )}
           {totalCh > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
               <Calendar className="w-3 h-3" />{totalCh}
             </span>
           )}
@@ -984,77 +984,77 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal className="w-4 h-4 text-gray-500" />
-                <span className="text-sm font-semibold text-gray-800">Filters</span>
+                <span className="typo-panel-title text-gray-800">Filters</span>
               </div>
               {hasPendingFilterChanges && (
-                <span className="text-xs text-amber-600 font-medium">Unapplied</span>
+                <span className="typo-badge text-amber-600">Unapplied</span>
               )}
             </div>
 
             <FilterSection title="Environment">
-              {filtersLoading ? <p className="text-xs text-gray-400 animate-pulse">Loading…</p>
-                : envOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
+              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
+                : envOptions.length === 0 ? <p className="typo-caption italic">No options</p>
                 : envOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
                       <input type="checkbox" checked={draftSidebar.env.includes(opt.value)}
                         onChange={() => toggleDraftFilter('env', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
-                      <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
+                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
                     </label>
                   ))
               }
             </FilterSection>
 
             <FilterSection title="Status">
-              {filtersLoading ? <p className="text-xs text-gray-400 animate-pulse">Loading…</p>
-                : statusOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
+              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
+                : statusOptions.length === 0 ? <p className="typo-caption italic">No options</p>
                 : statusOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
                       <input type="checkbox" checked={draftSidebar.status.includes(opt.value)}
                         onChange={() => toggleDraftFilter('status', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
-                      <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
+                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
                     </label>
                   ))
               }
             </FilterSection>
 
             <FilterSection title="Business Unit">
-              {filtersLoading ? <p className="text-xs text-gray-400 animate-pulse">Loading…</p>
-                : bizUnitOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
+              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
+                : bizUnitOptions.length === 0 ? <p className="typo-caption italic">No options</p>
                 : bizUnitOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
                       <input type="checkbox" checked={draftSidebar.bizUnit.includes(opt.value)}
                         onChange={() => toggleDraftFilter('bizUnit', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
-                      <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
+                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
                     </label>
                   ))
               }
             </FilterSection>
 
             <FilterSection title="Department">
-              {filtersLoading ? <p className="text-xs text-gray-400 animate-pulse">Loading…</p>
-                : deptOptions.length === 0 ? <p className="text-xs text-gray-400 italic">No options</p>
+              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
+                : deptOptions.length === 0 ? <p className="typo-caption italic">No options</p>
                 : deptOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
                       <input type="checkbox" checked={draftSidebar.dept.includes(opt.value)}
                         onChange={() => toggleDraftFilter('dept', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
-                      <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
+                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
                     </label>
                   ))
               }
             </FilterSection>
 
             <FilterSection title="Tier">
-              {filtersLoading ? <p className="text-xs text-gray-400 animate-pulse">Loading…</p>
+              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
                 : tierOptions.map(opt => (
                     <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
                       <input type="checkbox" checked={draftSidebar.tier.includes(opt.value)}
                         onChange={() => toggleDraftFilter('tier', opt.value)}
                         className="rounded border-gray-300 text-blue-600" />
-                      <span className="text-sm text-gray-700 group-hover:text-gray-900">{opt.label}</span>
+                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
                     </label>
                   ))
               }
@@ -1066,7 +1066,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               type="button"
               onClick={handleApplyFilters}
               disabled={!hasPendingFilterChanges || liveLoading}
-              className="flex-1 px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex-1 px-3 py-2 typo-body font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               Apply
             </button>
@@ -1074,7 +1074,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               type="button"
               onClick={handleResetFilters}
               disabled={liveLoading}
-              className="flex-1 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex-1 px-3 py-2 typo-body font-medium rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               Reset
             </button>
@@ -1097,9 +1097,9 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 <div>
                   {statsLoading
                     ? <div className="h-7 w-12 bg-gray-200 rounded animate-pulse mb-1" />
-                    : <p className="text-2xl font-semibold text-gray-900">{s.value.toLocaleString()}</p>
+                    : <p className="typo-stat">{s.value.toLocaleString()}</p>
                   }
-                  <p className="text-xs text-gray-500">{s.label}</p>
+                  <p className="typo-caption text-gray-500">{s.label}</p>
                 </div>
               </div>
             ))}
@@ -1114,7 +1114,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                 placeholder="Filter cards…"
                 value={cardSearch}
                 onChange={e => setCardSearch(e.target.value)}
-                className="w-full pl-9 pr-8 py-1.5 rounded-lg text-sm border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 placeholder-gray-400"
+                className="w-full pl-9 pr-8 py-1.5 rounded-lg typo-body border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 placeholder-gray-400"
               />
               {cardSearch && (
                 <button onClick={() => setCardSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -1147,7 +1147,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               )}
 
               {!liveLoading && liveError && (
-                <div className="flex items-center gap-3 px-5 py-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm mb-4">
+                <div className="flex items-center gap-3 px-5 py-4 rounded-xl bg-red-50 border border-red-200 text-red-700 typo-body mb-4">
                   <AlertCircle className="w-5 h-5 shrink-0" />
                   <span>Could not load live data: {liveError}</span>
                 </div>
@@ -1157,13 +1157,13 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               {!liveLoading && !liveError && hierarchyMode === true && noFilterResults && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Search className="w-10 h-10 mb-2 opacity-30" />
-                  <p className="text-sm">No instances match your filters.</p>
+                  <p className="typo-body">No instances match your filters.</p>
                 </div>
               )}
               {!liveLoading && !liveError && hierarchyMode === true && !noFilterResults && liveData.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Database className="w-10 h-10 mb-2 opacity-30" />
-                  <p className="text-sm">No core applications found in ServiceNow.</p>
+                  <p className="typo-body">No core applications found in ServiceNow.</p>
                 </div>
               )}
               {!liveLoading && !liveError && hierarchyMode === true && liveData.map(app => (
@@ -1181,13 +1181,13 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               {!liveLoading && !liveError && hierarchyMode === false && noFilterResults && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Search className="w-10 h-10 mb-2 opacity-30" />
-                  <p className="text-sm">No instances match your filters.</p>
+                  <p className="typo-body">No instances match your filters.</p>
                 </div>
               )}
               {!liveLoading && !liveError && hierarchyMode === false && !noFilterResults && liveTwoLevel.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 mb-4">
                   <Database className="w-10 h-10 mb-2 opacity-30" />
-                  <p className="text-sm">No application services found in ServiceNow.</p>
+                  <p className="typo-body">No application services found in ServiceNow.</p>
                 </div>
               )}
               {!liveLoading && !liveError && hierarchyMode === false && liveTwoLevel.map(appSvc => (
@@ -1203,7 +1203,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
               {showFamilyPagination && !liveLoading && (
                 <div className="flex items-center justify-between mt-4 px-2 py-3 border-t border-gray-200">
-                  <p className="text-xs text-gray-500">
+                  <p className="typo-caption text-gray-500">
                     {familyRangeStart}–{familyRangeEnd} of {totalFamilies} families
                   </p>
                   <div className="flex items-center gap-2">
@@ -1211,18 +1211,18 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                       type="button"
                       disabled={familyPage === 0}
                       onClick={() => setFamilyPage(p => Math.max(0, p - 1))}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 typo-badge rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
                     >
                       <ChevronLeft className="w-3.5 h-3.5" /> Previous
                     </button>
-                    <span className="text-xs text-gray-500">
+                    <span className="typo-caption text-gray-500">
                       Page {familyPage + 1} of {familyPageCount}
                     </span>
                     <button
                       type="button"
                       disabled={familyPage >= familyPageCount - 1}
                       onClick={() => setFamilyPage(p => Math.min(familyPageCount - 1, p + 1))}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 typo-badge rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
                     >
                       Next <ChevronRight className="w-3.5 h-3.5" />
                     </button>
@@ -1270,37 +1270,37 @@ function AppCard({ app, onViewDetails, onFlagClick }: {
     <div className={`bg-white rounded-xl border border-gray-200 hover:shadow-md transition-all group border-t-4 ${envAccent[app.env] ?? 'border-t-gray-300'} flex flex-col`}>
       <div className="p-5 flex-1">
         <div className="flex items-start justify-between gap-2 mb-3">
-          <h3 className="text-sm font-semibold text-gray-900 leading-snug">{app.name}</h3>
-          <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${envBadge[app.env] ?? 'bg-gray-100 text-gray-600'}`}>{app.env}</span>
+          <h3 className="typo-panel-title leading-snug">{app.name}</h3>
+          <span className={`typo-badge px-2 py-0.5 rounded-full shrink-0 ${envBadge[app.env] ?? 'bg-gray-100 text-gray-600'}`}>{app.env}</span>
         </div>
         <div className="space-y-1.5 mb-4">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 typo-body">
             <Building2  className="w-3.5 h-3.5 text-gray-400 shrink-0" /><span className="text-gray-500">App:</span><span className="text-gray-800 truncate">{app.app}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 typo-body">
             <Layers     className="w-3.5 h-3.5 text-gray-400 shrink-0" /><span className="text-gray-500">Dept:</span><span className="text-gray-800">{app.dept}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 typo-body">
             <TrendingUp className="w-3.5 h-3.5 text-gray-400 shrink-0" /><span className="text-gray-500">Servers:</span><span className="text-gray-800">{app.servers}</span>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap mb-3">
-          <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${st.cls}`}>
+          <span className={`inline-flex items-center gap-1 typo-badge px-2.5 py-1 rounded-full ${st.cls}`}>
             {st.icon}{app.status}
           </span>
-          <span className={`text-xs px-2 py-0.5 rounded ${criticalityBadge[app.criticality]}`}>{app.criticality}</span>
+          <span className={`typo-badge px-2 py-0.5 rounded ${criticalityBadge[app.criticality]}`}>{app.criticality}</span>
         </div>
         {(app.incidents > 0 || app.changes > 0) && (
           <div className="flex gap-2 flex-wrap">
             {app.incidents > 0 && (
               <button onClick={() => onFlagClick('incident')}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 rounded text-xs border border-red-200 hover:bg-red-100 transition-colors">
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 rounded typo-badge border border-red-200 hover:bg-red-100 transition-colors">
                 <AlertCircle className="w-3.5 h-3.5" />{app.incidents} Active Incident{app.incidents > 1 ? 's' : ''}
               </button>
             )}
             {app.changes > 0 && (
               <button onClick={() => onFlagClick('change')}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-50 text-yellow-700 rounded text-xs border border-yellow-200 hover:bg-yellow-100 transition-colors">
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-50 text-yellow-700 rounded typo-badge border border-yellow-200 hover:bg-yellow-100 transition-colors">
                 <Calendar className="w-3.5 h-3.5" />Upcoming Change
               </button>
             )}
@@ -1308,9 +1308,9 @@ function AppCard({ app, onViewDetails, onFlagClick }: {
         )}
       </div>
       <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50 rounded-b-xl">
-        <span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" /> {app.lastUpdated}</span>
+        <span className="typo-caption flex items-center gap-1"><Clock className="w-3 h-3" /> {app.lastUpdated}</span>
         <button onClick={onViewDetails}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors group-hover:underline">
+          className="flex items-center gap-1 typo-body text-blue-600 hover:text-blue-800 font-medium transition-colors group-hover:underline">
           View Details <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -1330,29 +1330,29 @@ function AppRow({ app, onViewDetails, onFlagClick }: {
       <div className={`w-1 h-12 rounded-full shrink-0 ${app.env === 'Production' ? 'bg-green-500' : app.env === 'Non-Prod (UAT)' ? 'bg-amber-400' : 'bg-blue-400'}`} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <p className="text-sm font-semibold text-gray-900 truncate">{app.name}</p>
-          <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${envBadge[app.env] ?? 'bg-gray-100 text-gray-600'}`}>{app.env}</span>
+          <p className="typo-panel-title truncate">{app.name}</p>
+          <span className={`typo-badge px-2 py-0.5 rounded-full shrink-0 ${envBadge[app.env] ?? 'bg-gray-100 text-gray-600'}`}>{app.env}</span>
         </div>
-        <p className="text-xs text-gray-500">{app.app} · {app.dept} · {app.servers} servers</p>
+        <p className="typo-caption text-gray-500">{app.app} · {app.dept} · {app.servers} servers</p>
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${st.cls}`}>
+        <span className={`inline-flex items-center gap-1 typo-badge px-2.5 py-1 rounded-full ${st.cls}`}>
           {st.icon}{app.status}
         </span>
         {app.incidents > 0 && (
           <button onClick={() => onFlagClick('incident')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 rounded text-xs border border-red-200 hover:bg-red-100 transition-colors">
+            className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 rounded typo-badge border border-red-200 hover:bg-red-100 transition-colors">
             <AlertCircle className="w-3 h-3" />{app.incidents}
           </button>
         )}
         {app.changes > 0 && (
           <button onClick={() => onFlagClick('change')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-50 text-yellow-700 rounded text-xs border border-yellow-200 hover:bg-yellow-100 transition-colors">
+            className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-50 text-yellow-700 rounded typo-badge border border-yellow-200 hover:bg-yellow-100 transition-colors">
             <Calendar className="w-3 h-3" />CHG
           </button>
         )}
-        <span className="text-xs text-gray-400">{app.lastUpdated}</span>
-        <button onClick={onViewDetails} className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium ml-2">
+        <span className="typo-caption">{app.lastUpdated}</span>
+        <button onClick={onViewDetails} className="flex items-center gap-1 typo-body text-blue-600 hover:text-blue-800 font-medium ml-2">
           View Details <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>

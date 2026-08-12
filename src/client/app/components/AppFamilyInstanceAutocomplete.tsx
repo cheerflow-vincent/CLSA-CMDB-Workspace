@@ -118,7 +118,7 @@ export default function AppFamilyInstanceAutocomplete({
         }
         <input
           type="text"
-          className="flex-1 text-sm bg-transparent outline-none placeholder-gray-400 min-w-0 disabled:cursor-not-allowed"
+          className="flex-1 typo-body bg-transparent outline-none placeholder-gray-400 min-w-0 disabled:cursor-not-allowed"
           placeholder={compact ? 'App or Instance…' : `Search ${familyLabel} or Instance…`}
           value={displayValue}
           disabled={disabled}
@@ -145,11 +145,11 @@ export default function AppFamilyInstanceAutocomplete({
               key={`${opt.kind}-${opt.sysId}`}
               type="button"
               onClick={() => handleSelect(opt)}
-              className={`w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors flex items-center justify-between gap-2
+              className={`w-full text-left px-4 py-2.5 typo-body hover:bg-blue-50 transition-colors flex items-center justify-between gap-2
                 ${value?.sysId === opt.sysId && value?.kind === opt.kind ? 'text-blue-700 bg-blue-50' : 'text-gray-800'}`}
             >
               <span className="truncate">{opt.name}</span>
-              <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+              <span className="shrink-0 typo-badge px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                 {opt.kind === 'family' ? familyLabel : 'Instance'}
               </span>
             </button>
@@ -158,7 +158,7 @@ export default function AppFamilyInstanceAutocomplete({
       )}
 
       {showDropdown && !loading && options.length === 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-xl px-4 py-3 text-sm text-gray-500">
+        <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-xl px-4 py-3 typo-page-subtitle">
           No applications match &ldquo;{query}&rdquo;
         </div>
       )}

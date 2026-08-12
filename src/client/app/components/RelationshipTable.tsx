@@ -159,7 +159,7 @@ async function fetchCIDetails(rows: RelRow[]): Promise<Map<string, CIDetail>> {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function InstanceInfoCell({ detail }: { detail: CIDetail | undefined }) {
-  if (!detail) return <span className="text-xs text-gray-300 italic">—</span>;
+  if (!detail) return <span className="typo-caption italic">—</span>;
 
   const badge = opStatusBadge(detail.operational_status);
   const fields = detail.viewFields.filter(f => f.element !== 'operational_status');
@@ -168,7 +168,7 @@ function InstanceInfoCell({ detail }: { detail: CIDetail | undefined }) {
     <div className="space-y-1 min-w-[160px]">
       {/* Operational status badge */}
       {detail.operational_status && (
-        <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium ${badge.cls}`}>
+        <span className={`inline-flex items-center gap-1 typo-badge px-2 py-0.5 rounded-full font-medium ${badge.cls}`}>
           {badge.icon}{detail.operational_status}
         </span>
       )}
@@ -206,7 +206,7 @@ function RelRowCard({
           type="button"
           onClick={() => onViewDetails(row)}
           title="View application details"
-          className="text-sm font-semibold text-gray-800 hover:text-blue-700 hover:underline text-left break-words"
+          className="typo-panel-title text-gray-800 hover:text-blue-700 hover:underline text-left break-words"
         >
           {row.name}
         </button>
@@ -214,7 +214,7 @@ function RelRowCard({
           href={`/${row.sysClass || 'cmdb_ci_service'}.do?sys_id=${row.sysId}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-1"
+          className="typo-link mt-1"
           title="Open in ServiceNow"
         >
           <ExternalLink className="w-3 h-3" />
@@ -224,7 +224,7 @@ function RelRowCard({
       <div className="border-t border-gray-100 pt-3 space-y-2">
         <div className="rf-field-row rf-field-row--badge">
           <span className="rf-field-row__label">Direction</span>
-          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${meta.badgeCls}`}>
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full typo-badge font-semibold whitespace-nowrap ${meta.badgeCls}`}>
             {meta.icon}{meta.label}
           </span>
         </div>
@@ -238,7 +238,7 @@ function RelRowCard({
         </div>
         {detail && (
           <div className="pt-2 border-t border-gray-50">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">Instance Info</p>
+            <p className="typo-label mb-2">Instance Info</p>
             <InstanceInfoCell detail={detail} />
           </div>
         )}
@@ -301,16 +301,16 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
   if (loading) return (
     <div className="flex items-center justify-center gap-2 py-20 text-gray-400">
       <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
-      <span className="text-sm">Loading relationships…</span>
+      <span className="typo-body">Loading relationships…</span>
     </div>
   );
 
   if (!selectedApp?.sysId) return (
-    <div className="py-20 text-center text-sm text-gray-400">No application selected.</div>
+    <div className="py-20 text-center typo-body text-gray-400">No application selected.</div>
   );
 
   if (filtered.length === 0) return (
-    <div className="py-20 text-center text-sm text-gray-400">
+    <div className="py-20 text-center typo-body text-gray-400">
       {q ? `No nodes matching "${nodeSearch}".` : 'No relationships match the current filters.'}
     </div>
   );
@@ -329,14 +329,14 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
           ))}
         </div>
       ) : (
-      <table className="w-full text-sm">
+      <table className="w-full typo-body">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">
-            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Related Application</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Direction</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Service Type</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">CI Class</th>
-            <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            <th className="px-5 py-3 text-left typo-label">Related Application</th>
+            <th className="px-5 py-3 text-left typo-label">Direction</th>
+            <th className="px-5 py-3 text-left typo-label">Service Type</th>
+            <th className="px-5 py-3 text-left typo-label">CI Class</th>
+            <th className="px-5 py-3 text-left typo-label">
               Instance Info
               {detLoading && <Loader2 className="inline-block ml-1.5 w-3 h-3 animate-spin text-blue-400" />}
             </th>
@@ -356,7 +356,7 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
                       type="button"
                       onClick={() => handleViewDetails(row)}
                       title="View application details"
-                      className="text-sm font-medium text-gray-800 hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
+                      className="typo-field-value-emphasis hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
                     >
                       {row.name}
                     </button>
@@ -364,7 +364,7 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
                       href={`/${row.sysClass || 'cmdb_ci_service'}.do?sys_id=${row.sysId}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                      className="typo-link"
                       title="Open in ServiceNow"
                     >
                       <ExternalLink className="w-3 h-3" />
@@ -375,18 +375,18 @@ export default function RelationshipTable({ selectedApp, nodeSearch = '', filter
 
                 {/* Direction badge */}
                 <td className="px-5 py-4">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${meta.badgeCls}`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full typo-badge font-semibold whitespace-nowrap ${meta.badgeCls}`}>
                     {meta.icon}{meta.label}
                   </span>
                 </td>
 
                 {/* Service type */}
-                <td className="px-5 py-4 text-xs text-gray-500 whitespace-nowrap">
+                <td className="px-5 py-4 typo-caption text-gray-500 whitespace-nowrap">
                   {SVC_LABEL[svcType]}
                 </td>
 
                 {/* CI Class — human label */}
-                <td className="px-5 py-4 text-xs text-gray-500 whitespace-nowrap">
+                <td className="px-5 py-4 typo-caption text-gray-500 whitespace-nowrap">
                   {tableLabel(row.sysClass)}
                 </td>
 

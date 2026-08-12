@@ -16,7 +16,7 @@ export default function CIFlagBadges({
   if (!incidents && !changes) return null;
 
   const iconCls = size === 'md' ? 'w-3.5 h-3.5' : 'w-3 h-3';
-  const textCls = size === 'md' ? 'text-[10px]' : 'text-[9px]';
+  const textCls = 'typo-badge';
   const padCls = size === 'md' ? 'px-1.5 py-0.5' : 'px-1 py-0.5';
 
   return (

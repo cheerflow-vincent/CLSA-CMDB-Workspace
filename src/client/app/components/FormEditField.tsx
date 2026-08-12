@@ -18,7 +18,7 @@ function isJournalType(internalType: string): boolean {
 }
 
 function inputClass(disabled: boolean): string {
-  return `w-full border rounded-lg px-3 py-2 text-sm ${
+  return `w-full border rounded-lg px-3 py-2 typo-body ${
     disabled
       ? 'border-gray-200 bg-gray-50 text-gray-600 cursor-not-allowed'
       : 'border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent'
@@ -88,7 +88,7 @@ export default function FormEditField({
   if (READONLY_TYPES.has(internalType) || isJournalType(internalType)) {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <div className={`${inputClass(true)} min-h-[38px] whitespace-pre-wrap break-words`}>
           {display || '—'}
         </div>
@@ -100,7 +100,7 @@ export default function FormEditField({
     const checked = display === 'true' || display === '1';
     return (
       <div className="min-w-0">
-        <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+        <label className="flex items-center gap-2 typo-field-label">
           <input
             type="checkbox"
             checked={checked}
@@ -119,7 +119,7 @@ export default function FormEditField({
     const current = typeof value === 'object' ? value.value : value;
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <select
           value={current}
           disabled={disabled}
@@ -162,7 +162,7 @@ export default function FormEditField({
   if (internalType === 'glide_date') {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <div className={pickerShellClass(disabled)}>
           <Calendar className="w-4 h-4 text-gray-400 shrink-0 pointer-events-none" />
           <input
@@ -170,7 +170,7 @@ export default function FormEditField({
             value={toDateInput(display)}
             disabled={disabled}
             onChange={e => onChange(element, e.target.value)}
-            className="flex-1 text-sm bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
+            className="flex-1 typo-body bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
           />
         </div>
       </div>
@@ -181,7 +181,7 @@ export default function FormEditField({
     const { date, time } = splitDateTime(display);
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <div className="flex flex-wrap gap-2">
           <div className={`${pickerShellClass(disabled)} flex-1 min-w-[140px]`}>
             <Calendar className="w-4 h-4 text-gray-400 shrink-0 pointer-events-none" />
@@ -190,7 +190,7 @@ export default function FormEditField({
               value={date}
               disabled={disabled}
               onChange={e => onChange(element, joinDateTime(e.target.value, time))}
-              className="flex-1 text-sm bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
+              className="flex-1 typo-body bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
             />
           </div>
           <div className={`${pickerShellClass(disabled)} w-[130px] shrink-0`}>
@@ -200,7 +200,7 @@ export default function FormEditField({
               value={time}
               disabled={disabled}
               onChange={e => onChange(element, joinDateTime(date, e.target.value))}
-              className="flex-1 text-sm bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
+              className="flex-1 typo-body bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
             />
           </div>
         </div>
@@ -211,7 +211,7 @@ export default function FormEditField({
   if (internalType === 'glide_time') {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <div className={pickerShellClass(disabled)}>
           <Clock className="w-4 h-4 text-gray-400 shrink-0 pointer-events-none" />
           <input
@@ -219,7 +219,7 @@ export default function FormEditField({
             value={toTimeInput(display)}
             disabled={disabled}
             onChange={e => onChange(element, fromTimeInput(e.target.value))}
-            className="flex-1 text-sm bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
+            className="flex-1 typo-body bg-transparent outline-none min-w-0 disabled:cursor-not-allowed"
           />
         </div>
       </div>
@@ -229,7 +229,7 @@ export default function FormEditField({
   if (internalType === 'integer' || internalType === 'long') {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <input
           type="number"
           step="1"
@@ -245,7 +245,7 @@ export default function FormEditField({
   if (internalType === 'float' || internalType === 'decimal' || internalType === 'currency') {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <input
           type="number"
           step="any"
@@ -262,7 +262,7 @@ export default function FormEditField({
     const num = Math.min(100, Math.max(0, parseInt(display, 10) || 0));
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <div className="flex items-center gap-3">
           <input
             type="range"
@@ -273,7 +273,7 @@ export default function FormEditField({
             onChange={e => onChange(element, e.target.value)}
             className="flex-1 disabled:opacity-60"
           />
-          <span className="text-sm text-gray-700 w-10 text-right tabular-nums">{num}%</span>
+          <span className="typo-body w-10 text-right tabular-nums">{num}%</span>
         </div>
       </div>
     );
@@ -283,7 +283,7 @@ export default function FormEditField({
     const colorVal = display.startsWith('#') ? display : '#000000';
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <div className="flex items-center gap-2">
           <input
             type="color"
@@ -297,7 +297,7 @@ export default function FormEditField({
             value={display}
             disabled={disabled}
             onChange={e => onChange(element, e.target.value)}
-            className={`${inputClass(disabled)} flex-1 font-mono text-xs`}
+            className={`${inputClass(disabled)} flex-1 font-mono typo-body`}
           />
         </div>
       </div>
@@ -307,13 +307,13 @@ export default function FormEditField({
   if (internalType === 'table_name' || internalType === 'GUID' || internalType === 'sys_id') {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <input
           type="text"
           value={display}
           disabled={disabled}
           onChange={e => onChange(element, e.target.value)}
-          className={`${inputClass(disabled)} font-mono text-xs`}
+          className={`${inputClass(disabled)} font-mono typo-body`}
         />
       </div>
     );
@@ -332,7 +332,7 @@ export default function FormEditField({
 
   return (
     <div className="min-w-0">
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className="block typo-field-label mb-1">{label}</label>
       {useMultiline ? (
         <textarea
           value={display}

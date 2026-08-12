@@ -147,8 +147,8 @@ export default function RecordEditDialog({
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col">
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200 shrink-0">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
-            <p className="text-sm text-gray-500 mt-0.5 truncate">{recordName}</p>
+            <h2 className="typo-section-title text-gray-900">{title}</h2>
+            <p className="typo-page-subtitle mt-0.5 truncate">{recordName}</p>
           </div>
           <button
             type="button"
@@ -162,7 +162,7 @@ export default function RecordEditDialog({
 
         <div className="flex-1 overflow-y-auto px-6 py-4 min-h-0">
           {loading ? (
-            <div className="flex items-center justify-center py-12 text-gray-400 gap-2 text-sm">
+            <div className="flex items-center justify-center py-12 text-gray-400 gap-2 typo-body">
               <Loader2 className="w-4 h-4 animate-spin" /> Loading edit form…
             </div>
           ) : (
@@ -177,7 +177,7 @@ export default function RecordEditDialog({
 
         {error && (
           <div className="px-6 pb-2 shrink-0">
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            <p className="typo-body text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
               {error}
             </p>
           </div>
@@ -188,7 +188,7 @@ export default function RecordEditDialog({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="px-4 py-2 border border-gray-300 rounded-lg typo-body text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             Cancel
           </button>
@@ -196,7 +196,7 @@ export default function RecordEditDialog({
             type="button"
             onClick={handleSave}
             disabled={loading || saving}
-            className="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm hover:bg-blue-800 disabled:opacity-50 inline-flex items-center gap-2"
+            className="px-4 py-2 bg-blue-900 text-white rounded-lg typo-body hover:bg-blue-800 disabled:opacity-50 inline-flex items-center gap-2"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />}
             Save Changes

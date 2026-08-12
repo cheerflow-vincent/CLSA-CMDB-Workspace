@@ -9,7 +9,7 @@ export function PriorityBadge({ priority }: { priority: string }) {
     priority.startsWith('P3') || priority.includes('Medium')   ? 'bg-yellow-100 text-yellow-700' :
                                                                  'bg-gray-100 text-gray-600';
   return (
-    <span className={`inline-flex text-[10px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>
+    <span className={`inline-flex typo-badge font-semibold px-1.5 py-0.5 rounded ${cls}`}>
       {priority}
     </span>
   );
@@ -25,7 +25,7 @@ export function StateBadge({ state }: { state: string }) {
     state === 'Pending'     ? 'bg-yellow-100 text-yellow-700' :
                               'bg-gray-100 text-gray-600';
   return (
-    <span className={`inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded ${cls}`}>
+    <span className={`inline-flex typo-badge px-1.5 py-0.5 rounded ${cls}`}>
       {state}
     </span>
   );
@@ -37,7 +37,7 @@ export function ChangeTypeBadge({ type }: { type: string }) {
     type === 'Normal'    ? 'bg-blue-100 text-blue-700' :
                            'bg-gray-100 text-gray-600';
   return (
-    <span className={`inline-flex text-[10px] font-medium px-1.5 py-0.5 rounded ${cls}`}>
+    <span className={`inline-flex typo-badge px-1.5 py-0.5 rounded ${cls}`}>
       {type}
     </span>
   );
@@ -90,8 +90,8 @@ function TaskCardBodyField({
   if (col.element === 'short_description') {
     return (
       <div key={col.element} className="mb-3">
-        <p className="text-xs text-gray-400 mb-1">{col.label}</p>
-        <p className="text-sm text-gray-800 whitespace-pre-line break-words">{value}</p>
+        <p className="typo-field-label mb-1">{col.label}</p>
+        <p className="typo-body whitespace-pre-line break-words">{value}</p>
       </div>
     );
   }
@@ -126,7 +126,7 @@ export function TaskCard({
           href={taskHref(config, row.sysId)}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm font-semibold text-blue-700 hover:underline font-mono"
+          className="typo-panel-title text-blue-700 hover:underline font-mono"
         >
           {title}
         </a>
@@ -143,7 +143,7 @@ export function TaskCard({
           href={taskHref(config, row.sysId)}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+          className="typo-link"
         >
           <ExternalLink className="w-3.5 h-3.5" /> Open in ServiceNow
         </a>

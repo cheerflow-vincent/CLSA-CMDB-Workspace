@@ -58,7 +58,7 @@ function BodyField({
     const fieldTone = scoreNum != null ? toneFromScore(scoreNum) : tone;
     return (
       <div key={col.element} className="mb-3">
-        <div className="flex items-center justify-between text-sm mb-1">
+        <div className="flex items-center justify-between typo-body mb-1">
           <span className="text-gray-600">{col.label}</span>
           <span className={`font-semibold ${scoreTextClass(fieldTone)}`}>{value}</span>
         </div>
@@ -79,7 +79,7 @@ function BodyField({
     return (
       <div key={col.element} className="rf-field-row rf-field-row--badge">
         <span className="rf-field-row__label">{col.label}</span>
-        <span className={`inline-flex text-[10px] font-medium px-2 py-0.5 rounded-full ${statusBadgeClass(badgeTone)}`}>
+        <span className={`inline-flex typo-badge px-2 py-0.5 rounded-full ${statusBadgeClass(badgeTone)}`}>
           {value}
         </span>
       </div>
@@ -115,7 +115,7 @@ export function HealthResultCard({
           href={healthRecordUrl(row.sysId)}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm font-semibold text-blue-700 hover:underline leading-snug"
+          className="typo-panel-title text-blue-700 hover:underline leading-snug"
         >
           {title}
         </a>
@@ -130,7 +130,7 @@ export function HealthResultCard({
       )}
 
       <div className="mt-3 pt-2 border-t border-gray-50 flex items-center justify-between gap-2">
-        <span className="text-xs text-gray-400 flex items-center gap-1">
+        <span className="typo-caption flex items-center gap-1">
           {tone === 'good'
             ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
             : tone === 'warning' || tone === 'bad'
@@ -142,7 +142,7 @@ export function HealthResultCard({
           href={healthRecordUrl(row.sysId)}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium shrink-0"
+          className="typo-link shrink-0"
         >
           <ExternalLink className="w-3.5 h-3.5" /> ServiceNow
         </a>
@@ -198,7 +198,7 @@ export default function HealthResultsPanel({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12 text-gray-400 gap-2 text-sm">
+      <div className="flex items-center justify-center py-12 text-gray-400 gap-2 typo-body">
         <Loader2 className="w-5 h-5 animate-spin" /> Loading health metrics…
       </div>
     );
@@ -206,7 +206,7 @@ export default function HealthResultsPanel({
 
   if (rows.length === 0) {
     return (
-      <p className="text-sm text-gray-400 italic text-center py-12">
+      <p className="typo-body text-gray-400 italic text-center py-12">
         No active health metrics found for this CI.
       </p>
     );
@@ -224,7 +224,7 @@ export default function HealthResultsPanel({
           href={healthListUrl(ciSysId)}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+          className="typo-link"
         >
           <ExternalLink className="w-3.5 h-3.5" /> View all in ServiceNow
         </a>

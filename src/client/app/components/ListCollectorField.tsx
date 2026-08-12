@@ -119,13 +119,13 @@ export default function ListCollectorField({
   if (disabled) {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+        <label className="block typo-field-label mb-1">{label}</label>
         <div className="flex flex-wrap gap-1.5">
-          {items.length === 0 && <span className="text-sm text-gray-500">—</span>}
+          {items.length === 0 && <span className="typo-body text-gray-500">—</span>}
           {items.map(item => (
             <span
               key={item.value}
-              className="inline-flex px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-xs border border-gray-200"
+              className="inline-flex px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 typo-badge border border-gray-200"
             >
               {item.display}
             </span>
@@ -137,14 +137,14 @@ export default function ListCollectorField({
 
   return (
     <div ref={ref} className="min-w-0 relative">
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className="block typo-field-label mb-1">{label}</label>
 
       {items.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">
           {items.map(item => (
             <span
               key={item.value}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 text-xs border border-blue-200"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 typo-badge border border-blue-200"
             >
               {item.display}
               <button
@@ -166,7 +166,7 @@ export default function ListCollectorField({
         <Plus className="w-4 h-4 text-gray-400 shrink-0" />
         <input
           type="text"
-          className="flex-1 text-sm bg-transparent outline-none placeholder-gray-400 min-w-0"
+          className="flex-1 typo-body bg-transparent outline-none placeholder-gray-400 min-w-0"
           placeholder={addPlaceholder}
           value={query}
           onChange={e => {
@@ -185,10 +185,10 @@ export default function ListCollectorField({
       {open && (
         <div className="absolute top-full left-0 right-0 mt-1 z-[60] bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1">
           {!loading && options.length === 0 && query.trim() && (
-            <p className="px-3 py-2 text-xs text-gray-400">No matches</p>
+            <p className="px-3 py-2 typo-caption">No matches</p>
           )}
           {!loading && !query.trim() && (
-            <p className="px-3 py-2 text-xs text-gray-400">Type to search and add</p>
+            <p className="px-3 py-2 typo-caption">Type to search and add</p>
           )}
           {options
             .filter(opt => !selectedIds.has(opt.sys_id))
@@ -196,7 +196,7 @@ export default function ListCollectorField({
               <button
                 key={opt.sys_id}
                 type="button"
-                className="w-full text-left px-3 py-2 text-sm text-gray-800 hover:bg-blue-50 transition-colors"
+                className="w-full text-left px-3 py-2 typo-body text-gray-800 hover:bg-blue-50 transition-colors"
                 onClick={() => addItem(opt)}
               >
                 {opt.display}

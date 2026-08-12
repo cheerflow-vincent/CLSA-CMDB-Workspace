@@ -34,7 +34,7 @@ export default function CISearchSummaryBanner({
 
   if (loading) {
     return (
-      <div className="mx-6 my-4 flex items-center gap-2 text-sm text-gray-500">
+      <div className="mx-6 my-4 flex items-center gap-2 typo-body text-gray-500">
         <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
         Loading summary…
       </div>
@@ -52,7 +52,7 @@ export default function CISearchSummaryBanner({
           <button
             type="button"
             onClick={() => onChipClick('incident')}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition-colors text-sm font-medium"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition-colors typo-body font-medium"
           >
             <AlertCircle className="w-4 h-4" />
             {incidents.toLocaleString()} Active Incident{incidents !== 1 ? 's' : ''}
@@ -62,7 +62,7 @@ export default function CISearchSummaryBanner({
           <button
             type="button"
             onClick={() => onChipClick('change')}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-700 hover:bg-yellow-100 transition-colors text-sm font-medium"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-700 hover:bg-yellow-100 transition-colors typo-body font-medium"
           >
             <Calendar className="w-4 h-4" />
             {changes.toLocaleString()} Upcoming Change{changes !== 1 ? 's' : ''}
@@ -72,14 +72,14 @@ export default function CISearchSummaryBanner({
           <button
             type="button"
             onClick={() => onChipClick('health')}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors text-sm font-medium"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors typo-body font-medium"
           >
             <Shield className="w-4 h-4" />
             {health.toLocaleString()} Active Health Metric{health !== 1 ? 's' : ''}
           </button>
         )}
       </div>
-      <p className="text-xs text-gray-500 mt-2">
+      <p className="typo-caption text-gray-500 mt-2">
         Across {matchingCiCount.toLocaleString()} matching CI{matchingCiCount !== 1 ? 's' : ''}
         {showMergeCapNote && (
           <span className="text-gray-400"> (list capped at 500; counts reflect full filter)</span>

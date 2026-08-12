@@ -75,8 +75,8 @@ export function LiveInstanceCard({
     <div className={`card-stack bg-white rounded-xl border border-gray-200 hover:shadow-md transition-all group border-t-4 ${topCls} flex flex-col`}>
       <div className="p-5 flex-1">
         <div className="mb-3">
-          <h3 className="text-sm font-semibold text-gray-900 leading-snug mb-0.5">{inst.name}</h3>
-          <p className="text-xs text-gray-400 break-words">{svcName}</p>
+          <h3 className="typo-panel-title leading-snug mb-0.5">{inst.name}</h3>
+          <p className="typo-caption break-words">{svcName}</p>
         </div>
         <div className="space-y-1.5 mb-4 border border-gray-100 rounded-lg p-3 bg-gray-50">
           {inst.viewFields.map(f => (
@@ -84,7 +84,7 @@ export function LiveInstanceCard({
           ))}
         </div>
         <div className="flex items-center gap-2 flex-wrap mb-3">
-          <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${badge.cls}`}>
+          <span className={`inline-flex items-center gap-1 typo-badge px-2.5 py-1 rounded-full ${badge.cls}`}>
             {badge.icon}{inst.operational_status || 'Unknown'}
           </span>
         </div>
@@ -92,13 +92,13 @@ export function LiveInstanceCard({
           <div className="flex gap-2 flex-wrap">
             {inst.incidents > 0 && (
               <button type="button" onClick={() => onFlagClick('incident')}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 rounded text-xs border border-red-200 hover:bg-red-100 transition-colors">
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 rounded typo-badge border border-red-200 hover:bg-red-100 transition-colors">
                 <AlertCircle className="w-3.5 h-3.5" />{inst.incidents} Incident{inst.incidents > 1 ? 's' : ''}
               </button>
             )}
             {inst.changes > 0 && (
               <button type="button" onClick={() => onFlagClick('change')}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-50 text-yellow-700 rounded text-xs border border-yellow-200 hover:bg-yellow-100 transition-colors">
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-50 text-yellow-700 rounded typo-badge border border-yellow-200 hover:bg-yellow-100 transition-colors">
                 <Calendar className="w-3.5 h-3.5" />Upcoming Change
               </button>
             )}
@@ -110,12 +110,12 @@ export function LiveInstanceCard({
           href={`/${inst.sys_class_name || SVC_TABLE}.do?sys_id=${inst.sys_id}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+          className="typo-link transition-colors"
         >
           <ExternalLink className="w-3.5 h-3.5" /> ServiceNow
         </a>
         <button type="button" onClick={onViewDetails}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors group-hover:underline">
+          className="flex items-center gap-1 typo-body text-blue-600 hover:text-blue-800 font-medium transition-colors group-hover:underline">
           View Details <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -141,32 +141,32 @@ export function LiveInstanceRow({
         inst.environment?.includes('UAT') ? 'bg-amber-400' : 'bg-blue-400'
       }`} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-gray-900 break-words mb-2">{inst.name}</p>
+        <p className="typo-panel-title break-words mb-2">{inst.name}</p>
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           {inst.viewFields.map(f => {
             const val = inst.fieldValues[f.element];
             return val ? (
               <div key={f.element} className="min-w-[7rem] max-w-full">
-                <span className="text-[10px] text-gray-400 block break-words">{f.label}</span>
-                <span className="text-xs text-gray-700 font-medium block break-words whitespace-pre-line">{val}</span>
+                <span className="typo-field-label block break-words">{f.label}</span>
+                <span className="typo-field-value-emphasis block break-words whitespace-pre-line">{val}</span>
               </div>
             ) : null;
           })}
         </div>
       </div>
       <div className="flex items-center gap-3 shrink-0 flex-wrap sm:justify-end">
-        <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${badge.cls}`}>
+        <span className={`inline-flex items-center gap-1 typo-badge px-2.5 py-1 rounded-full ${badge.cls}`}>
           {badge.icon}{inst.operational_status || 'Unknown'}
         </span>
         {inst.incidents > 0 && (
           <button type="button" onClick={() => onFlagClick('incident')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 rounded text-xs border border-red-200 hover:bg-red-100 transition-colors">
+            className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 rounded typo-badge border border-red-200 hover:bg-red-100 transition-colors">
             <AlertCircle className="w-3 h-3" />{inst.incidents}
           </button>
         )}
         {inst.changes > 0 && (
           <button type="button" onClick={() => onFlagClick('change')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-50 text-yellow-700 rounded text-xs border border-yellow-200 hover:bg-yellow-100 transition-colors">
+            className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-50 text-yellow-700 rounded typo-badge border border-yellow-200 hover:bg-yellow-100 transition-colors">
             <Calendar className="w-3 h-3" />CHG
           </button>
         )}
@@ -174,13 +174,13 @@ export function LiveInstanceRow({
           href={`/${inst.sys_class_name || SVC_TABLE}.do?sys_id=${inst.sys_id}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+          className="typo-link transition-colors"
           title="Open in ServiceNow"
         >
           <ExternalLink className="w-3.5 h-3.5" />
         </a>
         <button type="button" onClick={onViewDetails}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium">
+          className="flex items-center gap-1 typo-body text-blue-600 hover:text-blue-800 font-medium">
           View Details <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>

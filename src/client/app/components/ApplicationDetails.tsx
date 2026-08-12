@@ -227,7 +227,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   <button
                     type="button"
                     onClick={() => setRelationshipTab('app')}
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={`typo-tab ${
                       relationshipTab === 'app' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
                     }`}
                   >
@@ -236,14 +236,14 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   <button
                     type="button"
                     onClick={() => setRelationshipTab('infra')}
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 ${
+                    className={`typo-tab border-l border-gray-200 ${
                       relationshipTab === 'infra' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
                     }`}
                   >
                     Infrastructure
                   </button>
                 </div>
-                <h3 className="text-base font-semibold text-gray-900 truncate">
+                <h3 className="typo-section-title text-gray-900 truncate">
                   {relationshipTab === 'app'
                     ? 'Upstream / Downstream Relationships'
                     : 'Infrastructure Relationships'}
@@ -256,7 +256,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   placeholder="Search Nodes"
                   value={nodeSearch}
                   onChange={e => setNodeSearch(e.target.value)}
-                  className="pl-9 pr-4 py-1.5 border border-gray-300 rounded-lg w-56 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                  className="pl-9 pr-4 py-1.5 border border-gray-300 rounded-lg w-56 typo-body focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                 />
               </div>
             </div>
@@ -267,10 +267,10 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               {relationshipTab === 'app' ? (
                 <>
               {/* Direction filters */}
-              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Direction</span>
+              <span className="typo-label">Direction</span>
 
               <button onClick={() => toggleFilter('upstream')}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                className={`typo-chip ${
                   filters.upstream ? 'bg-orange-50 border-orange-300 text-orange-800' : 'bg-white border-gray-200 text-gray-400'
                 }`}>
                 <svg width="18" height="8" viewBox="0 0 22 10">
@@ -281,7 +281,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               </button>
 
               <button onClick={() => toggleFilter('downstream')}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                className={`typo-chip ${
                   filters.downstream ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-gray-200 text-gray-400'
                 }`}>
                 <svg width="18" height="8" viewBox="0 0 22 10">
@@ -292,7 +292,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               </button>
 
               <button onClick={() => toggleFilter('bidirectional')}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                className={`typo-chip ${
                   filters.bidirectional ? 'bg-violet-50 border-violet-300 text-violet-800' : 'bg-white border-gray-200 text-gray-400'
                 }`}>
                 <svg width="22" height="8" viewBox="0 0 26 10">
@@ -306,8 +306,8 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               {viewMode === 'map' && (
                 <>
                   <div className="h-5 w-px bg-gray-200 mx-1" />
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Legend</span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-xs text-gray-600">
+                  <span className="typo-label">Legend</span>
+                  <span className="typo-chip border-gray-200 bg-white text-gray-600">
                     <svg width="22" height="8" viewBox="0 0 26 10" aria-hidden>
                       <line
                         x1="0" y1="5" x2="26" y2="5"
@@ -324,7 +324,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               <div className="h-5 w-px bg-gray-200 mx-1" />
 
               {/* Service type filters */}
-              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Services</span>
+              <span className="typo-label">Services</span>
 
               {[
                 { key: 'platform'       as const, label: 'Platform',       svc: SVC_STYLE.platform,       active: filters.platform,       activeCls: 'border-blue-300 text-blue-800'  },
@@ -332,7 +332,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 { key: 'business'       as const, label: 'Business',       svc: SVC_STYLE.business,       active: filters.business,       activeCls: 'border-green-300 text-green-800' },
               ].map(({ key, label, svc, active, activeCls }) => (
                 <button key={key} onClick={() => toggleFilter(key)}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                  className={`typo-chip ${
                     active ? activeCls : 'bg-white border-gray-200 text-gray-400'
                   }`}
                   style={active ? { backgroundColor: svc.bg } : {}}>
@@ -345,7 +345,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 </>
               ) : (
                 <>
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">CI Type</span>
+                  <span className="typo-label">CI Type</span>
                   {(Object.keys(INFRA_CI_STYLE) as InfraCIType[]).map(ciType => {
                     const style = INFRA_CI_STYLE[ciType];
                     const active = infraFilters[ciType];
@@ -354,7 +354,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         key={ciType}
                         type="button"
                         onClick={() => toggleInfraFilter(ciType)}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
+                        className={`typo-chip ${
                           active ? 'text-gray-800' : 'bg-white border-gray-200 text-gray-400'
                         }`}
                         style={active ? { backgroundColor: style.bg, borderColor: style.border } : {}}
@@ -372,12 +372,12 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
               {/* View toggle — pushed to the right */}
               <div className="flex items-center gap-2 ml-auto">
-                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">View</span>
+                <span className="typo-label">View</span>
                 <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
                   <button
                     type="button"
                     onClick={() => setViewMode('map')}
-                    className={`inline-flex items-center justify-center min-w-[52px] px-3.5 py-1 text-xs font-medium transition-colors ${
+                    className={`inline-flex items-center justify-center min-w-[52px] px-3.5 py-1 typo-tab ${
                       viewMode === 'map' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
                     }`}
                   >
@@ -386,7 +386,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   <button
                     type="button"
                     onClick={() => setViewMode('table')}
-                    className={`inline-flex items-center justify-center min-w-[52px] px-3.5 py-1 text-xs font-medium transition-colors border-l border-gray-200 ${
+                    className={`inline-flex items-center justify-center min-w-[52px] px-3.5 py-1 typo-tab border-l border-gray-200 ${
                       viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
                     }`}
                   >
@@ -461,7 +461,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                 {/* Sticky header */}
                 <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-2.5">
                   <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-                  <span className="flex-1 text-sm font-semibold text-gray-900 truncate">
+                  <span className="flex-1 typo-panel-title truncate">
                     {selectedApp?.name ?? '—'}
                   </span>
                   <button onClick={() => setDetailsPanelOpen(false)}
@@ -475,19 +475,19 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   {/* ── Overview ── */}
                   {!isAccessDenied(overviewAccess) && (
                   <section>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Overview</p>
+                    <p className="typo-label mb-2">Overview</p>
                     {overviewLoading ? (
-                      <div className="flex items-center justify-center py-6 text-gray-400 gap-2 text-xs">
+                      <div className="flex items-center justify-center py-6 text-gray-400 gap-2 typo-caption">
                         <Loader2 className="w-4 h-4 animate-spin" /> Loading…
                       </div>
                     ) : overviewFields.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic px-1">No overview fields configured.</p>
+                      <p className="typo-caption italic px-1">No overview fields configured.</p>
                     ) : (
-                      <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+                      <div className="detail-sidebar-fields bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
                         {overviewFields.map(({ element, label }) => (
-                          <div key={element} className="flex items-start gap-3 px-3 py-2">
-                            <span className="text-xs text-gray-400 shrink-0 w-32 truncate">{label}</span>
-                            <span className="text-xs text-gray-800 break-words min-w-0">
+                          <div key={element} className="rf-field-row rf-field-row--inline px-3 py-2 mb-0">
+                            <span className="rf-field-row__label">{label}</span>
+                            <span className="rf-field-row__value font-medium text-gray-900">
                               {overviewValues[element] || '—'}
                             </span>
                           </div>
@@ -499,7 +499,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
                   {/* ── Infrastructure ── */}
                   <section>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Infrastructure</p>
+                    <p className="typo-label mb-2">Infrastructure</p>
                     <div className="space-y-2">
 
                       <RelatedListSection
@@ -582,7 +582,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
                   {/* ── Relationship Changes ── */}
                   <section>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Relationships</p>
+                    <p className="typo-label mb-2">Relationships</p>
                     <RelationshipChangesList
                       appSysId={selectedApp?.sysId}
                       appName={selectedApp?.name}
@@ -596,7 +596,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
                   {/* ── Active Flags ── */}
                   <section>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Active Flags</p>
+                    <p className="typo-label mb-2">Active Flags</p>
                     <div className="space-y-2">
 
                       <RelatedListSection

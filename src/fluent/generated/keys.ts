@@ -5,6 +5,78 @@ declare global {
         namespace Internal {
             interface Keys extends KeysRegistry {
                 explicit: {
+                    '../../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'c35b0f7adf8242b18a9b6621f68c7b9a'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: '38aa8e64b29c4d01a47ab6a956249981'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: '0a391f7ff75d46149f7a438d82085a49'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'ebad77392991452d814c6ef5959192c8'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'ff163223a02c4c73aecc4212c843a165'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'c58546a8291942769804fc6f3f59a4ff'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: '102d43a6bd4f48f18342c75f03031161'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: '9a441fe2335c49228c65ca29708e907d'
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-400-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: '6b271d27712c45dea6ec4c88419871e2'
+                        deleted: true
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-400-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'f7adac8c06824cac8615ff1732671109'
+                        deleted: true
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-500-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: '55ebfd1868414ccca2d8f80413512d1f'
+                        deleted: true
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-500-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: '586f34d2b48548b1929730793ede7003'
+                        deleted: true
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-600-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: '506b5ce560c6469993b9699dfe460a5f'
+                        deleted: true
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-600-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'bacab1ed38ab4e5c946bbcfabc080dfc'
+                        deleted: true
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-700-normal.woff': {
+                        table: 'sys_ux_theme_asset'
+                        id: '9ad87347d4474855a67844157e4b8756'
+                        deleted: true
+                    }
+                    '../../node_modules/@fontsource/inter/files/inter-latin-ext-700-normal.woff2': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'cd236aa315a64d4ab11ea3e9e9628baf'
+                        deleted: true
+                    }
                     'application-home-handler': {
                         table: 'sys_script_include'
                         id: 'b3678cc7b87f4a87b724ad383edf5b29'
@@ -42,6 +114,26 @@ declare global {
                     'field-access-route': {
                         table: 'sys_ws_operation'
                         id: '0501f1a415b84bcf95657933e17ef0fe'
+                    }
+                    'node_modules/@fontsource/inter/400.css': {
+                        table: 'sys_ux_theme_asset'
+                        id: 'afeea67986c1492f8a4229e88220bd3f'
+                        deleted: true
+                    }
+                    'node_modules/@fontsource/inter/500.css': {
+                        table: 'sys_ux_theme_asset'
+                        id: '9268b14d6e494977b6a810fdac51be6f'
+                        deleted: true
+                    }
+                    'node_modules/@fontsource/inter/600.css': {
+                        table: 'sys_ux_theme_asset'
+                        id: '6db9b81eae644c74a7db831981ed65ca'
+                        deleted: true
+                    }
+                    'node_modules/@fontsource/inter/700.css': {
+                        table: 'sys_ux_theme_asset'
+                        id: '8e26896952394e979498799305794d89'
+                        deleted: true
                     }
                     'node_modules/@xyflow/react/dist/style.css': {
                         table: 'sys_ux_theme_asset'

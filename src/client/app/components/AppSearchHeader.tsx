@@ -53,7 +53,7 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
 
   return (
     <div ref={ref} className="relative flex-1 min-w-0">
-      <p className="text-xs text-gray-400 mb-1 px-0.5">{label}</p>
+      <p className="typo-field-label mb-1 px-0.5">{label}</p>
       <div className={`flex items-center border rounded-lg bg-white px-3 py-2 gap-2 transition-colors
         ${disabled ? 'bg-gray-50 cursor-not-allowed opacity-60' : ''}
         ${open && !disabled ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-300'}`}>
@@ -62,7 +62,7 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
           : <Search   className="w-4 h-4 text-gray-400 shrink-0" />
         }
         <input
-          className="flex-1 text-sm bg-transparent outline-none placeholder-gray-400 min-w-0 disabled:cursor-not-allowed"
+          className="flex-1 typo-body bg-transparent outline-none placeholder-gray-400 min-w-0 disabled:cursor-not-allowed"
           placeholder={placeholder ?? `Search ${label}…`}
           value={open ? query : selectedLabel}
           disabled={disabled}
@@ -82,14 +82,14 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
       {open && !disabled && (
         <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1">
           {loading
-            ? <p className="px-4 py-3 text-sm text-gray-400">Loading…</p>
+            ? <p className="px-4 py-3 typo-body text-gray-400">Loading…</p>
             : filtered.length === 0
-              ? <p className="px-4 py-3 text-sm text-gray-400">No matches</p>
+              ? <p className="px-4 py-3 typo-body text-gray-400">No matches</p>
               : filtered.map(opt => (
                   <button
                     key={opt.id}
                     onClick={() => { onChange(opt.id); setOpen(false); setQuery(''); }}
-                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors
+                    className={`w-full text-left px-4 py-2.5 typo-body hover:bg-blue-50 transition-colors
                       ${value === opt.id ? 'text-blue-700 bg-blue-50' : 'text-gray-800'}`}
                   >
                     {opt.label}
@@ -230,15 +230,15 @@ export default function AppSearchHeader({
       {/* Page title (home mode) */}
       {mode === 'home' && (
         <div className="mb-4">
-          <h1 className="text-xl font-semibold text-gray-900">Application Mapping</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Search applications or navigate directly to a business service dependency map.</p>
+          <h1 className="typo-page-title">Application Mapping</h1>
+          <p className="typo-page-subtitle mt-0.5">Search applications or navigate directly to a business service dependency map.</p>
         </div>
       )}
 
       {/* Breadcrumb (detail mode) */}
       {mode === 'detail' && (
         <div className="flex items-center justify-between gap-3 mb-4">
-          <nav className="flex items-center gap-1.5 text-sm min-w-0">
+          <nav className="flex items-center gap-1.5 typo-body min-w-0">
             <button
               onClick={onBackToHome}
               className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
@@ -259,7 +259,7 @@ export default function AppSearchHeader({
                   type="button"
                   onClick={onRefresh}
                   disabled={refreshing}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg typo-body hover:bg-gray-50 transition-colors disabled:opacity-60"
                 >
                   <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
                 </button>
@@ -269,7 +269,7 @@ export default function AppSearchHeader({
                   <button
                     type="button"
                     onClick={() => setEditMenuOpen(open => !open)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg text-sm hover:bg-blue-50 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg typo-body hover:bg-blue-50 transition-colors"
                   >
                     <Edit2 className="w-4 h-4" /> Edit
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform ${editMenuOpen ? 'rotate-180' : ''}`} />
@@ -282,7 +282,7 @@ export default function AppSearchHeader({
                           onEditCi();
                           setEditMenuOpen(false);
                         }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left typo-body text-gray-700 hover:bg-gray-50 transition-colors"
                       >
                         <Edit2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                         Edit CI
@@ -293,7 +293,7 @@ export default function AppSearchHeader({
                           onEditRelationships();
                           setEditMenuOpen(false);
                         }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left typo-body text-gray-700 hover:bg-gray-50 transition-colors"
                       >
                         <Network className="w-3.5 h-3.5 text-blue-500 shrink-0" />
                         Edit Relationships
@@ -306,7 +306,7 @@ export default function AppSearchHeader({
                 href={`/${currentApp.table || 'cmdb_ci_service'}.do?sys_id=${currentApp.sysId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg typo-body hover:bg-indigo-50 transition-colors"
               >
                 <ExternalLink className="w-4 h-4" /> Open in ServiceNow
               </a>
@@ -317,7 +317,7 @@ export default function AppSearchHeader({
 
       {/* Jump to Application Details — shown in both home and detail modes */}
       <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
-        <p className="text-gray-500 text-xs font-medium mb-3 uppercase tracking-wide">Jump to Application Details</p>
+        <p className="typo-label mb-3">Jump to Application Details</p>
         <div className="flex gap-3 items-end">
           <Combobox
             label="IT Department"
@@ -339,7 +339,7 @@ export default function AppSearchHeader({
           <button
             onClick={handleGo}
             disabled={!selectedServiceId}
-            className="shrink-0 flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+            className="shrink-0 flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg typo-body font-medium transition-colors"
           >
             Go <ArrowRight className="w-4 h-4" />
           </button>

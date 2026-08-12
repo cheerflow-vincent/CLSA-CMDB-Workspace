@@ -30,7 +30,7 @@ export default function CollapsibleFormSection({
         aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 mb-3 py-1 hover:bg-gray-50 rounded transition-colors"
       >
-        <div className="flex items-center gap-2 text-base font-semibold text-gray-800">
+        <div className="flex items-center gap-2 typo-section-title">
           <span className="w-1 h-4 bg-blue-600 rounded-full shrink-0" />
           {caption}
         </div>

@@ -163,21 +163,21 @@ export default function ReferenceAutocomplete({
       className="bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1"
     >
       {loading && (
-        <p className="px-3 py-2 text-xs text-gray-400 flex items-center gap-2">
+        <p className="px-3 py-2 typo-caption flex items-center gap-2">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching…
         </p>
       )}
       {!loading && options.length === 0 && query.trim() && (
-        <p className="px-3 py-2 text-xs text-gray-400">No matches</p>
+        <p className="px-3 py-2 typo-caption">No matches</p>
       )}
       {!loading && !query.trim() && (
-        <p className="px-3 py-2 text-xs text-gray-400">Type to search by name</p>
+        <p className="px-3 py-2 typo-caption">Type to search by name</p>
       )}
       {options.map(opt => (
         <button
           key={opt.sys_id}
           type="button"
-          className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition-colors ${
+          className={`w-full text-left px-3 py-2 typo-body hover:bg-blue-50 transition-colors ${
             opt.sys_id === selectedId ? 'bg-blue-50 text-blue-800 font-medium' : 'text-gray-800'
           }`}
           onClick={() => pick(opt)}
@@ -191,8 +191,8 @@ export default function ReferenceAutocomplete({
   if (disabled) {
     return (
       <div className="min-w-0">
-        <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-        <div className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-600 min-h-[38px] break-words">
+        <label className="block typo-field-label mb-1">{label}</label>
+        <div className="w-full border border-gray-200 rounded-lg px-3 py-2 typo-body bg-gray-50 text-gray-600 min-h-[38px] break-words">
           {selectedLabel || '—'}
         </div>
       </div>
@@ -201,14 +201,14 @@ export default function ReferenceAutocomplete({
 
   return (
     <div ref={ref} className="min-w-0 relative">
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      <label className="block typo-field-label mb-1">{label}</label>
       <div className={inputShellClass(false, open)}>
         {loading
           ? <Loader2 className="w-4 h-4 text-gray-400 shrink-0 animate-spin" />
           : <Search className="w-4 h-4 text-gray-400 shrink-0" />}
         <input
           type="text"
-          className="flex-1 text-sm bg-transparent outline-none placeholder-gray-400 min-w-0"
+          className="flex-1 typo-body bg-transparent outline-none placeholder-gray-400 min-w-0"
           placeholder={placeholder}
           value={open ? query : selectedLabel}
           onChange={e => {

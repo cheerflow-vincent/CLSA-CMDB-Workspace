@@ -93,8 +93,8 @@ export default function RelationshipApprovalsView({ onNavigateToApp }: Props) {
             <Clock className="w-5 h-5 text-amber-700" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">Relationship Approvals</h1>
-            <p className="text-sm text-gray-500">
+            <h1 className="typo-page-title">Relationship Approvals</h1>
+            <p className="typo-page-subtitle">
               Pending removal requests assigned to you via ServiceNow approval.
             </p>
           </div>
@@ -109,24 +109,24 @@ export default function RelationshipApprovalsView({ onNavigateToApp }: Props) {
         ) : rows.length === 0 ? (
           <div className="max-w-md mx-auto text-center py-16">
             <GitBranch className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm text-gray-500">No pending relationship removal requests.</p>
+            <p className="typo-body text-gray-500">No pending relationship removal requests.</p>
           </div>
         ) : (
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full">
                 <thead>
-                  <tr className="bg-gray-50 text-left text-[10px] uppercase tracking-wide text-gray-400">
-                    <th className="px-3 py-2 font-semibold w-8" aria-label="Expand" />
-                    <th className="px-3 py-2 font-semibold">Source app</th>
-                    <th className="px-3 py-2 font-semibold">Target app</th>
-                    <th className="px-3 py-2 font-semibold">Type</th>
-                    <th className="px-3 py-2 font-semibold">Direction</th>
-                    <th className="px-3 py-2 font-semibold">Requested by</th>
-                    <th className="px-3 py-2 font-semibold">Status</th>
+                  <tr className="bg-gray-50 text-left typo-label text-gray-400">
+                    <th className="px-3 py-2 w-8" aria-label="Expand" />
+                    <th className="px-3 py-2">Source app</th>
+                    <th className="px-3 py-2">Target app</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2">Direction</th>
+                    <th className="px-3 py-2">Requested by</th>
+                    <th className="px-3 py-2">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody className="divide-y divide-gray-50 typo-body">
                   {rows.map(row => {
                     const change = row.change;
                     const isProcessing = processingIds.includes(row.sys_id);
@@ -187,7 +187,7 @@ export default function RelationshipApprovalsView({ onNavigateToApp }: Props) {
                                 <button
                                   type="button"
                                   onClick={() => toggleExpanded(row.sys_id)}
-                                  className="text-[10px] font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"
+                                  className="typo-badge text-amber-800 underline underline-offset-2 hover:text-amber-900"
                                 >
                                   Review
                                 </button>

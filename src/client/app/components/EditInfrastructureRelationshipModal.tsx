@@ -46,7 +46,7 @@ function InfraPill({
 
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border max-w-full"
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-full typo-badge border max-w-full"
       style={{
         backgroundColor: style.bg,
         borderColor: style.border,
@@ -136,12 +136,12 @@ function InfraAddRow({
         </div>
         {relTypesInUse.length > 1 && (
           <div className="w-44">
-            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Type</label>
+            <label className="block typo-label mb-1">Type</label>
             <select
               value={selectedRelType}
               disabled={disabled || adding}
               onChange={e => setSelectedRelType(e.target.value)}
-              className="w-full text-sm border border-gray-300 rounded-lg px-2 py-2 bg-white"
+              className="w-full typo-body border border-gray-300 rounded-lg px-2 py-2 bg-white"
             >
               {relTypesInUse.map(t => (
                 <option key={t} value={t}>{t}</option>
@@ -153,13 +153,13 @@ function InfraAddRow({
           type="button"
           disabled={disabled || adding || !editRawValue(addValue)}
           onClick={handleAdd}
-          className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-1.5"
+          className="px-3 py-2 typo-body bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 inline-flex items-center gap-1.5"
         >
           {adding && <Loader2 className="w-4 h-4 animate-spin" />}
           Add
         </button>
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="typo-caption text-red-600">{error}</p>}
     </div>
   );
 }
@@ -200,16 +200,16 @@ function InfraSection({
     <div className="mb-5">
       <div className="flex items-center gap-1.5 mb-2">
         <Icon className="w-4 h-4" style={{ color: style.border }} />
-        <label className="text-sm font-semibold text-gray-800">{meta.title}</label>
-        <span className="text-[10px] text-gray-400 ml-1">({config.relType})</span>
+        <label className="typo-panel-title text-gray-800">{meta.title}</label>
+        <span className="typo-caption ml-1">({config.relType})</span>
         {rows.length > 0 && (
-          <span className="ml-auto text-[10px] font-medium text-gray-500">{rows.length}</span>
+          <span className="ml-auto typo-badge text-gray-500">{rows.length}</span>
         )}
       </div>
 
       <div className="border border-gray-200 rounded-lg p-3 mb-2 min-h-[52px] bg-gray-50/50">
         {rows.length === 0 ? (
-          <p className="text-xs text-gray-400 italic">No linked {meta.title.toLowerCase()}</p>
+          <p className="typo-caption italic">No linked {meta.title.toLowerCase()}</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {rows.map(row => (
@@ -274,8 +274,8 @@ export default function EditInfrastructureRelationshipModal({
       >
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50 flex-shrink-0">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Edit Infrastructure Relationships</h2>
-            <p className="text-xs text-gray-500 mt-0.5 truncate">{selectedApp.name}</p>
+            <h2 className="typo-section-title text-gray-900">Edit Infrastructure Relationships</h2>
+            <p className="typo-caption mt-0.5 truncate">{selectedApp.name}</p>
           </div>
           <button
             type="button"
@@ -291,11 +291,11 @@ export default function EditInfrastructureRelationshipModal({
           {loading ? (
             <div className="flex items-center justify-center py-12 text-gray-400 gap-2">
               <Loader2 className="w-5 h-5 animate-spin" />
-              <span className="text-sm">Loading relationships…</span>
+              <span className="typo-body">Loading relationships…</span>
             </div>
           ) : (
             <>
-              <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+              <p className="typo-caption text-gray-500 mb-4 leading-relaxed">
                 Add or remove infrastructure CIs linked to this application.
                 Changes are applied immediately.
               </p>
@@ -316,7 +316,7 @@ export default function EditInfrastructureRelationshipModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+            className="px-4 py-2 rounded-lg typo-body font-medium bg-blue-600 text-white hover:bg-blue-700"
           >
             Close
           </button>

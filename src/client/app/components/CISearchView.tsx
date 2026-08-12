@@ -350,7 +350,7 @@ function ExportButton({
       type="button"
       onClick={exportCSV}
       disabled={disabled || exporting || !columns.length}
-      className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded-lg typo-body hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {exporting
         ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -400,32 +400,34 @@ function SearchResultCard({
   return (
     <div className="card-stack border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow bg-white">
       <div className="mb-3">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => onViewDetails(buildCIItem(row))}
-            title="View CI details"
-            className="text-sm font-semibold text-gray-900 hover:text-blue-700 hover:underline text-left break-words"
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            <button
+              type="button"
+              onClick={() => onViewDetails(buildCIItem(row))}
+              title="View CI details"
+              className="typo-panel-title text-gray-900 hover:text-blue-700 hover:underline text-left break-words"
+            >
+              {title}
+            </button>
+            <CIFlagBadges
+              incidents={row.incidents}
+              changes={row.changes}
+              onFlagClick={onFlagClick}
+              size="md"
+            />
+          </div>
+          <a
+            href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="typo-link shrink-0"
+            title="Open in ServiceNow"
           >
-            {title}
-          </button>
-          <CIFlagBadges
-            incidents={row.incidents}
-            changes={row.changes}
-            onFlagClick={onFlagClick}
-            size="md"
-          />
+            <ExternalLink className="w-3 h-3 shrink-0" />
+            Open in ServiceNow
+          </a>
         </div>
-        <a
-          href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-1"
-          title="Open in ServiceNow"
-        >
-          <ExternalLink className="w-3 h-3" />
-          Open in ServiceNow
-        </a>
       </div>
       {bodyCols.length > 0 && (
         <div className="border-t border-gray-100 pt-3 space-y-1">
@@ -1013,14 +1015,14 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         });
       };
       return (
-        <td key={col.element} className="px-6 py-4 max-w-[240px]">
-          <div className="flex flex-col items-start gap-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
+        <td key={col.element} className="px-6 py-4 max-w-[280px]">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
               <button
                 type="button"
                 onClick={() => onViewDetails(buildCIItem(row))}
                 title="View CI details"
-                className="font-medium text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
+                className="typo-body font-medium text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left break-words bg-transparent border-0 p-0"
               >
                 {val}
               </button>
@@ -1035,10 +1037,10 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+              className="typo-link shrink-0"
               title="Open in ServiceNow"
             >
-              <ExternalLink className="w-3 h-3" />
+              <ExternalLink className="w-3 h-3 shrink-0" />
               Open in ServiceNow
             </a>
           </div>
@@ -1047,7 +1049,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     }
 
     return (
-      <td key={col.element} className="px-6 py-4 text-sm text-gray-700 max-w-[200px] truncate" title={val}>
+      <td key={col.element} className="px-6 py-4 typo-body text-gray-700 max-w-[200px] truncate" title={val}>
         {val}
       </td>
     );
@@ -1056,13 +1058,13 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   return (
     <div className="p-6">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-gray-600 mb-6">
+      <div className="flex items-center gap-2 typo-body text-gray-600 mb-6">
         <span>Home</span><ChevronRight className="w-4 h-4" /><span className="text-gray-900">Welcome to CMDB</span>
       </div>
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Welcome to CMDB</h1>
+        <h1 className="typo-page-title">Welcome to CMDB</h1>
         <p className="text-gray-600 mt-1">Search and manage all configuration items from a single portal.</p>
       </div>
 
@@ -1078,9 +1080,9 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                 <div>
                   {count === null
                     ? <div className="h-7 w-16 bg-gray-200 animate-pulse rounded mb-1" />
-                    : <p className="text-2xl font-semibold text-gray-900">{count.toLocaleString()}</p>
+                    : <p className="typo-stat">{count.toLocaleString()}</p>
                   }
-                  <p className="text-sm text-gray-600">{label}</p>
+                  <p className="typo-body text-gray-600">{label}</p>
                 </div>
               </div>
             </button>
@@ -1092,7 +1094,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
         <div className="flex flex-col xl:flex-row xl:items-end gap-3">
           <div className="flex-1 min-w-0 xl:min-w-[220px]">
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">Application</label>
+            <label className="block typo-label mb-1.5">Application</label>
             <AppFamilyInstanceAutocomplete
               value={pending.appFilter}
               onChange={v => setPending(p => ({ ...p, appFilter: v }))}
@@ -1104,10 +1106,10 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           </div>
 
           <div className="w-full xl:w-44 shrink-0">
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">CI Type</label>
+            <label className="block typo-label mb-1.5">CI Type</label>
             <div className="relative">
               <select
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg appearance-none bg-white pr-10 text-sm"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg appearance-none bg-white pr-10 typo-body"
                 value={pending.ciType}
                 onChange={e => setPending(p => ({ ...p, ciType: e.target.value }))}
               >
@@ -1122,13 +1124,13 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           </div>
 
           <div className="flex-[1.5] min-w-0">
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">Keywords</label>
+            <label className="block typo-label mb-1.5">Keywords</label>
             <div className="relative">
               <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Search keywords…"
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg typo-body"
                 value={pending.keyword}
                 onChange={e => setPending(p => ({ ...p, keyword: e.target.value }))}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
@@ -1140,7 +1142,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             <button
               type="button"
               onClick={handleSearch}
-              className="flex-1 xl:flex-none px-6 py-2.5 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
+              className="flex-1 xl:flex-none px-6 py-2.5 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition-colors typo-body font-medium"
             >
               Search
             </button>
@@ -1148,7 +1150,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               type="button"
               onClick={handleReset}
               disabled={isAtDefault}
-              className="flex-1 xl:flex-none px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              className="flex-1 xl:flex-none px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed typo-body"
             >
               Reset
             </button>
@@ -1156,16 +1158,16 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         </div>
 
         {appFilterError && (
-          <p className="text-sm text-red-600 mt-3">{appFilterError}</p>
+          <p className="typo-body text-red-600 mt-3">{appFilterError}</p>
         )}
 
         {applied.appFilter && !appFilterLoading && appRelatedIdsByTab && allTotalCount === 0 && !applied.keyword.trim() && (
-          <p className="text-sm text-amber-700 mt-3">
+          <p className="typo-body text-amber-700 mt-3">
             No infrastructure CIs are linked to the selected application.
           </p>
         )}
 
-        <p className="text-xs text-gray-500 mt-3">
+        <p className="typo-caption text-gray-500 mt-3">
           Filter by application, keywords, or both. CI Type switches the results tab.
         </p>
       </div>
@@ -1180,9 +1182,9 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               return !isAccessDenied(tabData[tab].access) && !isAccessDenied(pillAccess[tab as keyof PillCounts]);
             }).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`py-3 whitespace-nowrap border-b-2 transition-colors text-sm ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
+                className={`py-3 whitespace-nowrap border-b-2 transition-colors typo-body ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                 {tabLabels[tab]}
-                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                <span className={`ml-1.5 typo-badge px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                   {loading && tab === activeTab
                     ? '…'
                     : tabResultCount(tab).toLocaleString()}
@@ -1205,7 +1207,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
 
         {/* Table toolbar */}
         <div className="px-6 pb-3 flex items-center justify-between">
-          <p className="text-sm text-gray-500">
+          <p className="typo-page-subtitle">
             {totalCount.toLocaleString()} result{totalCount !== 1 ? 's' : ''}
           </p>
           <ExportButton
@@ -1219,12 +1221,12 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         {narrow ? (
           <div className="px-6 pb-4 cards-grid-responsive">
             {loading ? (
-              <div className="col-span-full flex items-center justify-center gap-2 py-12 text-gray-400 text-sm">
+              <div className="col-span-full flex items-center justify-center gap-2 py-12 text-gray-400 typo-body">
                 <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
                 Loading records…
               </div>
             ) : displayRows.length === 0 ? (
-              <p className="col-span-full text-center text-gray-400 text-sm py-12">
+              <p className="col-span-full text-center text-gray-400 typo-body py-12">
                 No records found. Try adjusting your filters and click Search.
               </p>
             ) : (
@@ -1251,7 +1253,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               <tr>
                 {columns.map(col => (
                   <th key={col.element} className="px-6 py-3 text-left">
-                    <button type="button" className="flex items-center gap-2 text-xs font-medium text-gray-700 uppercase hover:text-gray-900">
+                    <button type="button" className="flex items-center gap-2 typo-label text-gray-700 hover:text-gray-900">
                       {col.label}<ArrowUpDown className="w-4 h-4" />
                     </button>
                   </th>
@@ -1267,7 +1269,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                           value={colFilters[col.element] ?? ''}
                           placeholder={`Filter ${col.label.toLowerCase()}…`}
                           onChange={e => setColFilter(col.element, e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
+                          className="w-full px-2 py-1 typo-body border border-gray-300 rounded bg-white placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
                         />
                         {colFilters[col.element] && (
                           <button
@@ -1287,7 +1289,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 typo-body">
                     <div className="flex items-center justify-center gap-2">
                       <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
                       Loading records…
@@ -1296,7 +1298,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                 </tr>
               ) : displayRows.length === 0 ? (
                 <tr>
-                  <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 typo-body">
                     No records found. Try adjusting your filters and click Search.
                   </td>
                 </tr>
@@ -1315,9 +1317,9 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         {/* Pagination */}
         <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-700">Rows per page:</span>
+            <span className="typo-body">Rows per page:</span>
             <select
-              className="border border-gray-300 rounded px-2 py-1 text-sm"
+              className="border border-gray-300 rounded px-2 py-1 typo-body"
               value={pageSize}
               onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }}
             >
@@ -1327,7 +1329,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             </select>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-700">
+            <span className="typo-body">
               {paginationTotal === 0 ? '0 of 0' : `${start}–${end} of ${paginationTotal.toLocaleString()}`}
               {activeTab === 'all' && allTotalCount > allMergedRows.length && (
                 <span className="text-gray-400 ml-1">({allTotalCount.toLocaleString()} total)</span>

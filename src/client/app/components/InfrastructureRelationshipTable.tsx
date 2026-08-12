@@ -117,11 +117,11 @@ function InfraTableSection({
           <Icon className={`w-4 h-4 ${section.iconColor}`} />
         </div>
         <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-gray-900">{style.label}</h4>
-          <p className="text-[11px] text-gray-500 truncate">{config.relType}</p>
+          <h4 className="typo-panel-title">{style.label}</h4>
+          <p className="typo-caption truncate">{config.relType}</p>
         </div>
         {totalCount !== null && (
-          <span className={`text-xs font-semibold ${section.badgeBg} ${section.badgeText} border ${section.badgeBorder} px-2.5 py-0.5 rounded-full shrink-0`}>
+          <span className={`typo-badge font-semibold ${section.badgeBg} ${section.badgeText} border ${section.badgeBorder} px-2.5 py-0.5 rounded-full shrink-0`}>
             {totalCount}
           </span>
         )}

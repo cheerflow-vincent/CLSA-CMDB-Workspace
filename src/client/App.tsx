@@ -280,7 +280,7 @@ export function App() {
         type="button"
         onClick={() => navTo(view, ciTab)}
         title={label}
-        className={`w-full flex items-center justify-start gap-3 px-3 py-2 rounded text-sm text-left transition-colors ${
+        className={`w-full flex items-center justify-start gap-3 px-3 py-2 rounded typo-body text-left transition-colors ${
           active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
         }`}
       >
@@ -301,7 +301,7 @@ export function App() {
         type="button"
         onClick={() => navToInventory(tab)}
         title={label}
-        className={`w-full flex items-center justify-start gap-3 px-3 py-2 rounded text-sm text-left transition-colors ${
+        className={`w-full flex items-center justify-start gap-3 px-3 py-2 rounded typo-body text-left transition-colors ${
           active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
         }`}
       >
@@ -354,7 +354,7 @@ export function App() {
         {/* ── Sidebar ────────────────────────────────────────────────────── */}
         <aside className={`${sidebarCollapsed ? 'w-16' : 'w-56'} bg-white border-r border-gray-200 flex flex-col transition-all duration-200 shrink-0`}>
           <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-            {!sidebarCollapsed && <span className="text-xs font-semibold text-gray-500 uppercase">Main Menu</span>}
+            {!sidebarCollapsed && <span className="typo-label px-3">Main Menu</span>}
             <button onClick={() => setSidebarCollapsed(c => !c)} className="p-1 hover:bg-gray-100 rounded">
               {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
@@ -365,7 +365,7 @@ export function App() {
             {navItem('rel-approvals', 'Relationship Approvals', Clock)}
             <div className={`pt-4 pb-2 ${sidebarCollapsed ? 'px-0' : ''}`}>
               {!sidebarCollapsed && (
-                <span className="text-xs font-semibold text-gray-500 uppercase px-3">Inventory</span>
+                <span className="typo-label px-3">Inventory</span>
               )}
             </div>
             {CI_INVENTORY_TABS.map(({ tab, label }) => inventoryItem(tab, label))}
@@ -444,33 +444,33 @@ function NotFoundView({ table, sysId, onGoHome, onGoSearch }: {
             <FileSearch className="w-10 h-10 text-gray-400" />
           </div>
         </div>
-        <h2 className="text-2xl font-semibold text-gray-900 mb-2">Record Not Found</h2>
-        <p className="text-gray-500 mb-2">
+        <h2 className="typo-page-title mb-2">Record Not Found</h2>
+        <p className="typo-page-subtitle mb-2">
           The requested configuration item could not be found in the CMDB.
         </p>
         {sysId && (
           <div className="mt-4 mb-6 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-left space-y-1">
-            <div className="flex gap-3 text-sm">
-              <span className="text-gray-400 w-16 shrink-0">Table</span>
-              <span className="font-mono text-gray-700 break-all">{table || '—'}</span>
+            <div className="flex gap-3 typo-body">
+              <span className="typo-field-label w-16">Table</span>
+              <span className="font-mono break-all">{table || '—'}</span>
             </div>
-            <div className="flex gap-3 text-sm">
-              <span className="text-gray-400 w-16 shrink-0">Sys ID</span>
-              <span className="font-mono text-gray-700 break-all">{sysId}</span>
+            <div className="flex gap-3 typo-body">
+              <span className="typo-field-label w-16">Sys ID</span>
+              <span className="font-mono break-all">{sysId}</span>
             </div>
           </div>
         )}
         <div className="flex gap-3 justify-center">
           <button
             onClick={onGoHome}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white typo-body font-medium rounded-lg hover:bg-blue-700 transition-colors"
           >
             <Home className="w-4 h-4" />
             App Home
           </button>
           <button
             onClick={onGoSearch}
-            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 typo-body font-medium rounded-lg hover:bg-gray-50 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
             CI Search

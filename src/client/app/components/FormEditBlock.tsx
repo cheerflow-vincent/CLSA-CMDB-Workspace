@@ -76,7 +76,7 @@ export default function FormEditBlock({
 
   if (!visibleSections.length) {
     return (
-      <p className="text-sm text-gray-400 italic py-4">
+      <p className="typo-body text-gray-400 italic py-4">
         Edit form not configured or no editable fields are visible.
       </p>
     );

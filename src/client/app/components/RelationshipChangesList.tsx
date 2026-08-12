@@ -48,7 +48,7 @@ function PaginationBar({
 }) {
   return (
     <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-      <span className="text-[11px] text-gray-400">
+      <span className="typo-caption">
         Showing {start}–{end} of {totalCount}
       </span>
       <div className="flex gap-1">
@@ -205,40 +205,40 @@ export default function RelationshipChangesList({
         <div className="p-1.5 bg-amber-100 rounded flex-shrink-0">
           <GitBranch className="w-4 h-4 text-amber-700" />
         </div>
-        <span className="flex-1 text-xs text-gray-700 font-medium">Relationship Changes</span>
+        <span className="flex-1 typo-panel-title text-gray-700">Relationship Changes</span>
         <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
         {pendingCount > 0 && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+          <span className="typo-badge font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
             {pendingCount} pending
           </span>
         )}
         {!loading && pendingCount === 0 && totalCount > 0 && (
-          <span className="text-[10px] text-gray-400">{totalCount} total</span>
+          <span className="typo-caption">{totalCount} total</span>
         )}
       </button>
 
       {isOpen && (
         <div className="border-t border-gray-100">
           {loading ? (
-            <div className="flex items-center justify-center py-6 text-gray-400 gap-2 text-xs">
+            <div className="flex items-center justify-center py-6 text-gray-400 gap-2 typo-caption">
               <Loader2 className="w-4 h-4 animate-spin" /> Loading…
             </div>
           ) : totalCount === 0 ? (
-            <p className="px-3 py-4 text-xs text-gray-400 italic">No relationship changes for this application.</p>
+            <p className="px-3 py-4 typo-caption italic">No relationship changes for this application.</p>
           ) : (
             <>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full">
                 <thead>
-                  <tr className="bg-gray-50 text-left text-[10px] uppercase tracking-wide text-gray-400">
+                  <tr className="bg-gray-50 text-left typo-label text-gray-400">
                     <th className="px-3 py-2 font-semibold w-8" aria-label="Expand" />
-                    <th className="px-3 py-2 font-semibold">Action</th>
-                    <th className="px-3 py-2 font-semibold">Peer</th>
-                    <th className="px-3 py-2 font-semibold">Type</th>
-                    <th className="px-3 py-2 font-semibold">State</th>
+                    <th className="px-3 py-2">Action</th>
+                    <th className="px-3 py-2">Peer</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2">State</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody className="divide-y divide-gray-50 typo-body">
                   {rows.map(row => {
                     const approval = approvalByDocumentId.get(row.sys_id);
                     const isProcessing = processingSet.has(row.sys_id);
@@ -287,7 +287,7 @@ export default function RelationshipChangesList({
                                 <button
                                   type="button"
                                   onClick={() => toggleExpanded(row.sys_id)}
-                                  className="text-[10px] font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"
+                                  className="typo-badge text-amber-800 underline underline-offset-2 hover:text-amber-900"
                                 >
                                   Review
                                 </button>

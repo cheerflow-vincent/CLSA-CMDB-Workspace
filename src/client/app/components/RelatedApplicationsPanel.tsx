@@ -29,8 +29,8 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick }: {
       <button type="button" onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-3 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-left">
         <Package className="w-4 h-4 text-gray-500 shrink-0" />
-        <span className="text-sm font-semibold text-gray-800 flex-1">{svc.name}</span>
-        <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
+        <span className="typo-panel-title text-gray-800 flex-1">{svc.name}</span>
+        <span className="typo-badge text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
           {svc.instances.length} instance{svc.instances.length !== 1 ? 's' : ''}
         </span>
         {open ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />}
@@ -82,10 +82,10 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick }: {
           <Building2 className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900">{app.name}</p>
-          {app.short_description && <p className="text-xs text-gray-400 truncate">{app.short_description}</p>}
+          <p className="typo-panel-title">{app.name}</p>
+          {app.short_description && <p className="typo-caption truncate">{app.short_description}</p>}
         </div>
-        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+        <span className="typo-badge text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
           {app.totalInstances} instance{app.totalInstances !== 1 ? 's' : ''}
         </span>
         {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
@@ -116,10 +116,10 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
           <Layers className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900">{appSvc.name}</p>
-          {appSvc.short_description && <p className="text-xs text-gray-400 truncate">{appSvc.short_description}</p>}
+          <p className="typo-panel-title">{appSvc.name}</p>
+          {appSvc.short_description && <p className="typo-caption truncate">{appSvc.short_description}</p>}
         </div>
-        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
+        <span className="typo-badge text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">
           {appSvc.instances.length} instance{appSvc.instances.length !== 1 ? 's' : ''}
         </span>
         {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
@@ -223,13 +223,13 @@ export default function RelatedApplicationsPanel({
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center py-12 text-gray-400 gap-2 text-sm">
+        <div className="flex items-center justify-center py-12 text-gray-400 gap-2 typo-body">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading related applications…
         </div>
       )}
 
       {!loading && !hasData && (
-        <p className="text-sm text-gray-400 italic text-center py-8">No related application instances found.</p>
+        <p className="typo-body text-gray-400 italic text-center py-8">No related application instances found.</p>
       )}
 
       {!loading && hierarchyMode && threeLevel.map(app => (

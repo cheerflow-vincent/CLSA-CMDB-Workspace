@@ -211,7 +211,7 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
         fontSize: isCenter ? 12 : 11,
         fontWeight: isCenter ? 600 : 400,
         color: isCenter ? '#111827' : style!.text,
-        fontFamily: 'system-ui,-apple-system,sans-serif',
+        fontFamily: 'var(--font-sans)',
         whiteSpace: 'normal',
         wordBreak: 'break-word',
         lineHeight: '1.35',
@@ -239,7 +239,7 @@ function MI({ icon, label, onClick, cls = 'text-gray-700 hover:bg-gray-50' }: {
 }) {
   return (
     <button type="button" onClick={onClick}
-      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors ${cls}`}>
+      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left typo-body transition-colors ${cls}`}>
       {icon}<span>{label}</span>
     </button>
   );
@@ -381,7 +381,7 @@ function InfrastructureDiagramInner({
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-            <span className="text-sm text-gray-500">Loading infrastructure…</span>
+            <span className="typo-page-subtitle">Loading infrastructure…</span>
           </div>
         </div>
       )}
@@ -389,8 +389,8 @@ function InfrastructureDiagramInner({
       {!loading && peerCount === 0 && selectedApp?.sysId && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="text-center text-gray-400 px-6">
-            <p className="text-sm font-medium text-gray-500">No infrastructure relationships found</p>
-            <p className="text-xs mt-1">Servers, network gear, network links, and databases linked to this application will appear here.</p>
+            <p className="typo-body font-medium text-gray-500">No infrastructure relationships found</p>
+            <p className="typo-caption mt-1">Servers, network gear, network links, and databases linked to this application will appear here.</p>
           </div>
         </div>
       )}
@@ -421,8 +421,8 @@ function InfrastructureDiagramInner({
           onClick={e => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b border-gray-100">
-            <p className="text-xs font-semibold text-gray-800 truncate">{nodeMenu.label}</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">
+            <p className="typo-panel-title truncate">{nodeMenu.label}</p>
+            <p className="typo-caption mt-0.5">
               {nodeMenu.isCenter ? 'Current Application' : 'Infrastructure CI'}
             </p>
           </div>
@@ -461,7 +461,7 @@ function InfrastructureDiagramInner({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={closeMenu}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-sm text-indigo-600 hover:bg-indigo-50 transition-colors"
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left typo-body text-indigo-600 hover:bg-indigo-50 transition-colors"
                 >
                   <ExternalLink size={14} className="flex-shrink-0" />
                   Open in ServiceNow
@@ -498,7 +498,7 @@ function InfrastructureDiagramInner({
             {!nodeMenu.isCenter && (
               <>
                 {menuPermissions?.loading && (
-                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400">
+                  <div className="flex items-center gap-2 px-3 py-2 typo-caption">
                     <Loader2 size={12} className="animate-spin" /> Checking permissions…
                   </div>
                 )}
