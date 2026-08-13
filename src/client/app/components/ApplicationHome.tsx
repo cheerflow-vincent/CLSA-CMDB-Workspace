@@ -7,10 +7,10 @@ import {
 } from 'lucide-react';
 import FlagDetailPanel, { type FlagType, type IncidentRecord, type ChangeRecord } from './FlagDetailPanel';
 import AppSearchHeader from './AppSearchHeader';
-import { fetchPortalMetadata, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { fetchPortalMetadata, type TableAccess } from '../../api/servicenow';
 import { isAccessDenied } from '../utils/acl';
 import { str } from '../utils/viewFields';
-import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG, taskCiQuery } from '../utils/relatedTasks';
+import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG } from '../utils/relatedTasks';
 import {
   mockApplications, appIncidents, appChanges, appFamilies,
   type AppItem, type AppFamily,
@@ -24,12 +24,16 @@ import {
   fetchFlagCountsForIds,
   loadInstanceCatalog,
   mergeFilterCriteria,
+  criteriaForHierarchy,
   hasActiveLiveFilters,
   sidebarFiltersEqual,
   fetchApplicationHomePageUnified,
+  fetchAppHomeStats,
+  buildAppHomeTaskSummaryBranches,
   sumFlagCounts,
   FAMILY_PAGE_SIZE,
   SEARCH_DEBOUNCE_MS,
+  isOthersFamilyId,
 } from '../utils/appHomeLoader';
 import type { CITaskFlagCounts } from '../utils/relatedCIFlags';
 import {
@@ -45,6 +49,10 @@ interface ApplicationHomeProps {
 }
 
 interface FilterOption { label: string; value: string }
+
+type LivePanelState =
+  | { kind: 'instance'; title: string; flagType: FlagType; recordSysId: string }
+  | { kind: 'summary'; title: string; subtitle: string; flagType: 'incident' | 'change'; encodedQueries: string[] };
 
 // ─── Style helpers ────────────────────────────────────────────────────────────
 const envBadge: Record<string, string> = {
@@ -157,7 +165,12 @@ function assembleThreeLevelHierarchy(
       totalChanges: appTotals.changes,
       totalInstances: allInstIds.length,
     };
-  }).filter(app => app.services.length > 0);
+  }).filter(app => app.services.length > 0)
+    .sort((a, b) => {
+      if (isOthersFamilyId(a.sys_id)) return 1;
+      if (isOthersFamilyId(b.sys_id)) return -1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 // ─── System property reader ───────────────────────────────────────────────────
@@ -203,7 +216,11 @@ function assembleTwoLevelFamilies(
       };
     })
     .filter(s => s.instanceIds.length > 0)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      if (isOthersFamilyId(a.sys_id)) return 1;
+      if (isOthersFamilyId(b.sys_id)) return -1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 const safe = str;
@@ -639,11 +656,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [panel, setPanel] = useState<{ app: AppItem; flagType: FlagType } | null>(null);
 
   // Live data panel
-  const [livePanel, setLivePanel] = useState<{
-    title: string;
-    flagType: FlagType;
-    recordSysId: string;
-  } | null>(null);
+  const [livePanel, setLivePanel] = useState<LivePanelState | null>(null);
 
   // ── Live filter options ────────────────────────────────────────────────────
   const [envOptions,     setEnvOptions]     = useState<FilterOption[]>([]);
@@ -690,12 +703,24 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const filterTokenRef = useRef<string | null>(null);
   const criteriaKeyRef = useRef('');
 
-  const appliedFilterCriteria = useMemo(
+  const rawFilterCriteria = useMemo(
     () => mergeFilterCriteria(appliedSearch, appliedSidebar),
     [appliedSearch, appliedSidebar],
   );
+  const appliedFilterCriteria = useMemo(
+    () => (hierarchyMode === false
+      ? criteriaForHierarchy(rawFilterCriteria, false)
+      : rawFilterCriteria),
+    [rawFilterCriteria, hierarchyMode],
+  );
   const filtersActive = hasActiveLiveFilters(appliedFilterCriteria);
   const hasPendingFilterChanges = !sidebarFiltersEqual(draftSidebar, appliedSidebar);
+
+  useEffect(() => {
+    if (hierarchyMode !== false) return;
+    setDraftSidebar(prev => (prev.env.length ? { ...prev, env: [] } : prev));
+    setAppliedSidebar(prev => (prev.env.length ? { ...prev, env: [] } : prev));
+  }, [hierarchyMode]);
 
   // Debounced toolbar search → applied server query
   useEffect(() => {
@@ -716,58 +741,46 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   });
 
   useEffect(() => {
-    if (hierarchyMode === null) return; // wait until mode is resolved
-
-    const count = (table: string, query?: string) =>
-      queryTableWithAccess({ table, query, fields: ['sys_id'], limit: 1 })
-        .then(({ totalCount, access }) => ({ totalCount, access }));
-
-    if (hierarchyMode) {
-      Promise.all([
-        count('cmdb_ci_service_auto'),
-        count('cmdb_ci_service_auto', 'operational_status=1'),
-        count('task_ci', taskCiQuery('ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto', INCIDENT_TASK_CONFIG)),
-        count('task_ci', taskCiQuery('ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto', CHANGE_TASK_CONFIG)),
-      ])
-        .then(([totalR, operationalR, incidentsR, changesR]) => {
-          setLiveStats({
-            total: totalR.access === 'denied' ? 0 : totalR.totalCount,
-            operational: operationalR.access === 'denied' ? 0 : operationalR.totalCount,
-            incidents: incidentsR.access === 'denied' ? 0 : incidentsR.totalCount,
-            changes: changesR.access === 'denied' ? 0 : changesR.totalCount,
-          });
-          setStatsAccess({
-            total: totalR.access,
-            operational: operationalR.access,
-            incidents: incidentsR.access,
-            changes: changesR.access,
-          });
-        })
-        .finally(() => setStatsLoading(false));
-    } else {
-      Promise.all([
-        count('cmdb_ci_service', 'u_service_type=instance'),
-        count('cmdb_ci_service', 'u_service_type=instance^operational_status=1'),
-        count('task_ci', taskCiQuery('ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance', INCIDENT_TASK_CONFIG)),
-        count('task_ci', taskCiQuery('ci_item.sys_class_name=cmdb_ci_service^ci_item.u_service_type=instance', CHANGE_TASK_CONFIG)),
-      ])
-        .then(([totalR, operationalR, incidentsR, changesR]) => {
-          setLiveStats({
-            total: totalR.access === 'denied' ? 0 : totalR.totalCount,
-            operational: operationalR.access === 'denied' ? 0 : operationalR.totalCount,
-            incidents: incidentsR.access === 'denied' ? 0 : incidentsR.totalCount,
-            changes: changesR.access === 'denied' ? 0 : changesR.totalCount,
-          });
-          setStatsAccess({
-            total: totalR.access,
-            operational: operationalR.access,
-            incidents: incidentsR.access,
-            changes: changesR.access,
-          });
-        })
-        .finally(() => setStatsLoading(false));
+    if (hierarchyMode === null) return;
+    if (filtersActive && liveLoading) {
+      setStatsLoading(true);
+      return;
     }
-  }, [hierarchyMode]);
+
+    let cancelled = false;
+    setStatsLoading(true);
+
+    fetchAppHomeStats(hierarchyMode, filtersActive, filteredInstIds)
+      .then(stats => {
+        if (cancelled) return;
+        setLiveStats({
+          total: stats.total,
+          operational: stats.operational,
+          incidents: stats.incidents,
+          changes: stats.changes,
+        });
+        setStatsAccess(stats.access);
+      })
+      .finally(() => {
+        if (!cancelled) setStatsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [hierarchyMode, appliedFilterCriteria, filteredInstIds, filtersActive, liveLoading]);
+
+  const handleStatSummaryClick = useCallback((flagType: 'incident' | 'change') => {
+    if (hierarchyMode === null) return;
+    const config = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
+    const instanceIds = filtersActive ? (filteredInstIds ? [...filteredInstIds] : []) : null;
+    const encodedQueries = buildAppHomeTaskSummaryBranches(instanceIds, hierarchyMode, config);
+    setLivePanel({
+      kind: 'summary',
+      title: filtersActive ? 'Filtered Application Instances' : 'All Application Instances',
+      subtitle: flagType === 'incident' ? 'Active Incidents' : 'Upcoming Changes',
+      flagType,
+      encodedQueries,
+    });
+  }, [hierarchyMode, filtersActive, filteredInstIds]);
 
   useEffect(() => {
     readHierarchyMode().then(setHierarchyMode).catch(e => {
@@ -991,6 +1004,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               )}
             </div>
 
+            {hierarchyMode === true && (
             <FilterSection title="Environment">
               {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
                 : envOptions.length === 0 ? <p className="typo-caption italic">No options</p>
@@ -1004,6 +1018,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   ))
               }
             </FilterSection>
+            )}
 
             <FilterSection title="Status">
               {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
@@ -1091,8 +1106,32 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               { key: 'operational' as const, label: 'Operational',      value: liveStats.operational,  icon: <CheckCircle2 className="w-5 h-5 text-green-500" /> },
               { key: 'incidents' as const,   label: 'Active Incidents', value: liveStats.incidents,    icon: <AlertCircle  className="w-5 h-5 text-red-500"   /> },
               { key: 'changes' as const,     label: 'Upcoming Changes', value: liveStats.changes,      icon: <Calendar     className="w-5 h-5 text-yellow-500"/> },
-            ]).filter(s => !isAccessDenied(statsAccess[s.key])).map((s, i, arr) => (
-              <div key={s.key} className={`px-5 py-4 flex items-center gap-4 ${i < arr.length - 1 ? 'border-r border-gray-200' : ''}`}>
+            ]).filter(s => !isAccessDenied(statsAccess[s.key])).map((s, i, arr) => {
+              const clickable = s.key === 'incidents' || s.key === 'changes';
+              const className = `px-5 py-4 flex items-center gap-4 ${i < arr.length - 1 ? 'border-r border-gray-200' : ''}${clickable ? ' hover:bg-gray-50 cursor-pointer transition-colors text-left w-full' : ''}`;
+
+              if (clickable) {
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => handleStatSummaryClick(s.key === 'incidents' ? 'incident' : 'change')}
+                    className={className}
+                  >
+                    <div className="p-2 bg-gray-50 rounded-lg">{s.icon}</div>
+                    <div>
+                      {statsLoading
+                        ? <div className="h-7 w-12 bg-gray-200 rounded animate-pulse mb-1" />
+                        : <p className="typo-stat">{s.value.toLocaleString()}</p>
+                      }
+                      <p className="typo-caption text-gray-500">{s.label}</p>
+                    </div>
+                  </button>
+                );
+              }
+
+              return (
+              <div key={s.key} className={className}>
                 <div className="p-2 bg-gray-50 rounded-lg">{s.icon}</div>
                 <div>
                   {statsLoading
@@ -1102,7 +1141,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   <p className="typo-caption text-gray-500">{s.label}</p>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Toolbar */}
@@ -1172,7 +1212,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   app={app}
                   viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
-                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
+                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ kind: 'instance', title, flagType: ft, recordSysId })}
                   onExpandService={handleExpandService}
                 />
               ))}
@@ -1196,7 +1236,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   appSvc={appSvc}
                   viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
-                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ title, flagType: ft, recordSysId })}
+                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ kind: 'instance', title, flagType: ft, recordSysId })}
                   onExpand={() => handleExpandAppSvc(appSvc)}
                 />
               ))}
@@ -1247,13 +1287,23 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
       {/* Live data flag panel */}
       {livePanel && (
-        <FlagDetailPanel
-          title={livePanel.title}
-          subtitle="Application Instance"
-          flagType={livePanel.flagType}
-          recordSysId={livePanel.recordSysId}
-          onClose={() => setLivePanel(null)}
-        />
+        livePanel.kind === 'instance' ? (
+          <FlagDetailPanel
+            title={livePanel.title}
+            subtitle="Application Instance"
+            flagType={livePanel.flagType}
+            recordSysId={livePanel.recordSysId}
+            onClose={() => setLivePanel(null)}
+          />
+        ) : (
+          <FlagDetailPanel
+            title={livePanel.title}
+            subtitle={livePanel.subtitle}
+            flagType={livePanel.flagType}
+            encodedQueries={livePanel.encodedQueries}
+            onClose={() => setLivePanel(null)}
+          />
+        )
       )}
     </div>
   );

@@ -6,10 +6,13 @@ ApplicationHomeHandler.prototype = {
   EDGE_BATCH: 100,
   MAX_EDGES: 50000,
   CACHE_PREFIX: 'clsa_app_home_filter_',
-  UNFILTERED_CACHE_PREFIX: 'clsa_app_home_unfiltered_',
+  UNFILTERED_CACHE_PREFIX: 'clsa_app_home_unfiltered_v2_',
   CACHE_TTL_MS: 15 * 60 * 1000,
   DEFAULT_PAGE_SIZE: 50,
   LOG_SOURCE: 'CLSA.AppHome',
+  OTHERS_FAMILY_ID: '__others__',
+  OTHERS_SVC_ID: '__others_svc__',
+  OTHERS_FAMILY_NAME: '[Others]',
 
   /** Writes to System Logs → Application Logs (filter source: CLSA.AppHome). */
   logQuery: function (label, message) {
@@ -261,10 +264,11 @@ ApplicationHomeHandler.prototype = {
     return this.CACHE_PREFIX + token;
   },
 
-  storeFilterCache: function (token, families, instanceIds) {
+  storeFilterCache: function (token, families, instanceIds, orphanIds) {
     var data = {
       families: families,
       instance_ids: instanceIds,
+      orphan_ids: orphanIds || [],
       created_at: new Date().getTime(),
     };
     gs.getSession().putClientData(this.cacheKey(token), JSON.stringify(data));
@@ -287,9 +291,10 @@ ApplicationHomeHandler.prototype = {
     return this.UNFILTERED_CACHE_PREFIX + (twoLevel ? '2l' : '3l');
   },
 
-  storeUnfilteredCache: function (twoLevel, families) {
+  storeUnfilteredCache: function (twoLevel, families, orphanIds) {
     gs.getSession().putClientData(this.unfilteredCacheKey(twoLevel), JSON.stringify({
       families: families,
+      orphan_ids: orphanIds || [],
       created_at: new Date().getTime(),
     }));
   },
@@ -301,17 +306,184 @@ ApplicationHomeHandler.prototype = {
       var data = JSON.parse(raw);
       if (!data || !data.created_at || !Array.isArray(data.families)) return null;
       if (new Date().getTime() - data.created_at > this.CACHE_TTL_MS) return null;
-      return data.families;
+      if (!Object.prototype.hasOwnProperty.call(data, 'orphan_ids')) return null;
+      return {
+        families: data.families,
+        orphan_ids: data.orphan_ids || [],
+      };
     } catch (e) {
       return null;
     }
+  },
+
+  fetchAllInstanceSysIds: function (twoLevel) {
+    var ids = [];
+    var table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_service_auto';
+    var gr = new GlideRecord(table);
+    if (twoLevel) gr.addQuery('u_service_type', 'instance');
+    gr.query();
+    while (gr.next()) ids.push(gr.getUniqueValue());
+    return ids;
+  },
+
+  /** All app-family / business-app family sys_ids (not just visible/paged families). */
+  fetchAllFamilyIds: function (twoLevel) {
+    var ids = [];
+    var table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_business_app';
+    var gr = new GlideRecord(table);
+    if (twoLevel) gr.addQuery('u_service_type', 'service');
+    gr.query();
+    while (gr.next()) ids.push(gr.getUniqueValue());
+    return ids;
+  },
+
+  /** Instance sys_ids reachable from any real app family via hierarchy rel_ci walks. */
+  fetchLinkedInstanceIds: function (twoLevel, restrictSet) {
+    var linked = {};
+    var familyIds = this.fetchAllFamilyIds(twoLevel);
+    if (!familyIds.length) return linked;
+
+    var families = [];
+    for (var fi = 0; fi < familyIds.length; fi++) {
+      families.push({ sys_id: familyIds[fi], name: '', short_description: '' });
+    }
+
+    var mapping = twoLevel
+      ? this.buildTwoLevelMapping(families, restrictSet)
+      : this.buildThreeLevelMapping(families, restrictSet);
+
+    if (!mapping) return linked;
+
+    if (twoLevel) {
+      for (var appId in mapping.app_to_instances) {
+        if (!mapping.app_to_instances.hasOwnProperty(appId)) continue;
+        if (appId === this.OTHERS_FAMILY_ID) continue;
+        var instArr = mapping.app_to_instances[appId] || [];
+        for (var i = 0; i < instArr.length; i++) linked[instArr[i]] = true;
+      }
+    } else {
+      var instIds = mapping.instance_ids || [];
+      for (var j = 0; j < instIds.length; j++) linked[instIds[j]] = true;
+    }
+    return linked;
+  },
+
+  /** Instances with no app-family link — grouped into [Others] on the home page. */
+  computeOrphanInstanceIds: function (twoLevel, restrictSet) {
+    var universe = restrictSet ? Object.keys(restrictSet) : this.fetchAllInstanceSysIds(twoLevel);
+    if (!universe.length) return [];
+
+    var linked = this.fetchLinkedInstanceIds(twoLevel, restrictSet);
+    var orphans = [];
+    for (var k = 0; k < universe.length; k++) {
+      if (!linked[universe[k]]) orphans.push(universe[k]);
+    }
+    this.logQuery(
+      'orphan_instances',
+      'two_level=' + twoLevel
+        + ' universe=' + universe.length
+        + ' linked=' + Object.keys(linked).length
+        + ' orphans=' + orphans.length
+    );
+    return orphans;
+  },
+
+  appendOthersToTwoLevelMapping: function (mapping, orphanIds) {
+    if (!orphanIds.length) return mapping;
+
+    if (!mapping) {
+      var onlyMeta = {};
+      onlyMeta[this.OTHERS_FAMILY_ID] = {
+        name: this.OTHERS_FAMILY_NAME,
+        short_description: '',
+      };
+      var onlyMap = {};
+      onlyMap[this.OTHERS_FAMILY_ID] = orphanIds.slice();
+      return {
+        app_family_meta: onlyMeta,
+        app_to_instances: onlyMap,
+        instance_svc_ids: orphanIds.slice(),
+      };
+    }
+
+    mapping.app_family_meta[this.OTHERS_FAMILY_ID] = {
+      name: this.OTHERS_FAMILY_NAME,
+      short_description: '',
+    };
+    mapping.app_to_instances[this.OTHERS_FAMILY_ID] = orphanIds.slice();
+
+    var instMap = {};
+    var existing = mapping.instance_svc_ids || [];
+    for (var ei = 0; ei < existing.length; ei++) instMap[existing[ei]] = true;
+    for (var oi = 0; oi < orphanIds.length; oi++) instMap[orphanIds[oi]] = true;
+    mapping.instance_svc_ids = Object.keys(instMap);
+    return mapping;
+  },
+
+  appendOthersToThreeLevelMapping: function (mapping, orphanIds) {
+    if (!orphanIds.length) return mapping;
+
+    if (!mapping) {
+      var onlySvcMap = {};
+      onlySvcMap[this.OTHERS_SVC_ID] = {
+        name: this.OTHERS_FAMILY_NAME,
+        short_description: '',
+      };
+      var onlyBAppToSvcs = {};
+      onlyBAppToSvcs[this.OTHERS_FAMILY_ID] = [this.OTHERS_SVC_ID];
+      var onlySvcToInst = {};
+      onlySvcToInst[this.OTHERS_SVC_ID] = orphanIds.slice();
+      return {
+        b_apps: [{
+          sys_id: this.OTHERS_FAMILY_ID,
+          name: this.OTHERS_FAMILY_NAME,
+          short_description: '',
+        }],
+        svc_map: onlySvcMap,
+        b_app_to_svcs: onlyBAppToSvcs,
+        svc_to_inst_ids: onlySvcToInst,
+        instance_ids: orphanIds.slice(),
+      };
+    }
+
+    mapping.svc_map[this.OTHERS_SVC_ID] = {
+      name: this.OTHERS_FAMILY_NAME,
+      short_description: '',
+    };
+    mapping.b_app_to_svcs[this.OTHERS_FAMILY_ID] = [this.OTHERS_SVC_ID];
+    mapping.svc_to_inst_ids[this.OTHERS_SVC_ID] = orphanIds.slice();
+
+    var hasOthers = false;
+    for (var bi = 0; bi < mapping.b_apps.length; bi++) {
+      if (mapping.b_apps[bi].sys_id === this.OTHERS_FAMILY_ID) {
+        hasOthers = true;
+        break;
+      }
+    }
+    if (!hasOthers) {
+      mapping.b_apps.push({
+        sys_id: this.OTHERS_FAMILY_ID,
+        name: this.OTHERS_FAMILY_NAME,
+        short_description: '',
+      });
+    }
+
+    var instMap = {};
+    var existing = mapping.instance_ids || [];
+    for (var ei = 0; ei < existing.length; ei++) instMap[existing[ei]] = true;
+    for (var oi = 0; oi < orphanIds.length; oi++) instMap[orphanIds[oi]] = true;
+    mapping.instance_ids = Object.keys(instMap);
+    return mapping;
   },
 
   /** Scan all family rows; return only those with at least one instance (session-cached). */
   resolveUnfilteredVisibleFamilies: function (twoLevel) {
     var cached = this.loadUnfilteredCache(twoLevel);
     if (cached) {
-      this.logQuery('unfiltered_cache_hit', 'families=' + cached.length);
+      this.logQuery(
+        'unfiltered_cache_hit',
+        'families=' + cached.families.length + ' orphans=' + (cached.orphan_ids ? cached.orphan_ids.length : 0)
+      );
       return cached;
     }
 
@@ -352,6 +524,7 @@ ApplicationHomeHandler.prototype = {
         if (twoLevel) {
           for (var appId in mapping.app_family_meta) {
             if (!mapping.app_family_meta.hasOwnProperty(appId)) continue;
+            if (appId === this.OTHERS_FAMILY_ID) continue;
             var meta = mapping.app_family_meta[appId];
             visible.push({
               sys_id: appId,
@@ -361,6 +534,7 @@ ApplicationHomeHandler.prototype = {
           }
         } else {
           for (var i = 0; i < mapping.b_apps.length; i++) {
+            if (mapping.b_apps[i].sys_id === this.OTHERS_FAMILY_ID) continue;
             visible.push(mapping.b_apps[i]);
           }
         }
@@ -371,12 +545,15 @@ ApplicationHomeHandler.prototype = {
     }
 
     visible = this.sortFamilies(visible);
-    this.storeUnfilteredCache(twoLevel, visible);
+    var orphanIds = this.computeOrphanInstanceIds(twoLevel, null);
+    this.storeUnfilteredCache(twoLevel, visible, orphanIds);
     this.logQuery(
       'unfiltered_visible_scan_result',
-      'table_rows_scanned=' + tableRowsScanned + ' visible_families=' + visible.length
+      'table_rows_scanned=' + tableRowsScanned
+        + ' visible_families=' + visible.length
+        + ' orphan_instances=' + orphanIds.length
     );
-    return visible;
+    return { families: visible, orphan_ids: orphanIds };
   },
 
   sortFamilies: function (families) {
@@ -857,6 +1034,7 @@ ApplicationHomeHandler.prototype = {
       var families = [];
       var totalFamilies = 0;
       var instanceIds = [];
+      var orphanIds = [];
       var truncated = false;
       var access = 'ok';
       var resultToken = null;
@@ -872,11 +1050,15 @@ ApplicationHomeHandler.prototype = {
         if (cacheUsable) {
           families = cache.families;
           instanceIds = cache.instance_ids || [];
+          orphanIds = Object.prototype.hasOwnProperty.call(cache, 'orphan_ids')
+            ? (cache.orphan_ids || [])
+            : this.computeOrphanInstanceIds(twoLevel, this.restrictSetFromArray(instanceIds));
           totalFamilies = families.length;
           resultToken = filterToken;
           this.logQuery(
             'filter_cache_hit',
             'families=' + families.length + ' instance_ids=' + instanceIds.length
+              + ' orphans=' + orphanIds.length
           );
         } else {
           if (cache) {
@@ -895,10 +1077,13 @@ ApplicationHomeHandler.prototype = {
           totalFamilies = families.length;
           truncated = resolved.truncated || false;
           resultToken = this.makeFilterToken();
-          this.storeFilterCache(resultToken, families, instanceIds);
+          orphanIds = this.computeOrphanInstanceIds(twoLevel, this.restrictSetFromArray(instanceIds));
+          this.storeFilterCache(resultToken, families, instanceIds, orphanIds);
         }
       } else {
-        families = this.resolveUnfilteredVisibleFamilies(twoLevel);
+        var unfiltered = this.resolveUnfilteredVisibleFamilies(twoLevel);
+        families = unfiltered.families || [];
+        orphanIds = unfiltered.orphan_ids || [];
         totalFamilies = families.length;
         instanceIds = [];
         resultToken = null;
@@ -911,7 +1096,13 @@ ApplicationHomeHandler.prototype = {
         ? this.buildTwoLevelMapping(pageFamilies, restrictSet)
         : this.buildThreeLevelMapping(pageFamilies, restrictSet);
 
-      if (!mapping && pageFamilies.length > 0) access = 'error';
+      if (orphanIds.length) {
+        mapping = twoLevel
+          ? this.appendOthersToTwoLevelMapping(mapping, orphanIds)
+          : this.appendOthersToThreeLevelMapping(mapping, orphanIds);
+      }
+
+      if (!mapping && pageFamilies.length > 0 && !orphanIds.length) access = 'error';
 
       this.logQuery(
         'response',

@@ -8,6 +8,13 @@ import {
 } from '../../api/servicenow';
 import { filterColumnsByProbe } from './acl';
 import { fetchCITaskFlagCounts, type CITaskFlagCounts } from './relatedCIFlags';
+import {
+  CHANGE_TASK_CONFIG,
+  INCIDENT_TASK_CONFIG,
+  countDistinctRelatedTasksFromBranches,
+  taskCiQuery,
+  type RelatedTaskConfig,
+} from './relatedTasks';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
 
@@ -18,6 +25,11 @@ export const CHUNK_CONCURRENCY = 5;
 export const FAMILY_PAGE_SIZE = 50;
 export const VIEW_TITLE = 'CLSA CMDB Workspace';
 export const SEARCH_DEBOUNCE_MS = 500;
+
+/** Synthetic family for instances with no app-family / business-app relationship. */
+export const OTHERS_FAMILY_ID = '__others__';
+export const OTHERS_SERVICE_ID = '__others_svc__';
+export const OTHERS_FAMILY_NAME = '[Others]';
 
 export const DEFAULT_VIEW_FIELDS: ViewField[] = [
   { element: 'department',         label: 'Department' },
@@ -452,6 +464,176 @@ export function mergeFilterCriteria(
   };
 }
 
+/** Omit Environment filter in 2-level hierarchy (field not exposed in sidebar). */
+export function criteriaForHierarchy(
+  criteria: LiveFilterCriteria,
+  hierarchyMode: boolean,
+): LiveFilterCriteria {
+  if (hierarchyMode) return criteria;
+  return { ...criteria, env: [] };
+}
+
+export function buildAppHomeHierarchyTaskPrefix(hierarchyMode: boolean): string {
+  return hierarchyMode
+    ? 'ci_item.sys_class_nameINSTANCEOFcmdb_ci_service_auto'
+    : 'ci_item.sys_class_name=cmdb_ci_service^ci_item.ref_cmdb_ci_service.u_service_type=instance';
+}
+
+/** Encoded task_ci query branches for app-home summary stats / sidebar panel. */
+export function buildAppHomeTaskSummaryBranches(
+  instanceIds: string[] | null,
+  hierarchyMode: boolean,
+  config: RelatedTaskConfig,
+): string[] {
+  if (instanceIds === null) {
+    const branch = taskCiQuery(buildAppHomeHierarchyTaskPrefix(hierarchyMode), config);
+    return branch ? [branch] : [];
+  }
+  if (!instanceIds.length) return [];
+
+  const branches: string[] = [];
+  for (let i = 0; i < instanceIds.length; i += CHUNK_SIZE) {
+    const chunk = instanceIds.slice(i, i + CHUNK_SIZE);
+    branches.push(`ci_item.sys_idIN${chunk.join(',')}^${config.extraQuery}`);
+  }
+  return branches;
+}
+
+export interface AppHomeStats {
+  total: number;
+  operational: number;
+  incidents: number;
+  changes: number;
+  access: {
+    total: TableAccess;
+    operational: TableAccess;
+    incidents: TableAccess;
+    changes: TableAccess;
+  };
+}
+
+async function countTableRows(
+  table: string,
+  query?: string,
+): Promise<{ totalCount: number; access: TableAccess }> {
+  const { totalCount, access } = await queryTableWithAccess({
+    table,
+    query,
+    fields: ['sys_id'],
+    limit: 1,
+  });
+  return { totalCount, access };
+}
+
+async function countInstancesBySysIds(
+  table: string,
+  baseQuery: string,
+  ids: string[],
+): Promise<{ totalCount: number; access: TableAccess }> {
+  if (!ids.length) return { totalCount: 0, access: 'ok' };
+
+  let totalCount = 0;
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    const idPart = `sys_idIN${chunk.join(',')}`;
+    const query = baseQuery ? `${baseQuery}^${idPart}` : idPart;
+    const result = await countTableRows(table, query);
+    if (result.access === 'denied') return { totalCount: 0, access: 'denied' };
+    totalCount += result.totalCount;
+  }
+  return { totalCount, access: 'ok' };
+}
+
+/** Top-of-page stats — global when unfiltered, scoped to resolved instance IDs when filtered. */
+export async function fetchAppHomeStats(
+  hierarchyMode: boolean,
+  filtersActive: boolean,
+  filteredInstIds: Set<string> | null,
+): Promise<AppHomeStats> {
+  if (filtersActive) {
+    const ids = filteredInstIds ? [...filteredInstIds] : [];
+    const instanceTable = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
+    const operationalBase = hierarchyMode
+      ? 'operational_status=1'
+      : 'u_service_type=instance^operational_status=1';
+
+    const [operationalR, incidentsR, changesR] = await Promise.all([
+      countInstancesBySysIds(instanceTable, operationalBase, ids),
+      countDistinctRelatedTasksFromBranches(
+        buildAppHomeTaskSummaryBranches(ids, hierarchyMode, INCIDENT_TASK_CONFIG),
+      ),
+      countDistinctRelatedTasksFromBranches(
+        buildAppHomeTaskSummaryBranches(ids, hierarchyMode, CHANGE_TASK_CONFIG),
+      ),
+    ]);
+
+    return {
+      total: ids.length,
+      operational: operationalR.access === 'denied' ? 0 : operationalR.totalCount,
+      incidents: incidentsR.access === 'denied' ? 0 : incidentsR.totalCount,
+      changes: changesR.access === 'denied' ? 0 : changesR.totalCount,
+      access: {
+        total: 'ok',
+        operational: operationalR.access,
+        incidents: incidentsR.access,
+        changes: changesR.access,
+      },
+    };
+  }
+
+  if (hierarchyMode) {
+    const [totalR, operationalR, incidentsR, changesR] = await Promise.all([
+      countTableRows('cmdb_ci_service_auto'),
+      countTableRows('cmdb_ci_service_auto', 'operational_status=1'),
+      countTableRows(
+        'task_ci',
+        taskCiQuery(buildAppHomeHierarchyTaskPrefix(true), INCIDENT_TASK_CONFIG),
+      ),
+      countTableRows(
+        'task_ci',
+        taskCiQuery(buildAppHomeHierarchyTaskPrefix(true), CHANGE_TASK_CONFIG),
+      ),
+    ]);
+    return {
+      total: totalR.access === 'denied' ? 0 : totalR.totalCount,
+      operational: operationalR.access === 'denied' ? 0 : operationalR.totalCount,
+      incidents: incidentsR.access === 'denied' ? 0 : incidentsR.totalCount,
+      changes: changesR.access === 'denied' ? 0 : changesR.totalCount,
+      access: {
+        total: totalR.access,
+        operational: operationalR.access,
+        incidents: incidentsR.access,
+        changes: changesR.access,
+      },
+    };
+  }
+
+  const [totalR, operationalR, incidentsR, changesR] = await Promise.all([
+    countTableRows('cmdb_ci_service', 'u_service_type=instance'),
+    countTableRows('cmdb_ci_service', 'u_service_type=instance^operational_status=1'),
+    countTableRows(
+      'task_ci',
+      taskCiQuery(buildAppHomeHierarchyTaskPrefix(false), INCIDENT_TASK_CONFIG),
+    ),
+    countTableRows(
+      'task_ci',
+      taskCiQuery(buildAppHomeHierarchyTaskPrefix(false), CHANGE_TASK_CONFIG),
+    ),
+  ]);
+  return {
+    total: totalR.access === 'denied' ? 0 : totalR.totalCount,
+    operational: operationalR.access === 'denied' ? 0 : operationalR.totalCount,
+    incidents: incidentsR.access === 'denied' ? 0 : incidentsR.totalCount,
+    changes: changesR.access === 'denied' ? 0 : changesR.totalCount,
+    access: {
+      total: totalR.access,
+      operational: operationalR.access,
+      incidents: incidentsR.access,
+      changes: changesR.access,
+    },
+  };
+}
+
 export async function fetchFilteredInstanceIds(
   table: string,
   query: string,
@@ -494,6 +676,156 @@ export function sumFlagCounts(
     }
   }
   return { incidents, changes };
+}
+
+export function isOthersFamilyId(id: string): boolean {
+  return id === OTHERS_FAMILY_ID;
+}
+
+export function appendOthersToTwoLevelMapping(
+  mapping: TwoLevelMapping | null,
+  orphanIds: string[],
+): TwoLevelMapping | null {
+  if (!orphanIds.length) return mapping;
+
+  if (!mapping) {
+    return {
+      appFamilyMeta: new Map([[OTHERS_FAMILY_ID, { name: OTHERS_FAMILY_NAME, short_description: '' }]]),
+      appToInstances: new Map([[OTHERS_FAMILY_ID, new Set(orphanIds)]]),
+      instanceSvcIds: [...orphanIds],
+    };
+  }
+
+  mapping.appFamilyMeta.set(OTHERS_FAMILY_ID, { name: OTHERS_FAMILY_NAME, short_description: '' });
+  mapping.appToInstances.set(OTHERS_FAMILY_ID, new Set(orphanIds));
+  mapping.instanceSvcIds = [...new Set([...mapping.instanceSvcIds, ...orphanIds])];
+  return mapping;
+}
+
+export function appendOthersToThreeLevelMapping(
+  mapping: ThreeLevelMapping | null,
+  orphanIds: string[],
+): ThreeLevelMapping | null {
+  if (!orphanIds.length) return mapping;
+
+  if (!mapping) {
+    return {
+      bApps: [{ sys_id: OTHERS_FAMILY_ID, name: OTHERS_FAMILY_NAME, short_description: '' }],
+      svcMap: new Map([[OTHERS_SERVICE_ID, { name: OTHERS_FAMILY_NAME, short_description: '' }]]),
+      bAppToSvcs: new Map([[OTHERS_FAMILY_ID, [OTHERS_SERVICE_ID]]]),
+      svcToInstIds: new Map([[OTHERS_SERVICE_ID, [...orphanIds]]]),
+      instanceIds: [...orphanIds],
+    };
+  }
+
+  if (!mapping.bApps.some(a => a.sys_id === OTHERS_FAMILY_ID)) {
+    mapping.bApps.push({ sys_id: OTHERS_FAMILY_ID, name: OTHERS_FAMILY_NAME, short_description: '' });
+  }
+  mapping.bAppToSvcs.set(OTHERS_FAMILY_ID, [OTHERS_SERVICE_ID]);
+  mapping.svcMap.set(OTHERS_SERVICE_ID, { name: OTHERS_FAMILY_NAME, short_description: '' });
+  mapping.svcToInstIds.set(OTHERS_SERVICE_ID, [...orphanIds]);
+  mapping.instanceIds = [...new Set([...mapping.instanceIds, ...orphanIds])];
+  return mapping;
+}
+
+async function fetchAllInstanceSysIds(
+  hierarchyMode: boolean,
+): Promise<{ ids: Set<string>; access: TableAccess }> {
+  const table = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
+  const baseQuery = hierarchyMode ? undefined : 'u_service_type=instance';
+  const ids = new Set<string>();
+  let access: TableAccess = 'ok';
+  let offset = 0;
+  const pageSize = 5000;
+
+  while (true) {
+    const res = await queryTableWithAccess<Record<string, unknown>>({
+      table,
+      query: baseQuery,
+      fields: ['sys_id'],
+      limit: pageSize,
+      offset,
+    });
+    access = res.access;
+    if (access === 'denied') return { ids: new Set(), access };
+    for (const row of res.result ?? []) {
+      const id = raw(row.sys_id);
+      if (id) ids.add(id);
+    }
+    const batchLen = res.result?.length ?? 0;
+    if (batchLen < pageSize) break;
+    offset += batchLen;
+  }
+
+  return { ids, access };
+}
+
+/** Instances with no app-family link — grouped into [Others] on the home page. */
+async function fetchAllFamilyIds(hierarchyMode: boolean): Promise<string[]> {
+  if (hierarchyMode) {
+    const res = await queryTableWithAccess<{ sys_id: string }>({
+      table: 'cmdb_ci_business_app',
+      fields: ['sys_id'],
+      limit: 10000,
+    });
+    if (res.access === 'denied') return [];
+    return (res.result ?? []).map(r => raw(r.sys_id)).filter(Boolean);
+  }
+
+  const res = await queryTableWithAccess<{ sys_id: string }>({
+    table: 'cmdb_ci_service',
+    query: 'u_service_type=service',
+    fields: ['sys_id'],
+    limit: 10000,
+  });
+  if (res.access === 'denied') return [];
+  return (res.result ?? []).map(r => raw(r.sys_id)).filter(Boolean);
+}
+
+async function fetchLinkedInstanceIds(
+  hierarchyMode: boolean,
+  restrictToInstanceIds: Set<string> | null,
+): Promise<Set<string>> {
+  const linked = new Set<string>();
+  const familyIds = await fetchAllFamilyIds(hierarchyMode);
+  if (!familyIds.length) return linked;
+
+  const families: FamilyMeta[] = familyIds.map(id => ({
+    sys_id: id,
+    name: '',
+    short_description: '',
+  }));
+
+  const mapping = hierarchyMode
+    ? await buildThreeLevelMappingForApps(families, restrictToInstanceIds)
+    : await buildTwoLevelMappingForFamilies(families, restrictToInstanceIds);
+
+  if (!mapping) return linked;
+
+  const mappedIds = hierarchyMode
+    ? (mapping as ThreeLevelMapping).instanceIds
+    : (mapping as TwoLevelMapping).instanceSvcIds;
+  for (const id of mappedIds) linked.add(id);
+  return linked;
+}
+
+export async function computeOrphanInstanceIds(
+  hierarchyMode: boolean,
+  restrictToInstanceIds: Set<string> | null,
+): Promise<string[]> {
+  let universe: Set<string>;
+  if (restrictToInstanceIds) {
+    universe = restrictToInstanceIds;
+  } else {
+    const res = await fetchAllInstanceSysIds(hierarchyMode);
+    if (res.access === 'denied' || !res.ids.size) return [];
+    universe = res.ids;
+  }
+
+  if (!universe.size) return [];
+
+  const linked = await fetchLinkedInstanceIds(hierarchyMode, restrictToInstanceIds);
+  return [...universe].filter(id => !linked.has(id));
 }
 
 // ─── 2-level paged loaders ────────────────────────────────────────────────────
@@ -638,9 +970,11 @@ export async function fetchTwoLevelFamilyPage(
   }
 
   const mapping = await buildTwoLevelMappingForFamilies(families, filteredInstIds);
-  if (!mapping && access === 'ok' && families.length > 0) access = 'error';
+  const orphanIds = await computeOrphanInstanceIds(false, filteredInstIds);
+  const mappingWithOthers = appendOthersToTwoLevelMapping(mapping, orphanIds);
+  if (!mappingWithOthers && access === 'ok' && families.length > 0 && !orphanIds.length) access = 'error';
 
-  return { mapping, totalFamilies, page, access };
+  return { mapping: mappingWithOthers, totalFamilies, page, access };
 }
 
 // ─── 3-level paged loaders ──────────────────────────────────────────────────
@@ -790,9 +1124,11 @@ export async function fetchThreeLevelFamilyPage(
   }
 
   const mapping = await buildThreeLevelMappingForApps(bApps, filteredInstIds);
-  if (!mapping && access === 'ok' && bApps.length > 0) access = 'error';
+  const orphanIds = await computeOrphanInstanceIds(true, filteredInstIds);
+  const mappingWithOthers = appendOthersToThreeLevelMapping(mapping, orphanIds);
+  if (!mappingWithOthers && access === 'ok' && bApps.length > 0 && !orphanIds.length) access = 'error';
 
-  return { mapping, totalFamilies, page, access };
+  return { mapping: mappingWithOthers, totalFamilies, page, access };
 }
 
 /** Resolve all instance sys_ids under a single app family / business app (2- or 3-level). */
