@@ -13,6 +13,7 @@
  */
 
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ReactFlow, ReactFlowProvider,
   useNodesState, useEdgesState, useReactFlow,
@@ -23,7 +24,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   MoreVertical, Eye, Edit2, Trash2,
-  Loader2, Network, ExternalLink,
+  Loader2, Network, ExternalLink, X,
 } from 'lucide-react';
 import {
   queryTable, getSysProperties, fetchRelationshipChangesForApp,
@@ -33,6 +34,8 @@ import {
 } from '../../api/servicenow';
 import { loadAppRelationshipPeers, loadAppRelationships, type RelCIPeer } from '../utils/appRelationships';
 import { getAppRelationshipTypes } from '../utils/appRelationshipTypes';
+import { Z_INDEX } from '../utils/layering';
+import { useDismissOnPointerDown } from '../utils/useDismissOnPointerDown';
 import { canRemoveRelationship } from '../utils/relationshipEdit';
 import { isDirectCenterPeer } from '../utils/diagramLinkPartner';
 import { canEditRecord } from '../utils/acl';
@@ -597,6 +600,7 @@ function DiagramFlow({
   const { setCenter, getZoom } = useReactFlow();
 
   const [nodeMenu,        setNodeMenu]        = useState<MenuState | null>(null);
+  const nodeMenuRef = useRef<HTMLDivElement>(null);
   const [menuPermissions, setMenuPermissions] = useState<MenuPermissions | null>(null);
   const [relCIs,          setRelCIs]          = useState<RelCI[]>([]);
   const [childrenByNode,  setChildrenByNode]  = useState<Map<string, RelCI[]>>(new Map());
@@ -655,6 +659,8 @@ function DiagramFlow({
     setNodeMenu(null);
     setMenuPermissions(null);
   }, []);
+
+  useDismissOnPointerDown(!!nodeMenu, nodeMenuRef, closeMenu);
 
   // ── Menu permissions (edit CI + remove relationship) ───────────────────────
   useEffect(() => {
@@ -980,17 +986,28 @@ function DiagramFlow({
       </ReactFlow>
 
       {/* ── Context menu ────────────────────────────────────────────────────── */}
-      {nodeMenu && (
+      {nodeMenu && createPortal(
         <div
-          className="fixed z-[9999] w-60 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
-          style={{ left: nodeMenu.x, top: nodeMenu.y }}
+          ref={nodeMenuRef}
+          className="clsa-portal fixed w-60 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
+          style={{ left: nodeMenu.x, top: nodeMenu.y, zIndex: Z_INDEX.diagramNodeMenu }}
           onClick={e => e.stopPropagation()}
         >
-          <div className="px-3 py-2 border-b border-gray-100">
-            <p className="typo-panel-title truncate">{nodeMenu.label}</p>
-            <p className="typo-caption mt-0.5">
-              {nodeMenu.isCenter ? 'Current Application (Hub)' : 'Related Application'}
-            </p>
+          <div className="px-3 py-2 border-b border-gray-100 flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="typo-panel-title truncate">{nodeMenu.label}</p>
+              <p className="typo-caption mt-0.5">
+                {nodeMenu.isCenter ? 'Current Application (Hub)' : 'Related Application'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeMenu}
+              className="p-1 hover:bg-gray-100 rounded shrink-0"
+              aria-label="Close menu"
+            >
+              <X size={16} className="text-gray-500" />
+            </button>
           </div>
 
           <div className="py-1">
@@ -1142,7 +1159,8 @@ function DiagramFlow({
               </div>
             </>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
 
       <div className="absolute bottom-2 right-14 pointer-events-none">

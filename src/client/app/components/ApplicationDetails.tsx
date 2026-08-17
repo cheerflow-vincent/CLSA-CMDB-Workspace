@@ -549,7 +549,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                         isOpen={expanded.netgear}
                         onToggle={() => toggleExpand('netgear')}
                         onViewCI={onViewCI}
-                        title="Network gear hosting the application"
+                        title="Network gears hosting the application"
                         Icon={Network}
                         iconBg="bg-teal-100"
                         iconColor="text-teal-600"

@@ -5,7 +5,7 @@ export type CISearchInventoryTab = Exclude<CISearchTab, 'all'>;
 
 export const CI_INVENTORY_TABS: { tab: CISearchInventoryTab; label: string }[] = [
   { tab: 'servers', label: 'Servers' },
-  { tab: 'switches', label: 'Network Gear' },
+  { tab: 'switches', label: 'Network Gears' },
   { tab: 'databases', label: 'Databases' },
   { tab: 'network_links', label: 'Network Links' },
 ];

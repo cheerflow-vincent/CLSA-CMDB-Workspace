@@ -3,6 +3,7 @@ import { X, Check, AlertTriangle, ArrowUp, ArrowDown, ArrowLeftRight,
   Clock, Loader2,
 } from 'lucide-react';
 import ReferenceAutocomplete from './ReferenceAutocomplete';
+import { Z_INDEX } from '../utils/layering';
 import { loadAppRelationships, type LiveRelationship, type RelationshipDirection } from '../utils/appRelationships';
 import {
   fetchRelationshipChangesForApp,
@@ -443,7 +444,10 @@ export default function EditRelationshipModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      style={{ zIndex: Z_INDEX.modal }}
+    >
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
           <div>

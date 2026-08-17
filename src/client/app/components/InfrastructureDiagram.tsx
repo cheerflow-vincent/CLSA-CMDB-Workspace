@@ -3,6 +3,7 @@
  */
 
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ReactFlow, ReactFlowProvider,
   useNodesState, useEdgesState, useReactFlow,
@@ -11,10 +12,12 @@ import {
   MarkerType, BackgroundVariant,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { MoreVertical, Eye, Edit2, ExternalLink, Loader2, Network } from 'lucide-react';
+import { MoreVertical, Eye, Edit2, ExternalLink, Loader2, Network, X } from 'lucide-react';
 import { fetchFieldAccess } from '../../api/servicenow';
 import { fetchAllInfraPeers, type InfraCIPeer } from '../utils/relatedCIs';
 import { canEditRecord } from '../utils/acl';
+import { Z_INDEX } from '../utils/layering';
+import { useDismissOnPointerDown } from '../utils/useDismissOnPointerDown';
 import {
   INFRA_CI_STYLE,
   INFRA_COLUMN_ORDER,
@@ -280,6 +283,7 @@ function InfrastructureDiagramInner({
   const [loading, setLoading] = useState(true);
   const [peerCount, setPeerCount] = useState(0);
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; label: string; isCenter: boolean } | null>(null);
+  const nodeMenuRef = useRef<HTMLDivElement>(null);
   const [menuPermissions, setMenuPermissions] = useState<{ loading: boolean; canEdit: boolean } | null>(null);
 
   const infoMapRef = useRef(new Map<string, { name: string; sysClass: string; ciType: InfraCIType }>());
@@ -293,8 +297,15 @@ function InfrastructureDiagramInner({
     setMenuPermissions(null);
   }, []);
 
+  useDismissOnPointerDown(!!nodeMenu, nodeMenuRef, closeMenu);
+
   const openMenu = useCallback((nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent) => {
-    setNodeMenu({ x: e.clientX, y: e.clientY, nodeId, label, isCenter });
+    e.stopPropagation();
+    setNodeMenu({
+      x: Math.min(e.clientX, window.innerWidth - 260),
+      y: Math.min(e.clientY + 6, window.innerHeight - 360),
+      nodeId, label, isCenter,
+    });
     if (isCenter) {
       setMenuPermissions({ loading: false, canEdit: canEditCenterRecord });
       return;
@@ -375,7 +386,7 @@ function InfrastructureDiagramInner({
   }, [nodeSearch, setNodes]);
 
   return (
-    <div className="relative w-full h-full overflow-hidden" style={{ minHeight: 400 }} onClick={closeMenu}>
+    <div className="relative w-full h-full overflow-hidden" style={{ minHeight: 400 }}>
 
       {loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-sm">
@@ -390,7 +401,7 @@ function InfrastructureDiagramInner({
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="text-center text-gray-400 px-6">
             <p className="typo-body font-medium text-gray-500">No infrastructure relationships found</p>
-            <p className="typo-caption mt-1">Servers, network gear, network links, and databases linked to this application will appear here.</p>
+            <p className="typo-caption mt-1">Servers, network gears, network links, and databases linked to this application will appear here.</p>
           </div>
         </div>
       )}
@@ -414,17 +425,28 @@ function InfrastructureDiagramInner({
         <Controls showInteractive={false} className="rounded-lg" />
       </ReactFlow>
 
-      {nodeMenu && (
+      {nodeMenu && createPortal(
         <div
-          className="fixed z-[9999] w-60 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
-          style={{ left: nodeMenu.x, top: nodeMenu.y }}
+          ref={nodeMenuRef}
+          className="clsa-portal fixed w-60 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
+          style={{ left: nodeMenu.x, top: nodeMenu.y, zIndex: Z_INDEX.diagramNodeMenu }}
           onClick={e => e.stopPropagation()}
         >
-          <div className="px-3 py-2 border-b border-gray-100">
-            <p className="typo-panel-title truncate">{nodeMenu.label}</p>
-            <p className="typo-caption mt-0.5">
-              {nodeMenu.isCenter ? 'Current Application' : 'Infrastructure CI'}
-            </p>
+          <div className="px-3 py-2 border-b border-gray-100 flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="typo-panel-title truncate">{nodeMenu.label}</p>
+              <p className="typo-caption mt-0.5">
+                {nodeMenu.isCenter ? 'Current Application' : 'Infrastructure CI'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeMenu}
+              className="p-1 hover:bg-gray-100 rounded shrink-0"
+              aria-label="Close menu"
+            >
+              <X size={16} className="text-gray-500" />
+            </button>
           </div>
 
           <div className="py-1">
@@ -526,7 +548,8 @@ function InfrastructureDiagramInner({
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

@@ -59,7 +59,7 @@ const tabTypeMap: Record<Tab, string | null> = {
   databases: 'Database', network_links: 'Network Link',
 };
 const tabLabels: Record<Tab, string> = {
-  all: 'All Results', servers: 'Servers', switches: 'Network Gear',
+  all: 'All Results', servers: 'Servers', switches: 'Network Gears',
   databases: 'Databases', network_links: 'Network Links',
 };
 // ─── v2 live-data config ──────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ const V2_TABS: V2TabCfg[] = [
     ],
   },
   {
-    tab: 'switches', table: 'cmdb_ci_netgear', label: 'Network Gear',
+    tab: 'switches', table: 'cmdb_ci_netgear', label: 'Network Gears',
     defaultColumns: [
       { element: 'name', label: 'Name' }, { element: 'environment', label: 'Environment' },
       { element: 'model_id', label: 'Model' }, { element: 'location', label: 'Location' },
@@ -303,7 +303,7 @@ const EMPTY_PILL_ACCESS: PillAccess = { servers: 'ok', switches: 'ok', databases
 type PillDef = { tab: Tab; label: string; count: number | null; icon: JSX.Element; accent: string; iconBg: string };
 const buildPills = (c: PillCounts, access: PillAccess): PillDef[] => ([
   { tab: 'servers' as Tab,   label: 'Servers',   count: c.servers,   icon: <Server       className="w-5 h-5 text-blue-600"   />, accent: 'border-blue-500   bg-blue-50',   iconBg: 'bg-blue-100'   },
-  { tab: 'switches' as Tab,  label: 'Network Gear', count: c.switches,  icon: <Network      className="w-5 h-5 text-green-600"  />, accent: 'border-green-500  bg-green-50',  iconBg: 'bg-green-100'  },
+  { tab: 'switches' as Tab,  label: 'Network Gears', count: c.switches,  icon: <Network      className="w-5 h-5 text-green-600"  />, accent: 'border-green-500  bg-green-50',  iconBg: 'bg-green-100'  },
   { tab: 'databases' as Tab, label: 'Databases', count: c.databases, icon: <Database     className="w-5 h-5 text-purple-600" />, accent: 'border-purple-500 bg-purple-50', iconBg: 'bg-purple-100' },
   { tab: 'network_links' as Tab,  label: 'Network Links',  count: c.network_links,  icon: <Link className="w-5 h-5 text-orange-600" />, accent: 'border-orange-500 bg-orange-50', iconBg: 'bg-orange-100' },
 ] as PillDef[]).filter(p => !isAccessDenied(access[p.tab as keyof PillCounts]));

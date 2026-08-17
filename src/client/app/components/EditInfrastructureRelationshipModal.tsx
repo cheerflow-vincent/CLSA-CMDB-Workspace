@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Loader2, Server, Network, Link, Database } from 'lucide-react';
 import ReferenceAutocomplete from './ReferenceAutocomplete';
+import { Z_INDEX } from '../utils/layering';
 import {
   fetchInfraRelationshipsForEdit,
   addInfraRelationship,
@@ -20,7 +21,7 @@ interface Props {
 
 const SECTION_META: Record<InfraCIType, { title: string; Icon: typeof Server }> = {
   server:   { title: 'Servers',        Icon: Server },
-  netgear:  { title: 'Network Gear',   Icon: Network },
+  netgear:  { title: 'Network Gears',   Icon: Network },
   network_link: { title: 'Network Links', Icon: Link },
   database: { title: 'Databases',      Icon: Database },
 };
@@ -267,7 +268,10 @@ export default function EditInfrastructureRelationshipModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50">
+    <div
+      className="fixed inset-0 flex items-center justify-center p-4 bg-black/50"
+      style={{ zIndex: Z_INDEX.modal }}
+    >
       <div
         className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}

@@ -160,7 +160,7 @@ export default function ReferenceAutocomplete({
     <div
       ref={menuRef}
       style={menuStyle}
-      className="bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1"
+      className="clsa-portal bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1"
     >
       {loading && (
         <p className="px-3 py-2 typo-caption flex items-center gap-2">

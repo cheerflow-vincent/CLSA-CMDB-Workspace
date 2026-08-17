@@ -58,7 +58,7 @@ export interface CiSearchSummaryCounts {
 
 const TAB_LABELS: Record<CISearchInventoryTab, string> = {
   servers: 'Servers',
-  switches: 'Network Gear',
+  switches: 'Network Gears',
   databases: 'Databases',
   network_links: 'Network Links',
 };

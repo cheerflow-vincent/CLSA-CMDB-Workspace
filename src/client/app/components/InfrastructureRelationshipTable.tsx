@@ -42,8 +42,8 @@ const SECTIONS: Array<{
   },
   {
     config: NETGEAR_REL_CONFIG,
-    title: 'Network gear hosting the application',
-    emptyMessage: 'No linked network gear.',
+    title: 'Network gears hosting the application',
+    emptyMessage: 'No linked network gears.',
     Icon: Network,
     iconBg: 'bg-teal-100',
     iconColor: 'text-teal-600',

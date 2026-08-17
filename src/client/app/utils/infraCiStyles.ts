@@ -21,7 +21,7 @@ export const INFRA_CI_STYLE: Record<InfraCIType, InfraCIStyle> = {
     bg: '#F5F3FF',
     edge: '#7C3AED',
     text: '#5B21B6',
-    label: 'Network Gear',
+    label: 'Network Gears',
   },
   network_link: {
     border: '#EA580C',

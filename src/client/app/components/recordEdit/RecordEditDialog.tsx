@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import {
   loadFormLayout,
@@ -14,6 +15,7 @@ import {
   type FieldAccessEntry,
 } from '../../../api/servicenow';
 import { buildPatchPayload } from '../../utils/editValues';
+import { Z_INDEX } from '../../utils/layering';
 import {
   mergeEditFieldAccess,
   fetchDictionaryFieldMeta,
@@ -142,8 +144,11 @@ export default function RecordEditDialog({
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  return createPortal(
+    <div
+      className="clsa-portal fixed inset-0 flex items-center justify-center bg-black/40 p-4"
+      style={{ zIndex: Z_INDEX.modal }}
+    >
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col">
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200 shrink-0">
           <div className="min-w-0">
@@ -203,6 +208,7 @@ export default function RecordEditDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

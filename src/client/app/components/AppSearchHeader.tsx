@@ -264,6 +264,14 @@ export default function AppSearchHeader({
                   <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
                 </button>
               )}
+              <a
+                href={`/${currentApp.table || 'cmdb_ci_service'}.do?sys_id=${currentApp.sysId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg typo-body hover:bg-indigo-50 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" /> Open in ServiceNow
+              </a>
               {canEditRecord && onEditCi && onEditRelationships && (
                 <div ref={editMenuRef} className="relative">
                   <button
@@ -302,14 +310,6 @@ export default function AppSearchHeader({
                   )}
                 </div>
               )}
-              <a
-                href={`/${currentApp.table || 'cmdb_ci_service'}.do?sys_id=${currentApp.sysId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg typo-body hover:bg-indigo-50 transition-colors"
-              >
-                <ExternalLink className="w-4 h-4" /> Open in ServiceNow
-              </a>
             </div>
           )}
         </div>

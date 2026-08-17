@@ -5,13 +5,13 @@
 @layer base {
   .clsa-portal {
     --font-sans: 'Inter', system-ui, sans-serif;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   html, body, #root.clsa-portal {
     height: 100%;
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
   }
 
   .clsa-portal,

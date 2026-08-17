@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
-  Edit2, MoreHorizontal, ExternalLink, MapPin,
+  Edit2, ExternalLink, MapPin,
   AlertCircle, Calendar, Activity, Server, Database,
   Network, Shield, User,
   ArrowUpDown, Layers, Loader2, RefreshCw,
@@ -9,7 +9,7 @@ import {
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
 import { type AppItem } from '../data/appData';
-import { queryTable, fetchFieldAccess, getSysProperties, APP_SCOPE, type TableAccess } from '../../api/servicenow';
+import { queryTable, fetchFieldAccess, getSysProperties, getTableLabel, APP_SCOPE, type TableAccess } from '../../api/servicenow';
 import { filterFormSections, isAccessDenied, canEditRecord } from '../utils/acl';
 import RecordEditDialog from './recordEdit/RecordEditDialog';
 import {
@@ -88,6 +88,17 @@ function grafanaPropertyName(table: string): string {
 /** Substitute `{0}` in a Grafana URL template with the CI name. */
 function buildGrafanaUrl(template: string, ciName: string): string {
   return template.replace(/\{0\}/g, encodeURIComponent(ciName));
+}
+
+function formatClassLabel(cls: string): string {
+  return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function initialClassLabel(ci: CIItem): string {
+  if (ci.class && !isCmdbTableName(ci.class)) return ci.class;
+  if (isCmdbTableName(ci.table)) return formatClassLabel(ci.table);
+  if (isCmdbTableName(ci.class)) return formatClassLabel(ci.class);
+  return ci.type || '';
 }
 
 /** Pick the best CMDB table hint from URL params or CI props. */
@@ -252,6 +263,7 @@ export default function CIDetailView({
   const [pageRefreshKey, setPageRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [displayName, setDisplayName] = useState(ci.name);
+  const [displayClassLabel, setDisplayClassLabel] = useState(() => initialClassLabel(ci));
   const [grafanaUrl, setGrafanaUrl] = useState<string | null>(null);
   const [formSections, setFormSections] = useState<FormSectionLayout[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -275,6 +287,7 @@ export default function CIDetailView({
     setContactSections([]);
     setContactValues({});
     setDisplayName(ci.name);
+    setDisplayClassLabel(initialClassLabel(ci));
     setCanWriteRecord(false);
     setRecordSysId('');
     setRecordTable('');
@@ -293,6 +306,14 @@ export default function CIDetailView({
         setRecordSysId(ctx.sysId);
         setRecordTable(ctx.recordTable);
         setDisplayName(ctx.name);
+
+        getTableLabel(ctx.recordTable)
+          .then(label => {
+            if (!cancelled && label) setDisplayClassLabel(label);
+          })
+          .catch(() => {
+            if (!cancelled) setDisplayClassLabel(formatClassLabel(ctx.recordTable));
+          });
 
         fetchFieldAccess(ctx.recordTable, ctx.sysId, ['name'])
           .then(access => { if (!cancelled) setCanWriteRecord(canEditRecord(access)); })
@@ -586,7 +607,10 @@ export default function CIDetailView({
       <div className="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h1 className="typo-page-title mb-2">{displayName}</h1>
+            <h1 className="typo-page-title">{displayName}</h1>
+            {displayClassLabel && (
+              <p className="typo-page-subtitle mt-1 mb-2">{displayClassLabel}</p>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-100 text-green-700 typo-badge">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
@@ -619,26 +643,15 @@ export default function CIDetailView({
               type="button"
               onClick={refreshPage}
               disabled={refreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg typo-body hover:bg-gray-50 transition-colors disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg typo-body hover:bg-gray-50 transition-colors disabled:opacity-60"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
             </button>
-            {grafanaUrl && (
-              <a
-                href={grafanaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg typo-body hover:bg-orange-50 transition-colors"
-              >
-                <Activity className="w-4 h-4" /> Grafana
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
             <a
               href={`/${recordTable || resolveTableHint(ci)}.do?sys_id=${recordSysId || ci.id}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg typo-body hover:bg-indigo-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg typo-body hover:bg-indigo-50 transition-colors"
             >
               <ExternalLink className="w-4 h-4" /> Open in ServiceNow
             </a>
@@ -646,14 +659,22 @@ export default function CIDetailView({
               <button
                 type="button"
                 onClick={() => setShowRecordEditModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg typo-body hover:bg-gray-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg typo-body hover:bg-blue-50 transition-colors"
               >
                 <Edit2 className="w-4 h-4" /> Edit
               </button>
             )}
-            <button type="button" className="p-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500">
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
+            {grafanaUrl && (
+              <a
+                href={grafanaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-orange-300 text-orange-700 rounded-lg typo-body hover:bg-orange-50 transition-colors"
+              >
+                <Activity className="w-4 h-4" /> Grafana
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </div>
         </div>
       </div>
