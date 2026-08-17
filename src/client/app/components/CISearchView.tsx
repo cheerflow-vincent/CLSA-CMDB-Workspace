@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Server, Database, Link, Network, Search,
   ChevronDown, ArrowUpDown, ChevronLeft, ChevronRight,
-  X,
+  X, Check, FilterX,
   Download, FileText, ExternalLink, Loader2
 } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
@@ -24,12 +24,14 @@ import { useNarrowContainer } from '../utils/useNarrowLayout';
 import { enrichRowsWithTaskFlags } from '../utils/relatedCIFlags';
 import {
   buildSnQueriesByTab,
+  buildResultSnQueryForTab,
   fetchRelatedInfraCiIdsByTable,
   resolveInstanceIdsForAppSelection,
   fetchAllScopedCiRows,
   type AppFilterSelection,
   type AppRelatedIdsByTab,
 } from '../utils/ciSearchAppFilter';
+import { buildColumnFiltersQuery } from '../utils/searchQuery';
 import {
   buildSummaryContext,
   buildSidebarQueryBranches,
@@ -373,6 +375,43 @@ function isDefaultFilters(f: PendingFilters): boolean {
   return !f.keyword.trim() && !f.ciType && !f.appFilter;
 }
 
+type ColFilterMap = Record<string, string>;
+type ColFiltersByTab = Record<Tab, ColFilterMap>;
+
+const EMPTY_COL_FILTERS_BY_TAB = (): ColFiltersByTab => ({
+  all: {},
+  servers: {},
+  switches: {},
+  databases: {},
+  network_links: {},
+});
+
+function hasAppliedColFilters(map: ColFilterMap): boolean {
+  return Object.values(map).some(v => v.trim());
+}
+
+function inventoryColumnElementsFromCache(
+  tab: SpecificTab,
+  columnsCache: Map<string, ViewField[]>,
+): string[] {
+  const cfg = V2_TABS.find(t => t.tab === tab);
+  const cols = columnsCache.get(cfg?.table ?? '') ?? cfg?.defaultColumns ?? [];
+  return cols.map(c => c.element);
+}
+
+function allTabColumnElements(allColumns: ViewField[]): string[] {
+  return (allColumns.length ? allColumns : ALL_DEFAULT_COLUMNS).map(c => c.element);
+}
+
+function mergeAllowedFieldsFromCache(
+  allColumns: ViewField[],
+  tab: SpecificTab,
+  columnsCache: Map<string, ViewField[]>,
+): string[] {
+  const tabFields = new Set(inventoryColumnElementsFromCache(tab, columnsCache));
+  return allTabColumnElements(allColumns).filter(f => tabFields.has(f));
+}
+
 /** Map CI Type dropdown label → results tab. */
 function ciTypeToTab(ciType: string): Tab | null {
   const entry = (Object.entries(tabTypeMap) as [Tab, string | null][])
@@ -453,7 +492,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [pending, setPending]     = useState<PendingFilters>(emptyPending());
   const [applied, setApplied]     = useState<PendingFilters>(emptyPending());
-  const [colFilters, setColFilters] = useState<Record<string, string>>({});
+  const [colFiltersByTab, setColFiltersByTab] = useState<ColFiltersByTab>(EMPTY_COL_FILTERS_BY_TAB);
+  const [appliedColFiltersByTab, setAppliedColFiltersByTab] = useState<ColFiltersByTab>(EMPTY_COL_FILTERS_BY_TAB);
   const [panel, setPanel] = useState<
     | { kind: 'ci'; recordSysId: string; ciName: string; flagType: 'incident' | 'change' }
     | { kind: 'summary'; flagType: SummaryFlagType; encodedQueries: string[]; title: string; subtitle: string }
@@ -489,6 +529,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const [appFilterLoading, setAppFilterLoading] = useState(false);
   const [appFilterError, setAppFilterError] = useState<string | null>(null);
   const columnsCache = useRef<Map<string, ViewField[]>>(new Map());
+  const [columnsLoadedKey, setColumnsLoadedKey] = useState(0);
 
   const appFilterActive = !!applied.appFilter;
 
@@ -501,6 +542,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     if (cached) return cached;
     const cols = await loadListFields(table, LIST_VIEW, defaults);
     columnsCache.current.set(table, cols);
+    setColumnsLoadedKey(k => k + 1);
     return cols;
   }, []);
 
@@ -509,7 +551,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     [applied, ciFilter, searchFields, appRelatedIdsByTab, hierarchyMode],
   );
 
-  const snQueriesByTab = useMemo(() => {
+  const baseSnQueriesByTab = useMemo(() => {
     if (ciFilter === null) {
       return {
         servers: '',
@@ -526,6 +568,85 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       appFilterActive,
     );
   }, [applied.keyword, ciFilter, searchFields, appRelatedIdsByTab, appFilterActive]);
+
+  const tabBadgeQueriesByTab = useMemo(() => {
+    if (ciFilter === null) {
+      return {
+        servers: '',
+        switches: '',
+        databases: '',
+        network_links: '',
+      } as Record<SpecificTab, string>;
+    }
+    const out = {} as Record<SpecificTab, string>;
+    for (const cfg of V2_TABS) {
+      out[cfg.tab] = buildResultSnQueryForTab(
+        baseSnQueriesByTab[cfg.tab],
+        appliedColFiltersByTab[cfg.tab],
+        inventoryColumnElementsFromCache(cfg.tab, columnsCache.current),
+      );
+    }
+    return out;
+  }, [baseSnQueriesByTab, appliedColFiltersByTab, ciFilter, columnsLoadedKey]);
+
+  const tabBadgeQueryKey = useMemo(
+    () => JSON.stringify(tabBadgeQueriesByTab),
+    [tabBadgeQueriesByTab],
+  );
+
+  const mergeQueriesByTab = useMemo(() => {
+    if (ciFilter === null) {
+      return {
+        servers: '',
+        switches: '',
+        databases: '',
+        network_links: '',
+      } as Record<SpecificTab, string>;
+    }
+    const out = {} as Record<SpecificTab, string>;
+    for (const cfg of V2_TABS) {
+      out[cfg.tab] = buildResultSnQueryForTab(
+        baseSnQueriesByTab[cfg.tab],
+        appliedColFiltersByTab.all,
+        mergeAllowedFieldsFromCache(allColumns, cfg.tab, columnsCache.current),
+      );
+    }
+    return out;
+  }, [baseSnQueriesByTab, appliedColFiltersByTab.all, allColumns, ciFilter, columnsLoadedKey]);
+
+  const mergeQueryKey = useMemo(
+    () => JSON.stringify(mergeQueriesByTab),
+    [mergeQueriesByTab],
+  );
+
+  const summaryQueriesByTab = useMemo(() => {
+    if (activeTab === 'all') return mergeQueriesByTab;
+    return tabBadgeQueriesByTab;
+  }, [activeTab, mergeQueriesByTab, tabBadgeQueriesByTab]);
+
+  const columnFilterPartByTab = useMemo((): Record<SpecificTab, string> => {
+    const out = {} as Record<SpecificTab, string>;
+    for (const cfg of V2_TABS) {
+      const allowed = activeTab === 'all'
+        ? mergeAllowedFieldsFromCache(allColumns, cfg.tab, columnsCache.current)
+        : inventoryColumnElementsFromCache(cfg.tab, columnsCache.current);
+      const filterSource = activeTab === 'all'
+        ? appliedColFiltersByTab.all
+        : appliedColFiltersByTab[cfg.tab];
+      out[cfg.tab] = buildColumnFiltersQuery(filterSource, allowed);
+    }
+    return out;
+  }, [activeTab, appliedColFiltersByTab, allColumns, columnsLoadedKey]);
+
+  const resultQueryKey = useMemo(
+    () => JSON.stringify(appliedColFiltersByTab),
+    [appliedColFiltersByTab],
+  );
+
+  const activeTabFilterKey = useMemo(
+    () => JSON.stringify(appliedColFiltersByTab[activeTab]),
+    [appliedColFiltersByTab, activeTab],
+  );
 
   const queriesReady = ciFilter !== null && (!appFilterActive || (!appFilterLoading && appRelatedIdsByTab !== null));
 
@@ -621,8 +742,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     );
   }, [ciFilter]);
 
-  // Reset page when query or tab changes
-  useEffect(() => { setPage(0); }, [queryKey, activeTab]);
+  // Reset page when query, tab, or active tab column filters change
+  useEffect(() => { setPage(0); }, [queryKey, activeTab, activeTabFilterKey]);
 
   // Fetch result counts for all tabs when query changes
   useEffect(() => {
@@ -632,7 +753,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       V2_TABS.map(async cfg => {
         const { totalCount, access } = await queryTableWithAccess({
           table: cfg.table,
-          query: snQueriesByTab[cfg.tab],
+          query: tabBadgeQueriesByTab[cfg.tab],
           fields: ['sys_id'],
           limit: 1,
         });
@@ -648,22 +769,21 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           }
           return next;
         });
-        setAllTotalCount(counts.reduce((s, [, c, access]) => s + (access === 'denied' ? 0 : c), 0));
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [queryKey, snQueriesByTab, queriesReady]);
+  }, [queryKey, resultQueryKey, tabBadgeQueryKey, queriesReady]);
 
-  // Load All Results merged data when query changes
+  // Load All Results merged data when on All tab
   useEffect(() => {
-    if (!queriesReady) return;
+    if (!queriesReady || activeTab !== 'all') return;
     let cancelled = false;
     setAllLoading(true);
     getColumns('cmdb_ci', ALL_DEFAULT_COLUMNS)
       .then(cols => {
         if (cancelled) return null;
         setAllColumns(cols);
-        return fetchAllMerged(snQueriesByTab, cols);
+        return fetchAllMerged(mergeQueriesByTab, cols);
       })
       .then(async result => {
         if (cancelled || !result) return;
@@ -687,7 +807,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       })
       .finally(() => { if (!cancelled) setAllLoading(false); });
     return () => { cancelled = true; };
-  }, [queryKey, snQueriesByTab, queriesReady, getColumns]);
+  }, [queryKey, resultQueryKey, mergeQueryKey, queriesReady, getColumns, activeTab]);
 
   // Load specific tab rows when app filter is active (client-side pagination)
   useEffect(() => {
@@ -705,6 +825,10 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       .then(async cols => {
         if (cancelled) return null;
         const relatedIds = appRelatedIdsByTab[activeTab];
+        const columnFilterPart = buildColumnFiltersQuery(
+          appliedColFiltersByTab[activeTab],
+          cols.map(c => c.element),
+        );
         const { rows: records, access } = await fetchAllScopedCiRows<Record<string, unknown>>(
           cfg.table,
           relatedIds,
@@ -712,6 +836,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           ciFilter!,
           searchFields,
           apiFieldsForColumns(cols),
+          columnFilterPart,
         );
         if (cancelled) return null;
         if (access === 'denied') {
@@ -758,6 +883,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     return () => { cancelled = true; };
   }, [
     queryKey,
+    resultQueryKey,
     queriesReady,
     activeTab,
     getColumns,
@@ -766,6 +892,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     applied.keyword,
     ciFilter,
     searchFields,
+    activeTabFilterKey,
   ]);
 
   // Load specific tab page with server-side pagination when no app filter
@@ -783,7 +910,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     getColumns(cfg.table, cfg.defaultColumns)
       .then(cols => {
         if (cancelled) return null;
-        return fetchTabPage(cfg, snQueriesByTab[activeTab], cols, page, pageSize);
+        return fetchTabPage(cfg, tabBadgeQueriesByTab[activeTab], cols, page, pageSize);
       })
       .then(async result => {
         if (cancelled || !result) return;
@@ -812,7 +939,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     return () => { cancelled = true; };
   }, [
     queryKey,
-    snQueriesByTab,
+    resultQueryKey,
+    tabBadgeQueryKey,
     queriesReady,
     activeTab,
     page,
@@ -824,6 +952,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const handleSearch = () => {
     const next = { ...pending };
     setApplied(next);
+    setColFiltersByTab(EMPTY_COL_FILTERS_BY_TAB());
+    setAppliedColFiltersByTab(EMPTY_COL_FILTERS_BY_TAB());
     if (next.ciType) {
       const tab = ciTypeToTab(next.ciType);
       if (tab) setActiveTab(tab);
@@ -834,7 +964,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     const cleared = emptyPending();
     setPending(cleared);
     setApplied(cleared);
-    setColFilters({});
+    setColFiltersByTab(EMPTY_COL_FILTERS_BY_TAB());
+    setAppliedColFiltersByTab(EMPTY_COL_FILTERS_BY_TAB());
     setActiveTab('all');
     setPage(0);
   };
@@ -842,7 +973,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const isAtDefault =
     isDefaultFilters(applied)
     && isDefaultFilters(pending)
-    && Object.values(colFilters).every(v => !v)
+    && Object.values(appliedColFiltersByTab).every(m => !hasAppliedColFilters(m))
+    && Object.values(colFiltersByTab).every(m => !hasAppliedColFilters(m))
     && activeTab === 'all';
 
   const columns = activeTab === 'all'
@@ -863,13 +995,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     ? tabFullRows.slice(page * pageSize, (page + 1) * pageSize)
     : tabData[activeTab].rows;
 
-  const displayRows = pageRows.filter(row =>
-    columns.every(col => {
-      const f = colFilters[col.element];
-      if (!f) return true;
-      return (row.values[col.element] || '').toLowerCase().includes(f.toLowerCase());
-    }),
-  );
+  const displayRows = pageRows;
 
   const tabResultCount = (tab: Tab): number | string => {
     if (tab === 'all') return allTotalCount;
@@ -884,8 +1010,69 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const canPrev = page > 0;
   const canNext = (page + 1) * pageSize < paginationTotal;
 
+  const pendingColFilters = colFiltersByTab[activeTab] ?? {};
+  const appliedColFilters = appliedColFiltersByTab[activeTab] ?? {};
+  const activeTabHasColFilters = hasAppliedColFilters(appliedColFilters);
+
   const setColFilter = (element: string, val: string) =>
-    setColFilters(f => ({ ...f, [element]: val }));
+    setColFiltersByTab(prev => ({
+      ...prev,
+      [activeTab]: { ...(prev[activeTab] ?? {}), [element]: val },
+    }));
+
+  const markTabResultsLoading = () => {
+    if (activeTab === 'all') {
+      setAllLoading(true);
+      return;
+    }
+    setTabData(prev => ({
+      ...prev,
+      [activeTab]: { ...prev[activeTab], loading: true, rows: [] },
+    }));
+  };
+
+  const applyColFiltersForTab = () => {
+    const pending = colFiltersByTab[activeTab] ?? {};
+    const nextApplied: ColFilterMap = {};
+    for (const [element, rawVal] of Object.entries(pending)) {
+      if (rawVal.trim()) nextApplied[element] = rawVal;
+    }
+    setAppliedColFiltersByTab(prev => ({ ...prev, [activeTab]: nextApplied }));
+    markTabResultsLoading();
+    setPage(0);
+  };
+
+  const applyColFilter = (_element: string) => {
+    applyColFiltersForTab();
+  };
+
+  const clearColFilter = (element: string) => {
+    setColFiltersByTab(prev => {
+      const next = { ...(prev[activeTab] ?? {}) };
+      delete next[element];
+      return { ...prev, [activeTab]: next };
+    });
+    setAppliedColFiltersByTab(prev => {
+      const next = { ...(prev[activeTab] ?? {}) };
+      delete next[element];
+      return { ...prev, [activeTab]: next };
+    });
+    markTabResultsLoading();
+    setPage(0);
+  };
+
+  const clearActiveTabColFilters = () => {
+    setColFiltersByTab(prev => ({ ...prev, [activeTab]: {} }));
+    setAppliedColFiltersByTab(prev => ({ ...prev, [activeTab]: {} }));
+    markTabResultsLoading();
+    setPage(0);
+  };
+
+  const isColFilterDirty = (element: string) =>
+    (pendingColFilters[element] ?? '') !== (appliedColFilters[element] ?? '');
+
+  const isColFilterActive = (element: string) =>
+    !!(appliedColFilters[element]?.trim());
 
   const tabCounts = useMemo((): Record<SpecificTab, number> => ({
     servers:   tabData.servers.totalCount,
@@ -899,7 +1086,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     return buildSummaryContext(
       activeTab,
       applied,
-      snQueriesByTab,
+      summaryQueriesByTab,
+      columnFilterPartByTab,
       appRelatedIdsByTab,
       tabCounts,
       allTotalCount,
@@ -909,7 +1097,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   }, [
     activeTab,
     applied,
-    snQueriesByTab,
+    summaryQueriesByTab,
+    columnFilterPartByTab,
     appRelatedIdsByTab,
     tabCounts,
     allTotalCount,
@@ -948,7 +1137,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       });
 
     return () => { cancelled = true; };
-  }, [queryKey, activeTab, queriesReady, summaryContext]);
+  }, [queryKey, resultQueryKey, activeTab, queriesReady, summaryContext]);
 
   const handleSummaryChipClick = useCallback((flagType: SummaryFlagType) => {
     const context = summaryContextRef.current;
@@ -980,19 +1169,21 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
 
   const handleExportRows = useCallback(async (): Promise<SearchRow[]> => {
     if (!queriesReady) return [];
+    const exportQueries = activeTab === 'all' ? mergeQueriesByTab : tabBadgeQueriesByTab;
     if (activeTab === 'all') {
-      return fetchAllForExport(snQueriesByTab, columns, tabCounts, tabAccess);
+      return fetchAllForExport(exportQueries, columns, tabCounts, tabAccess);
     }
     const cfg = V2_TABS.find(t => t.tab === activeTab);
     if (!cfg || isAccessDenied(tabData[activeTab].access)) return [];
     if (appFilterActive) {
       return tabData[activeTab].rows;
     }
-    const { rows } = await fetchTabAll(cfg, snQueriesByTab[activeTab], columns, tabData[activeTab].totalCount);
+    const { rows } = await fetchTabAll(cfg, exportQueries[activeTab], columns, tabData[activeTab].totalCount);
     return rows;
   }, [
     queriesReady,
-    snQueriesByTab,
+    mergeQueriesByTab,
+    tabBadgeQueriesByTab,
     activeTab,
     columns,
     tabCounts,
@@ -1206,15 +1397,27 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         />
 
         {/* Table toolbar */}
-        <div className="px-6 pb-3 flex items-center justify-between">
+        <div className="px-6 pb-3 flex items-center justify-between gap-3">
           <p className="typo-page-subtitle">
             {totalCount.toLocaleString()} result{totalCount !== 1 ? 's' : ''}
           </p>
-          <ExportButton
-            columns={columns}
-            disabled={totalCount === 0}
-            onFetchRows={handleExportRows}
-          />
+          <div className="flex items-center gap-2">
+            {activeTabHasColFilters && (
+              <button
+                type="button"
+                onClick={clearActiveTabColFilters}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg typo-body text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                <FilterX className="w-4 h-4" />
+                Clear filters
+              </button>
+            )}
+            <ExportButton
+              columns={columns}
+              disabled={totalCount === 0}
+              onFetchRows={handleExportRows}
+            />
+          </div>
         </div>
 
         {/* Results */}
@@ -1263,19 +1466,40 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                 <tr className="border-t border-gray-200">
                   {columns.map(col => (
                     <td key={col.element} className="px-3 pb-2 pt-1">
-                      <div className="relative">
+                      <div className="relative flex items-center gap-1">
                         <input
                           type="text"
-                          value={colFilters[col.element] ?? ''}
+                          value={pendingColFilters[col.element] ?? ''}
                           placeholder={`Filter ${col.label.toLowerCase()}…`}
                           onChange={e => setColFilter(col.element, e.target.value)}
-                          className="w-full px-2 py-1 typo-body border border-gray-300 rounded bg-white placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              applyColFilter(col.element);
+                            }
+                          }}
+                          className={`w-full min-w-0 px-2 py-1 typo-body border rounded bg-white placeholder-gray-400 focus:outline-none focus:ring-1 ${
+                            isColFilterActive(col.element)
+                              ? 'border-blue-400 bg-blue-50/50 focus:border-blue-500 focus:ring-blue-300'
+                              : 'border-gray-300 focus:border-blue-400 focus:ring-blue-300'
+                          }`}
                         />
-                        {colFilters[col.element] && (
+                        {isColFilterDirty(col.element) && (
                           <button
                             type="button"
-                            onClick={() => setColFilter(col.element, '')}
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            onClick={() => applyColFilter(col.element)}
+                            title="Apply filter"
+                            className="shrink-0 p-0.5 text-blue-600 hover:text-blue-800"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {(pendingColFilters[col.element] || appliedColFilters[col.element]) && (
+                          <button
+                            type="button"
+                            onClick={() => clearColFilter(col.element)}
+                            title="Clear filter"
+                            className="shrink-0 p-0.5 text-gray-400 hover:text-gray-600"
                           >
                             <X className="w-3 h-3" />
                           </button>

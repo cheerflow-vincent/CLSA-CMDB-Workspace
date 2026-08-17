@@ -9,7 +9,7 @@ import {
   type RelatedCIConfig,
 } from './relatedCIs';
 import { raw } from './viewFields';
-import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms } from './searchQuery';
+import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms, appendEncodedQuery, buildColumnFiltersQuery } from './searchQuery';
 import type { CISearchInventoryTab } from './ciSearchTabs';
 
 export type AppFilterKind = 'family' | 'instance';
@@ -209,6 +209,7 @@ export function buildAppScopedCiQuery(
   keyword: string,
   ciFilter: string,
   searchFields: string[],
+  columnFilterPart = '',
 ): string {
   if (!relatedIds.length) return EMPTY_CI_QUERY;
 
@@ -216,7 +217,17 @@ export function buildAppScopedCiQuery(
   const fields = searchFields.length ? searchFields : ['name'];
   const keywordPart = tokens.length ? buildMultiFieldAndLikeQuery(fields, tokens) : '';
   const idPart = `sys_idIN${relatedIds.slice(0, CHUNK_SIZE).join(',')}`;
-  return [idPart, ciFilter, keywordPart].filter(Boolean).join('^');
+  const base = [idPart, ciFilter, keywordPart].filter(Boolean).join('^');
+  return appendEncodedQuery(base, columnFilterPart);
+}
+
+/** Append column header filters to a base encoded query. */
+export function buildResultSnQueryForTab(
+  baseQuery: string,
+  filters: Record<string, string>,
+  allowedFields: string[],
+): string {
+  return appendEncodedQuery(baseQuery, buildColumnFiltersQuery(filters, allowedFields));
 }
 
 export function buildSnQueriesByTab(
@@ -263,11 +274,12 @@ export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
   ciFilter: string,
   searchFields: string[],
   fields: string[],
+  columnFilterPart = '',
 ): Promise<{ rows: T[]; access: TableAccess }> {
   if (!relatedIds.length) return { rows: [], access: 'ok' };
 
   if (relatedIds.length <= CHUNK_SIZE) {
-    const query = buildAppScopedCiQuery(relatedIds, keyword, ciFilter, searchFields);
+    const query = buildAppScopedCiQuery(relatedIds, keyword, ciFilter, searchFields, columnFilterPart);
     const { result, access } = await queryTableWithAccess<T>({
       table,
       query: `${query}^ORDERBYname`,
@@ -282,7 +294,7 @@ export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
   let access: TableAccess = 'ok';
   for (let i = 0; i < relatedIds.length; i += CHUNK_SIZE) {
     const chunk = relatedIds.slice(i, i + CHUNK_SIZE);
-    const query = buildAppScopedCiQuery(chunk, keyword, ciFilter, searchFields);
+    const query = buildAppScopedCiQuery(chunk, keyword, ciFilter, searchFields, columnFilterPart);
     const { result, access: chunkAccess } = await queryTableWithAccess<T>({
       table,
       query: `${query}^ORDERBYname`,

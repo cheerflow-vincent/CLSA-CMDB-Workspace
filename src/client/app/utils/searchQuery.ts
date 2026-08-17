@@ -88,3 +88,44 @@ export function prefixEncodedQuery(query: string, prefix: string): string {
   if (!query.trim()) return '';
   return query.split('^').map(seg => prefixQuerySegment(seg, prefix)).join('^');
 }
+
+/** Reference columns where LIKE must dot-walk to display value (.name). */
+const REFERENCE_FILTER_FIELDS = new Set([
+  'location',
+  'managed_by',
+  'support_group',
+  'model_id',
+]);
+
+function columnFilterField(element: string): string {
+  return REFERENCE_FILTER_FIELDS.has(element) ? `${element}.name` : element;
+}
+
+/** Append an encoded-query segment when both parts are non-empty. */
+export function appendEncodedQuery(base: string, extra: string): string {
+  if (!extra.trim()) return base;
+  if (!base.trim()) return extra;
+  return `${base}^${extra}`;
+}
+
+/**
+ * Build AND-combined fieldLIKE segments for column header filters.
+ * Only includes filters whose element is in allowedFields.
+ */
+export function buildColumnFiltersQuery(
+  filters: Record<string, string>,
+  allowedFields: string[],
+): string {
+  const allowed = new Set(allowedFields);
+  for (const [element, rawVal] of Object.entries(filters)) {
+    if (rawVal.trim()) allowed.add(element);
+  }
+  const parts: string[] = [];
+  for (const [element, rawVal] of Object.entries(filters)) {
+    if (!allowed.has(element)) continue;
+    const val = escapeLikeTerm(rawVal.trim());
+    if (!val) continue;
+    parts.push(`${columnFilterField(element)}LIKE${val}`);
+  }
+  return parts.join('^');
+}

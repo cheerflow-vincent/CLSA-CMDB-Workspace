@@ -9,7 +9,7 @@ import {
 import type { CISearchInventoryTab, CISearchTab } from './ciSearchTabs';
 import { CI_INVENTORY_TABS } from './ciSearchTabs';
 import { countDistinctHealthFromBranches } from './cmdbHealthResults';
-import { prefixEncodedQuery, joinOrEncodedQueries } from './searchQuery';
+import { prefixEncodedQuery, joinOrEncodedQueries, appendEncodedQuery } from './searchQuery';
 import {
   CHANGE_TASK_CONFIG,
   countDistinctRelatedTasksFromBranches,
@@ -43,6 +43,7 @@ export interface CiSearchSummaryContext {
   keyword: string;
   ciFilter: string;
   searchFields: string[];
+  columnFilterPartByTab: Record<CISearchInventoryTab, string>;
 }
 
 export interface CiSearchSummaryCounts {
@@ -84,6 +85,7 @@ function buildChunkedScopedPrefix(
   keyword: string,
   ciFilter: string,
   searchFields: string[],
+  columnFilterPart: string,
   toPrefix: (scopedQuery: string) => string,
 ): string {
   if (!relatedIds.length) return '';
@@ -91,7 +93,10 @@ function buildChunkedScopedPrefix(
   const parts: string[] = [];
   for (let i = 0; i < relatedIds.length; i += CHUNK_SIZE) {
     const chunk = relatedIds.slice(i, i + CHUNK_SIZE);
-    const scoped = buildAppScopedCiQuery(chunk, keyword, ciFilter, searchFields);
+    const scoped = appendEncodedQuery(
+      buildAppScopedCiQuery(chunk, keyword, ciFilter, searchFields),
+      columnFilterPart,
+    );
     const prefixed = toPrefix(scoped);
     if (prefixed) parts.push(prefixed);
   }
@@ -102,18 +107,17 @@ function buildChunkedScopedPrefix(
 
 export function buildTaskCiPrefixForTabScope(
   scope: CiSearchTabScope,
-  appFilterActive: boolean,
-  keyword: string,
-  ciFilter: string,
-  searchFields: string[],
+  context: CiSearchSummaryContext,
 ): string {
-  if (appFilterActive) {
+  const columnFilterPart = context.columnFilterPartByTab[scope.tab] ?? '';
+  if (context.appFilterActive) {
     const ids = scope.relatedIds ?? [];
     return buildChunkedScopedPrefix(
       ids,
-      keyword,
-      ciFilter,
-      searchFields,
+      context.keyword,
+      context.ciFilter,
+      context.searchFields,
+      columnFilterPart,
       scopedQueryToCiItemPrefix,
     );
   }
@@ -125,18 +129,17 @@ export function buildTaskCiPrefixForTabScope(
 
 export function buildHealthPrefixForTabScope(
   scope: CiSearchTabScope,
-  appFilterActive: boolean,
-  keyword: string,
-  ciFilter: string,
-  searchFields: string[],
+  context: CiSearchSummaryContext,
 ): string {
-  if (appFilterActive) {
+  const columnFilterPart = context.columnFilterPartByTab[scope.tab] ?? '';
+  if (context.appFilterActive) {
     const ids = scope.relatedIds ?? [];
     return buildChunkedScopedPrefix(
       ids,
-      keyword,
-      ciFilter,
-      searchFields,
+      context.keyword,
+      context.ciFilter,
+      context.searchFields,
+      columnFilterPart,
       scopedQueryToCiPrefix,
     );
   }
@@ -155,26 +158,24 @@ function buildTaskCiBranchesForScope(
   context: CiSearchSummaryContext,
   config: RelatedTaskConfig,
 ): string[] {
+  const columnFilterPart = context.columnFilterPartByTab[scope.tab] ?? '';
   if (context.appFilterActive) {
     const ids = scope.relatedIds ?? [];
     if (!ids.length) return [];
     const branches: string[] = [];
     for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
       const chunk = ids.slice(i, i + CHUNK_SIZE);
-      const scoped = buildAppScopedCiQuery(chunk, context.keyword, context.ciFilter, context.searchFields);
+      const scoped = appendEncodedQuery(
+        buildAppScopedCiQuery(chunk, context.keyword, context.ciFilter, context.searchFields),
+        columnFilterPart,
+      );
       const prefixed = scopedQueryToCiItemPrefix(scoped);
       if (prefixed) branches.push(taskCiQuery(prefixed, config));
     }
     return branches;
   }
 
-  const prefix = buildTaskCiPrefixForTabScope(
-    scope,
-    false,
-    context.keyword,
-    context.ciFilter,
-    context.searchFields,
-  );
+  const prefix = buildTaskCiPrefixForTabScope(scope, context);
   return prefix ? [taskCiQuery(prefix, config)] : [];
 }
 
@@ -182,26 +183,24 @@ function buildHealthBranchesForScope(
   scope: CiSearchTabScope,
   context: CiSearchSummaryContext,
 ): string[] {
+  const columnFilterPart = context.columnFilterPartByTab[scope.tab] ?? '';
   if (context.appFilterActive) {
     const ids = scope.relatedIds ?? [];
     if (!ids.length) return [];
     const branches: string[] = [];
     for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
       const chunk = ids.slice(i, i + CHUNK_SIZE);
-      const scoped = buildAppScopedCiQuery(chunk, context.keyword, context.ciFilter, context.searchFields);
+      const scoped = appendEncodedQuery(
+        buildAppScopedCiQuery(chunk, context.keyword, context.ciFilter, context.searchFields),
+        columnFilterPart,
+      );
       const prefixed = scopedQueryToCiPrefix(scoped);
       if (prefixed) branches.push(`active=true^${prefixed}`);
     }
     return branches;
   }
 
-  const prefix = buildHealthPrefixForTabScope(
-    scope,
-    false,
-    context.keyword,
-    context.ciFilter,
-    context.searchFields,
-  );
+  const prefix = buildHealthPrefixForTabScope(scope, context);
   return prefix ? [`active=true^${prefix}`] : [];
 }
 
@@ -244,6 +243,7 @@ export function buildSummaryContext(
   activeTab: CISearchTab,
   applied: { keyword: string; appFilter: AppFilterSelection | null },
   snQueriesByTab: Record<CISearchInventoryTab, string>,
+  columnFilterPartByTab: Record<CISearchInventoryTab, string>,
   appRelatedIdsByTab: AppRelatedIdsByTab | null,
   tabCounts: Record<CISearchInventoryTab, number>,
   allTotalCount: number,
@@ -279,6 +279,7 @@ export function buildSummaryContext(
     keyword: applied.keyword,
     ciFilter,
     searchFields,
+    columnFilterPartByTab,
   };
 }
 
