@@ -9,7 +9,7 @@ import {
   type RelatedCIConfig,
 } from './relatedCIs';
 import { raw } from './viewFields';
-import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms, appendEncodedQuery, buildColumnFiltersQuery } from './searchQuery';
+import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms, appendEncodedQuery, buildColumnFiltersQuery, escapeLikeTerm } from './searchQuery';
 import type { CISearchInventoryTab } from './ciSearchTabs';
 
 export type AppFilterKind = 'family' | 'instance';
@@ -33,7 +33,7 @@ export interface AppFamilyInstanceOption {
   kind: AppFilterKind;
 }
 
-const EMPTY_RELATED: AppRelatedIdsByTab = {
+export const EMPTY_RELATED: AppRelatedIdsByTab = {
   servers: [],
   switches: [],
   databases: [],
@@ -47,25 +47,17 @@ const TAB_TO_CI_TYPE: Record<keyof AppRelatedIdsByTab, RelatedCIConfig['ciType']
   network_links: 'network_link',
 };
 
-function appRole(config: RelatedCIConfig): 'parent' | 'child' {
-  return config.appRole ?? 'parent';
-}
-
 function infraSideField(config: RelatedCIConfig): 'child.sys_id' | 'parent.sys_id' {
-  return appRole(config) === 'child' ? 'parent.sys_id' : 'child.sys_id';
+  return (config.appRole ?? 'parent') === 'child' ? 'parent.sys_id' : 'child.sys_id';
 }
 
 function appSideInField(config: RelatedCIConfig): 'parent.sys_id' | 'child.sys_id' {
-  return appRole(config) === 'child' ? 'child.sys_id' : 'parent.sys_id';
+  return (config.appRole ?? 'parent') === 'child' ? 'child.sys_id' : 'parent.sys_id';
 }
 
 function relExtraQuery(config: RelatedCIConfig): string {
-  const infraSide = appRole(config) === 'child' ? 'parent' : 'child';
+  const infraSide = (config.appRole ?? 'parent') === 'child' ? 'parent' : 'child';
   return `type.name=${config.relType}^${infraSide}.sys_class_nameINSTANCEOF${config.baseClass}`;
-}
-
-function escapeLikeTerm(term: string): string {
-  return term.replace(/\^/g, '').replace(/=/g, '');
 }
 
 export function familyKindLabel(hierarchyMode: boolean): string {

@@ -4,6 +4,13 @@ import axios from 'axios'
 // ServiceNow omits WWW-Authenticate when this header is present.
 axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest'
 
+declare global {
+  interface Window {
+    g_ck?: string;
+    NOW?: { user?: { userToken?: string; userName?: string } };
+  }
+}
+
 const APP_SCOPE = 'x_citi4_clsa_cmd_0'
 
 function unwrapRestBody<T>(data: unknown): T {
@@ -32,6 +39,8 @@ export interface PortalMetadataResponse {
 }
 
 let _portalMetadataCache: PortalMetadataResponse | null = null
+let _portalMetadataCacheTime = 0
+const PORTAL_METADATA_TTL_MS = 5 * 60 * 1000
 
 const EMPTY_PORTAL_METADATA: PortalMetadataResponse = {
   hierarchy_mode: true,
@@ -43,13 +52,18 @@ const EMPTY_PORTAL_METADATA: PortalMetadataResponse = {
 
 /** Server-brokered portal metadata (choices, properties, reference lists). */
 export async function fetchPortalMetadata(force = false): Promise<PortalMetadataResponse> {
-  if (_portalMetadataCache && !force) return _portalMetadataCache
+  const now = Date.now()
+  if (_portalMetadataCache && !force && (now - _portalMetadataCacheTime) < PORTAL_METADATA_TTL_MS) {
+    return _portalMetadataCache
+  }
   try {
     const r = await axios.get(`/api/${APP_SCOPE}/portal/metadata`)
     const payload = unwrapRestBody(unwrapRestBody(r.data)) as PortalMetadataResponse
     _portalMetadataCache = payload?.properties ? payload : EMPTY_PORTAL_METADATA
+    _portalMetadataCacheTime = now
   } catch {
     _portalMetadataCache = EMPTY_PORTAL_METADATA
+    _portalMetadataCacheTime = now
   }
   return _portalMetadataCache
 }
@@ -108,19 +122,10 @@ declare const g_user: { userName?: string; firstName?: string; lastName?: string
  */
 export async function initUserToken(): Promise<void> {
   // If g_ck is already injected by the page (some SN versions), use it directly
-  const injected = (window as any).g_ck ?? (window as any).NOW?.user?.userToken ?? ''
+  const injected = window.g_ck ?? window.NOW?.user?.userToken ?? ''
   if (injected) {
     axios.defaults.headers.common['X-UserToken'] = injected
     return
-  }
-  try {
-    await fetch('/angular.do?sysparm_type=get_user', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    })
-  } catch {
-    // ignore network errors
   }
   // angular.do always returns 401 for get_user; the token is in the response
   // headers. Since fetch doesn't expose non-CORS headers on 401, we use
@@ -147,8 +152,7 @@ export function bootstrapAuth(): { username: string } {
   try {
     const name =
       (typeof g_user !== 'undefined' && g_user?.userName) ||
-      // fallback: NOW global used by newer SN platform versions
-      (typeof (window as any).NOW !== 'undefined' && (window as any).NOW?.user?.userName) ||
+      (typeof window.NOW !== 'undefined' && window.NOW?.user?.userName) ||
       'user'
     return { username: String(name) }
   } catch {
@@ -252,19 +256,25 @@ export async function getSysProperties(names: string[]): Promise<Record<string, 
 
 const DEFAULT_CI_FILTER = 'install_status!=7'
 let _cachedCIFilter: string | null = null
+let _cachedCIFilterTime = 0
+const CI_FILTER_TTL_MS = 5 * 60 * 1000
 
 /**
  * Convenience wrapper — returns the `<scope>.ci.filter` property value.
- * Cached for the lifetime of the page.
+ * Cached for up to 5 minutes.
  */
 export async function getCIFilter(): Promise<string> {
-  if (_cachedCIFilter !== null) return _cachedCIFilter
+  const now = Date.now()
+  if (_cachedCIFilter !== null && (now - _cachedCIFilterTime) < CI_FILTER_TTL_MS) {
+    return _cachedCIFilter
+  }
   try {
     const props = await getSysProperties([`${APP_SCOPE}.ci.filter`])
     _cachedCIFilter = props[`${APP_SCOPE}.ci.filter`] ?? DEFAULT_CI_FILTER
   } catch {
     _cachedCIFilter = DEFAULT_CI_FILTER
   }
+  _cachedCIFilterTime = now
   return _cachedCIFilter
 }
 
@@ -293,6 +303,8 @@ export interface FieldAccessResponse {
   fields: Record<string, FieldAccessEntry>
 }
 
+const FIELD_ACCESS_BATCH_SIZE = 35
+
 export async function fetchFieldAccess(
   table: string,
   sysId: string,
@@ -301,13 +313,12 @@ export async function fetchFieldAccess(
   const fallback: FieldAccessResponse = { canWriteRecord: false, fields: {} }
   if (!table || !sysId || !fields.length) return fallback
 
-  const BATCH_SIZE = 35
   const mergedFields: Record<string, FieldAccessEntry> = {}
   let canWriteRecord = false
 
   try {
-    for (let i = 0; i < fields.length; i += BATCH_SIZE) {
-      const batch = fields.slice(i, i + BATCH_SIZE)
+    for (let i = 0; i < fields.length; i += FIELD_ACCESS_BATCH_SIZE) {
+      const batch = fields.slice(i, i + FIELD_ACCESS_BATCH_SIZE)
       const r = await axios.get(`/api/${APP_SCOPE}/portal/field_access`, {
         params: { table, sys_id: sysId, fields: batch.join(',') },
       })
@@ -483,11 +494,16 @@ function coerceSysId(v: unknown): string {
   return String(v)
 }
 
-function formatTableNameFallback(tableName: string): string {
+/** Human-readable label derived from a CMDB table name (strips cmdb_ci_ prefix, title-cases words). */
+export function formatCmdbTableLabel(tableName: string): string {
   return tableName
     .replace(/^cmdb_ci_/, '')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function formatTableNameFallback(tableName: string): string {
+  return formatCmdbTableLabel(tableName)
 }
 
 /** Human-readable label for a table (sys_db_object.label). */
@@ -504,11 +520,11 @@ export async function getTableLabel(tableName: string): Promise<string> {
       limit: 1,
     })
     const label = result[0] ? coerceDisplay(result[0].label).trim() : ''
-    const resolved = label || formatTableNameFallback(tableName)
+    const resolved = label || formatCmdbTableLabel(tableName)
     tableLabelCache.set(tableName, resolved)
     return resolved
   } catch {
-    return formatTableNameFallback(tableName)
+    return formatCmdbTableLabel(tableName)
   }
 }
 

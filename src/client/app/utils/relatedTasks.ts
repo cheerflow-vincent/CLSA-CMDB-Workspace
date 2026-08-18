@@ -82,8 +82,10 @@ export function taskCiTrendQuery(
 export const CHANGE_TASK_CONFIG: RelatedTaskConfig = {
   taskClass: 'change_request',
   taskTable: 'change_request',
+  // `javascript:gs.beginningOfToday()` is a ServiceNow server-side GlideScript expression
+  // evaluated by the Table API — it is not a browser JavaScript URI.
   extraQuery:
-    'task.sys_class_name=change_request^task.active=true^task.ref_change_request.start_date>=javascript:gs.beginningOfToday()',
+    'task.sys_class_name=change_request^task.active=true^task.ref_change_request.start_date>=javascript:gs.beginningOfToday()', // NOSONAR: ServiceNow GlideScript server-side expression, not a browser URI
   listTitle: LIST_VIEW_TITLE,
   defaultColumns: [
     { element: 'number',            label: 'Number'            },
@@ -396,24 +398,6 @@ export async function fetchRelatedTaskPage(
     return { rows: [], columns: layoutColumns, totalCount: 0, access };
   }
 
-  const columns = filterColumnsByRecords(layoutColumns, taskRows, 'task.');
-
-  const seen = new Set<string>();
-  const rows: RelatedTaskRow[] = [];
-
-  for (const r of taskRows) {
-    const sysId = raw(r['task.sys_id']);
-    if (!sysId || seen.has(sysId)) continue;
-    seen.add(sysId);
-
-    const values: Record<string, string> = {};
-    for (const col of columns) {
-      if (col.element in r || `task.${col.element}` in r) {
-        values[col.element] = str(r[`task.${col.element}`]);
-      }
-    }
-    rows.push({ sysId, values });
-  }
-
+  const { rows, columns } = mapTaskCiResultRows(taskRows, layoutColumns);
   return { rows, columns, totalCount, access };
 }

@@ -110,7 +110,9 @@ export function appendEncodedQuery(base: string, extra: string): string {
 
 /**
  * Build AND-combined fieldLIKE segments for column header filters.
- * Only includes filters whose element is in allowedFields.
+ * Includes every filter in `allowedFields`, plus any filter key with a
+ * non-empty value even if not in `allowedFields` (so filters applied before
+ * columns finish loading are preserved).
  */
 export function buildColumnFiltersQuery(
   filters: Record<string, string>,

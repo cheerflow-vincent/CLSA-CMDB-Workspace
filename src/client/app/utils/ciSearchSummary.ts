@@ -80,6 +80,29 @@ function scopedQueryToCiPrefix(scopedQuery: string): string {
     .join('^');
 }
 
+function buildChunkedScopedBranches(
+  relatedIds: string[],
+  keyword: string,
+  ciFilter: string,
+  searchFields: string[],
+  columnFilterPart: string,
+  toPrefix: (scopedQuery: string) => string,
+  wrap: (prefixed: string) => string = p => p,
+): string[] {
+  if (!relatedIds.length) return [];
+  const branches: string[] = [];
+  for (let i = 0; i < relatedIds.length; i += CHUNK_SIZE) {
+    const chunk = relatedIds.slice(i, i + CHUNK_SIZE);
+    const scoped = appendEncodedQuery(
+      buildAppScopedCiQuery(chunk, keyword, ciFilter, searchFields),
+      columnFilterPart,
+    );
+    const prefixed = toPrefix(scoped);
+    if (prefixed) branches.push(wrap(prefixed));
+  }
+  return branches;
+}
+
 function buildChunkedScopedPrefix(
   relatedIds: string[],
   keyword: string,
@@ -88,21 +111,9 @@ function buildChunkedScopedPrefix(
   columnFilterPart: string,
   toPrefix: (scopedQuery: string) => string,
 ): string {
-  if (!relatedIds.length) return '';
-
-  const parts: string[] = [];
-  for (let i = 0; i < relatedIds.length; i += CHUNK_SIZE) {
-    const chunk = relatedIds.slice(i, i + CHUNK_SIZE);
-    const scoped = appendEncodedQuery(
-      buildAppScopedCiQuery(chunk, keyword, ciFilter, searchFields),
-      columnFilterPart,
-    );
-    const prefixed = toPrefix(scoped);
-    if (prefixed) parts.push(prefixed);
-  }
-
-  if (!parts.length) return '';
-  return joinOrEncodedQueries(parts);
+  const branches = buildChunkedScopedBranches(relatedIds, keyword, ciFilter, searchFields, columnFilterPart, toPrefix);
+  if (!branches.length) return '';
+  return joinOrEncodedQueries(branches);
 }
 
 export function buildTaskCiPrefixForTabScope(
@@ -149,10 +160,6 @@ export function buildHealthPrefixForTabScope(
   return [classPart, filterPart].filter(Boolean).join('^');
 }
 
-function orJoinQueryParts(parts: string[]): string {
-  return joinOrEncodedQueries(parts);
-}
-
 function buildTaskCiBranchesForScope(
   scope: CiSearchTabScope,
   context: CiSearchSummaryContext,
@@ -162,17 +169,15 @@ function buildTaskCiBranchesForScope(
   if (context.appFilterActive) {
     const ids = scope.relatedIds ?? [];
     if (!ids.length) return [];
-    const branches: string[] = [];
-    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-      const chunk = ids.slice(i, i + CHUNK_SIZE);
-      const scoped = appendEncodedQuery(
-        buildAppScopedCiQuery(chunk, context.keyword, context.ciFilter, context.searchFields),
-        columnFilterPart,
-      );
-      const prefixed = scopedQueryToCiItemPrefix(scoped);
-      if (prefixed) branches.push(taskCiQuery(prefixed, config));
-    }
-    return branches;
+    return buildChunkedScopedBranches(
+      ids,
+      context.keyword,
+      context.ciFilter,
+      context.searchFields,
+      columnFilterPart,
+      scopedQueryToCiItemPrefix,
+      prefixed => taskCiQuery(prefixed, config),
+    );
   }
 
   const prefix = buildTaskCiPrefixForTabScope(scope, context);
@@ -187,17 +192,15 @@ function buildHealthBranchesForScope(
   if (context.appFilterActive) {
     const ids = scope.relatedIds ?? [];
     if (!ids.length) return [];
-    const branches: string[] = [];
-    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-      const chunk = ids.slice(i, i + CHUNK_SIZE);
-      const scoped = appendEncodedQuery(
-        buildAppScopedCiQuery(chunk, context.keyword, context.ciFilter, context.searchFields),
-        columnFilterPart,
-      );
-      const prefixed = scopedQueryToCiPrefix(scoped);
-      if (prefixed) branches.push(`active=true^${prefixed}`);
-    }
-    return branches;
+    return buildChunkedScopedBranches(
+      ids,
+      context.keyword,
+      context.ciFilter,
+      context.searchFields,
+      columnFilterPart,
+      scopedQueryToCiPrefix,
+      prefixed => `active=true^${prefixed}`,
+    );
   }
 
   const prefix = buildHealthPrefixForTabScope(scope, context);
@@ -228,15 +231,7 @@ export function buildSidebarEncodedQuery(
   context: CiSearchSummaryContext,
   flagType: SummaryFlagType,
 ): string {
-  return orJoinQueryParts(buildSidebarQueryBranches(context, flagType));
-}
-
-/** @deprecated Use buildSidebarEncodedQuery — kept for callers expecting CI-only prefix on single tab. */
-export function buildSidebarQueryPrefix(
-  context: CiSearchSummaryContext,
-  flagType: SummaryFlagType,
-): string {
-  return buildSidebarEncodedQuery(context, flagType);
+  return joinOrEncodedQueries(buildSidebarQueryBranches(context, flagType));
 }
 
 export function buildSummaryContext(

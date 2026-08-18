@@ -16,6 +16,7 @@ import {
   getSysProperties,
   fetchPortalMetadata,
   APP_SCOPE,
+  formatCmdbTableLabel,
   type TableAccess,
 } from '../../api/servicenow';
 import { loadListFields, raw, str, type ViewField } from '../utils/viewFields';
@@ -28,6 +29,7 @@ import {
   fetchRelatedInfraCiIdsByTable,
   resolveInstanceIdsForAppSelection,
   fetchAllScopedCiRows,
+  EMPTY_RELATED,
   type AppFilterSelection,
   type AppRelatedIdsByTab,
 } from '../utils/ciSearchAppFilter';
@@ -46,6 +48,7 @@ const LIST_VIEW = 'CLSA CMDB Workspace';
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50] as const;
 const DEFAULT_PAGE_SIZE = 10;
 const MERGE_CAP = 500;
+const EXPORT_ROW_CAP = 10_000;
 
 interface CISearchViewProps {
   onViewDetails: (ci: CIItem) => void;
@@ -134,18 +137,24 @@ interface TabData {
 
 const EMPTY_TAB_DATA: TabData = { columns: [], rows: [], totalCount: 0, loading: false, access: 'ok' };
 
-function formatClassLabel(cls: string): string {
-  return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function apiFieldsForColumns(columns: ViewField[]): string[] {
-  return [...new Set(['sys_id', 'name', 'sys_class_name', ...columns.map(c => c.element)])];
-}
-
 function resolveCiTable(rec: Record<string, unknown>, fallbackTable: string): string {
   const v = raw(rec.sys_class_name);
   if (v && /^cmdb_ci/.test(v)) return v;
   return fallbackTable;
+}
+
+/**
+ * Build a safe ServiceNow record URL from a table name and sys_id.
+ * The table name is validated to contain only word characters before encoding,
+ * preventing path injection through API-sourced values.
+ */
+function buildServiceNowRecordUrl(table: string, sysId: string): string {
+  const safeTable = /^\w+$/.test(table) ? table : 'cmdb_ci';
+  return `/${encodeURIComponent(safeTable)}.do?sys_id=${encodeURIComponent(sysId)}`;
+}
+
+function apiFieldsForColumns(columns: ViewField[]): string[] {
+  return [...new Set(['sys_id', 'name', 'sys_class_name', ...columns.map(c => c.element)])];
 }
 
 function mapApiRow(
@@ -163,7 +172,7 @@ function mapApiRow(
     sysId:    raw(rec.sys_id),
     sysClass: table,
     table,
-    label:    cfg?.label ?? formatClassLabel(table),
+    label:    cfg?.label ?? formatCmdbTableLabel(table),
     values,
     incidents: 0,
     changes:   0,
@@ -175,7 +184,7 @@ function buildCIItem(row: SearchRow): CIItem {
     id:           row.sysId,
     name:         row.values.name || row.sysId,
     type:         row.label,
-    class:        formatClassLabel(row.sysClass),
+    class:        formatCmdbTableLabel(row.sysClass),
     table:        row.table,
     environment:  row.values.environment ?? '',
     location:     row.values.location ?? '',
@@ -222,7 +231,7 @@ async function fetchTabAll(
   totalCount: number,
 ): Promise<{ rows: SearchRow[]; access: TableAccess }> {
   if (!totalCount) return { rows: [], access: 'ok' };
-  const limit = Math.min(totalCount, 10000);
+  const limit = Math.min(totalCount, EXPORT_ROW_CAP);
   const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
     table: cfg.table,
     query: `${snQuery}^ORDERBYname`,
@@ -314,10 +323,12 @@ const buildPills = (c: PillCounts, access: PillAccess): PillDef[] => ([
 function ExportButton({
   columns,
   disabled,
+  truncated,
   onFetchRows,
 }: {
   columns: ViewField[];
   disabled: boolean;
+  truncated?: boolean;
   onFetchRows: () => Promise<SearchRow[]>;
 }) {
   const [exporting, setExporting] = useState(false);
@@ -348,18 +359,25 @@ function ExportButton({
   };
 
   return (
-    <button
-      type="button"
-      onClick={exportCSV}
-      disabled={disabled || exporting || !columns.length}
-      className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded-lg typo-body hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {exporting
-        ? <Loader2 className="w-4 h-4 animate-spin" />
-        : <Download className="w-4 h-4" />}
-      <FileText className="w-4 h-4 text-gray-500" />
-      {exporting ? 'Exporting…' : 'Export CSV'}
-    </button>
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={exportCSV}
+        disabled={disabled || exporting || !columns.length}
+        className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded-lg typo-body hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {exporting
+          ? <Loader2 className="w-4 h-4 animate-spin" />
+          : <Download className="w-4 h-4" />}
+        <FileText className="w-4 h-4 text-gray-500" />
+        {exporting ? 'Exporting…' : 'Export CSV'}
+      </button>
+      {truncated && (
+        <p className="typo-caption text-amber-600">
+          Export limited to {EXPORT_ROW_CAP.toLocaleString()} rows per CI type.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -457,7 +475,7 @@ function SearchResultCard({
             />
           </div>
           <a
-            href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
+            href={buildServiceNowRecordUrl(row.table || 'cmdb_ci', row.sysId)}
             target="_blank"
             rel="noopener noreferrer"
             className="typo-link self-start"
@@ -547,8 +565,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   }, []);
 
   const queryKey = useMemo(
-    () => JSON.stringify({ applied, ciFilter, searchFields, appRelatedIdsByTab, hierarchyMode }),
-    [applied, ciFilter, searchFields, appRelatedIdsByTab, hierarchyMode],
+    () => JSON.stringify({ applied, ciFilter, searchFields, appRelatedIdsByTab }),
+    [applied, ciFilter, searchFields, appRelatedIdsByTab],
   );
 
   const baseSnQueriesByTab = useMemo(() => {
@@ -684,36 +702,21 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         const instanceIds = await resolveInstanceIdsForAppSelection(applied.appFilter!, hierarchyMode);
         if (cancelled) return;
         if (!instanceIds.length) {
-          setAppRelatedIdsByTab({
-            servers: [],
-            switches: [],
-            databases: [],
-            network_links: [],
-          });
+          setAppRelatedIdsByTab({ ...EMPTY_RELATED });
           return;
         }
         const { idsByTab, access } = await fetchRelatedInfraCiIdsByTable(instanceIds);
         if (cancelled) return;
         if (access === 'denied') {
           setAppFilterError('Access denied while loading application relationships.');
-          setAppRelatedIdsByTab({
-            servers: [],
-            switches: [],
-            databases: [],
-            network_links: [],
-          });
+          setAppRelatedIdsByTab({ ...EMPTY_RELATED });
           return;
         }
         setAppRelatedIdsByTab(idsByTab);
       } catch (e) {
         if (!cancelled) {
-          setAppFilterError(String((e as Error)?.message ?? e));
-          setAppRelatedIdsByTab({
-            servers: [],
-            switches: [],
-            databases: [],
-            network_links: [],
-          });
+          setAppFilterError('Failed to load application relationships. Please try again.');
+          setAppRelatedIdsByTab({ ...EMPTY_RELATED });
         }
       } finally {
         if (!cancelled) setAppFilterLoading(false);
@@ -833,7 +836,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           cfg.table,
           relatedIds,
           applied.keyword,
-          ciFilter!,
+          ciFilter ?? '',
           searchFields,
           apiFieldsForColumns(cols),
           columnFilterPart,
@@ -1042,7 +1045,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     setPage(0);
   };
 
-  const applyColFilter = (_element: string) => {
+  const applyColFilter = () => {
     applyColFiltersForTab();
   };
 
@@ -1192,6 +1195,14 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     appFilterActive,
   ]);
 
+  const exportTruncated = useMemo(() => {
+    if (activeTab === 'all') {
+      return V2_TABS.some(cfg => tabData[cfg.tab].totalCount > EXPORT_ROW_CAP);
+    }
+    const specificTab = activeTab as SpecificTab;
+    return (tabData[specificTab]?.totalCount ?? 0) > EXPORT_ROW_CAP;
+  }, [activeTab, tabData]);
+
   function renderCell(row: SearchRow, col: ViewField, colIdx: number) {
     if (!(col.element in row.values)) return null;
     const val = row.values[col.element] || '—';
@@ -1225,7 +1236,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               />
             </div>
             <a
-              href={`/${row.table || 'cmdb_ci'}.do?sys_id=${row.sysId}`}
+              href={buildServiceNowRecordUrl(row.table || 'cmdb_ci', row.sysId)}
               target="_blank"
               rel="noopener noreferrer"
               className="typo-link self-start"
@@ -1265,6 +1276,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           const isActive = activeTab === tab;
           return (
             <button key={tab} onClick={() => setActiveTab(tab)}
+              type="button"
               className={`rounded-lg border-2 p-5 transition-all text-left ${isActive ? `${accent} shadow-sm` : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded shrink-0 ${iconBg}`}>{icon}</div>
@@ -1373,6 +1385,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               return !isAccessDenied(tabData[tab].access) && !isAccessDenied(pillAccess[tab as keyof PillCounts]);
             }).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
+                type="button"
                 className={`py-3 whitespace-nowrap border-b-2 transition-colors typo-body ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                 {tabLabels[tab]}
                 <span className={`ml-1.5 typo-badge px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
@@ -1415,6 +1428,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             <ExportButton
               columns={columns}
               disabled={totalCount === 0}
+              truncated={exportTruncated}
               onFetchRows={handleExportRows}
             />
           </div>
@@ -1475,7 +1489,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                           onKeyDown={e => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
-                              applyColFilter(col.element);
+                              applyColFilter();
                             }
                           }}
                           className={`w-full min-w-0 px-2 py-1 typo-body border rounded bg-white placeholder-gray-400 focus:outline-none focus:ring-1 ${
@@ -1487,7 +1501,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                         {isColFilterDirty(col.element) && (
                           <button
                             type="button"
-                            onClick={() => applyColFilter(col.element)}
+                            onClick={() => applyColFilter()}
                             title="Apply filter"
                             className="shrink-0 p-0.5 text-blue-600 hover:text-blue-800"
                           >
