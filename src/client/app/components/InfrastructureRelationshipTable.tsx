@@ -8,17 +8,20 @@ import {
   NETWORK_LINK_REL_CONFIG,
   DATABASE_REL_CONFIG,
   fetchRelatedCICount,
+  fetchRelatedCICountForCi,
   type RelatedCIConfig,
 } from '../utils/relatedCIs';
 import { INFRA_CI_STYLE, type InfraCIType } from '../utils/infraCiStyles';
 
 interface Props {
   recordSysId?: string;
+  ciSysId?: string;
   refreshKey?: number;
   onViewCI?: (ci: CIItem) => void;
+  nodeSearch?: string;
 }
 
-const SECTIONS: Array<{
+const APP_SECTIONS: Array<{
   config: RelatedCIConfig;
   title: string;
   emptyMessage: string;
@@ -75,29 +78,53 @@ const SECTIONS: Array<{
   },
 ];
 
+const CI_SECTION_TITLES: Record<InfraCIType, string> = {
+  server: 'Related servers',
+  netgear: 'Related network gears',
+  network_link: 'Related network links',
+  database: 'Related databases',
+};
+
+function buildSections(ciMode: boolean) {
+  const source = APP_SECTIONS;
+  if (!ciMode) return source;
+  return source.map(section => ({
+    ...section,
+    title: CI_SECTION_TITLES[section.config.ciType as InfraCIType],
+  }));
+}
+
 function InfraTableSection({
   section,
   recordSysId,
+  ciSysId,
   refreshKey,
   onViewCI,
+  nodeSearch = '',
 }: {
-  section: typeof SECTIONS[number];
+  section: typeof APP_SECTIONS[number];
   recordSysId?: string;
+  ciSysId?: string;
   refreshKey: number;
   onViewCI?: (ci: CIItem) => void;
+  nodeSearch?: string;
 }) {
   const { config, Icon } = section;
   const ciType = config.ciType as InfraCIType;
   const style = INFRA_CI_STYLE[ciType];
   const [totalCount, setTotalCount] = useState<number | null>(null);
+  const anchorId = ciSysId || recordSysId;
 
   useEffect(() => {
-    if (!recordSysId) {
+    if (!anchorId) {
       setTotalCount(0);
       return;
     }
     let cancelled = false;
-    fetchRelatedCICount(recordSysId, config)
+    const loadCount = ciSysId
+      ? fetchRelatedCICountForCi(ciSysId, config)
+      : fetchRelatedCICount(recordSysId!, config);
+    loadCount
       .then(({ totalCount: count }) => {
         if (!cancelled) setTotalCount(count);
       })
@@ -105,7 +132,7 @@ function InfraTableSection({
         if (!cancelled) setTotalCount(0);
       });
     return () => { cancelled = true; };
-  }, [recordSysId, config, refreshKey]);
+  }, [anchorId, ciSysId, recordSysId, config, refreshKey]);
 
   return (
     <section className="rounded-xl border border-gray-200 overflow-hidden bg-white">
@@ -118,7 +145,9 @@ function InfraTableSection({
         </div>
         <div className="flex-1 min-w-0">
           <h4 className="typo-panel-title">{style.label}</h4>
-          <p className="typo-caption truncate">{config.relType}</p>
+          <p className="typo-caption truncate">
+            {ciSysId ? 'Direct relationships' : config.relType}
+          </p>
         </div>
         {totalCount !== null && (
           <span className={`typo-badge font-semibold ${section.badgeBg} ${section.badgeText} border ${section.badgeBorder} px-2.5 py-0.5 rounded-full shrink-0`}>
@@ -131,6 +160,8 @@ function InfraTableSection({
         embedded
         config={config}
         recordSysId={recordSysId}
+        ciSysId={ciSysId}
+        nodeSearch={nodeSearch}
         refreshKey={refreshKey}
         responsiveLayout={false}
         showCIFlags
@@ -153,18 +184,24 @@ function InfraTableSection({
 
 export default function InfrastructureRelationshipTable({
   recordSysId,
+  ciSysId,
   refreshKey = 0,
   onViewCI,
+  nodeSearch = '',
 }: Props) {
+  const sections = buildSections(!!ciSysId);
+
   return (
     <div className="space-y-5">
-      {SECTIONS.map(section => (
+      {sections.map(section => (
         <InfraTableSection
           key={section.config.ciType}
           section={section}
           recordSysId={recordSysId}
+          ciSysId={ciSysId}
           refreshKey={refreshKey}
           onViewCI={onViewCI}
+          nodeSearch={nodeSearch}
         />
       ))}
     </div>

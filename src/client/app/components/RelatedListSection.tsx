@@ -7,7 +7,9 @@ import { type ViewField } from '../utils/viewFields';
 import { useNarrowContainer, useResponsiveListVariant } from '../utils/useNarrowLayout';
 import {
   fetchRelatedCICount,
+  fetchRelatedCICountForCi,
   fetchRelatedCIPage,
+  fetchRelatedCIPageForCi,
   RELATED_CI_PAGE_SIZE,
   type RelatedCIConfig,
   type RelatedCIRow,
@@ -285,6 +287,7 @@ function PaginationBar({
 export default function RelatedListSection({
   config,
   recordSysId,
+  ciSysId,
   isOpen,
   onToggle,
   onViewCI,
@@ -303,9 +306,12 @@ export default function RelatedListSection({
   embedded = false,
   responsiveLayout = true,
   showCIFlags = false,
+  nodeSearch = '',
 }: {
   config: RelatedCIConfig | RelatedTaskConfig;
   recordSysId?: string;
+  /** When set, load direct infra relationships from cmdb_rel_ci for this CI. */
+  ciSysId?: string;
   isOpen: boolean;
   onToggle: () => void;
   onViewCI?: (ci: CIItem) => void;
@@ -328,6 +334,8 @@ export default function RelatedListSection({
   responsiveLayout?: boolean;
   /** Show incident/change flag badges next to related CI names. */
   showCIFlags?: boolean;
+  /** Client-side filter for related CI name (infrastructure table search). */
+  nodeSearch?: string;
 }) {
   const [flagPanel, setFlagPanel] = useState<{
     recordSysId: string;
@@ -353,19 +361,23 @@ export default function RelatedListSection({
     ? useResponsiveListVariant(displayVariant, narrow, 'cards')
     : displayVariant;
   const contentOpen = embedded || isOpen;
+  const ciMode = !taskMode && !!ciSysId;
+  const anchorId = ciMode ? ciSysId : recordSysId;
 
   useEffect(() => {
     setPage(0);
     setRows([]);
     setColumns([]);
-    if (!recordSysId) {
+    if (!anchorId) {
       setTotalCount(0);
       setAccess('ok');
       return;
     }
     const loadCount = taskMode
-      ? fetchRelatedTaskCount(recordSysId, config)
-      : fetchRelatedCICount(recordSysId, config);
+      ? fetchRelatedTaskCount(anchorId, config)
+      : ciMode
+        ? fetchRelatedCICountForCi(ciSysId!, config as RelatedCIConfig)
+        : fetchRelatedCICount(anchorId, config as RelatedCIConfig);
     loadCount
       .then(({ totalCount: count, access: acc }) => {
         setTotalCount(count);
@@ -375,14 +387,16 @@ export default function RelatedListSection({
         setTotalCount(0);
         setAccess('error');
       });
-  }, [recordSysId, config, taskMode, refreshKey]);
+  }, [anchorId, ciSysId, ciMode, recordSysId, config, taskMode, refreshKey]);
 
   useEffect(() => {
-    if (!contentOpen || !recordSysId) return;
+    if (!contentOpen || !anchorId) return;
     setLoading(true);
     const loadPage = taskMode
-      ? fetchRelatedTaskPage(recordSysId, config, page)
-      : fetchRelatedCIPage(recordSysId, config, page);
+      ? fetchRelatedTaskPage(anchorId, config, page)
+      : ciMode
+        ? fetchRelatedCIPageForCi(ciSysId!, config as RelatedCIConfig, page)
+        : fetchRelatedCIPage(anchorId, config as RelatedCIConfig, page);
     loadPage
       .then(({ rows: pageRows, columns: pageCols, totalCount: count, access: acc }) => {
         setRows(pageRows);
@@ -392,11 +406,24 @@ export default function RelatedListSection({
       })
       .catch(() => {
         setRows([]);
-        setColumns(config.defaultColumns);
+        setColumns('defaultColumns' in config ? config.defaultColumns : []);
         setAccess('error');
       })
       .finally(() => setLoading(false));
-  }, [contentOpen, recordSysId, page, config, taskMode, refreshKey]);
+  }, [contentOpen, anchorId, ciSysId, ciMode, recordSysId, page, config, taskMode, refreshKey]);
+
+  const searchQ = nodeSearch.trim().toLowerCase();
+  const displayRows = !taskMode && searchQ
+    ? (rows as RelatedCIRow[]).filter(row => {
+        const name = (row.values.name || '').toLowerCase();
+        const rel = (row.relType || '').toLowerCase();
+        return name.includes(searchQ) || rel.includes(searchQ);
+      })
+    : rows;
+
+  const displayColumns = ciMode
+    ? [{ element: '__rel_type__', label: 'Relationship' }, ...columns]
+    : columns;
 
   const pageSize = RELATED_CI_PAGE_SIZE;
   const start = totalCount === 0 ? 0 : page * pageSize + 1;
@@ -408,6 +435,16 @@ export default function RelatedListSection({
     col: ViewField,
     colIdx: number,
   ) {
+    if (col.element === '__rel_type__') {
+      const ciRow = row as RelatedCIRow;
+      const relVal = ciRow.relType || '—';
+      return (
+        <td key={col.element} className="px-2 py-1.5 typo-body text-gray-600 max-w-[180px]">
+          <span className="truncate block" title={relVal}>{relVal}</span>
+        </td>
+      );
+    }
+
     if (!(col.element in row.values)) return null;
     const cellVal = row.values[col.element] || '—';
 
@@ -434,7 +471,7 @@ export default function RelatedListSection({
       );
     }
 
-    if (colIdx === 0) {
+    if (col.element === 'name') {
       const ciRow = row as RelatedCIRow;
       const openFlag = (type: FlagType) => {
         setFlagPanel({
@@ -545,7 +582,7 @@ export default function RelatedListSection({
   }
 
   function renderCIList() {
-    const ciRows = rows as RelatedCIRow[];
+    const ciRows = displayRows as RelatedCIRow[];
 
     if (resolvedVariant === 'cards') {
       return (
@@ -574,7 +611,7 @@ export default function RelatedListSection({
         <table className="w-full">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100">
-              {columns.map(col => (
+              {displayColumns.map(col => (
                 <th key={col.element}
                   className="px-2 py-1.5 text-left typo-label first:pl-3">
                   {col.label}
@@ -584,8 +621,11 @@ export default function RelatedListSection({
           </thead>
           <tbody className="divide-y divide-gray-50 typo-body">
             {ciRows.map((row, i) => (
-              <tr key={row.sysId} className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}>
-                {columns.map((col, colIdx) => renderCell(row, col, colIdx))}
+              <tr
+                key={row.relSysId ?? row.sysId}
+                className={`transition-colors ${i % 2 === 1 ? 'bg-gray-50/50' : ''}`}
+              >
+                {displayColumns.map((col, colIdx) => renderCell(row, col, colIdx))}
               </tr>
             ))}
           </tbody>

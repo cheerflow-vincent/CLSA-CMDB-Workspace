@@ -14,7 +14,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { MoreVertical, Eye, Edit2, ExternalLink, Loader2, Network, X } from 'lucide-react';
 import { fetchFieldAccess } from '../../api/servicenow';
-import { fetchAllInfraPeers, type InfraCIPeer } from '../utils/relatedCIs';
+import { fetchAllInfraPeers, fetchInfraPeersForCi, resolveInfraCIType, type InfraCIPeer } from '../utils/relatedCIs';
 import { canEditRecord } from '../utils/acl';
 import { Z_INDEX } from '../utils/layering';
 import { useDismissOnPointerDown } from '../utils/useDismissOnPointerDown';
@@ -39,10 +39,14 @@ interface Props {
   filters: InfraDiagramFilters;
   nodeSearch?: string;
   selectedApp?: AppItem | null;
+  /** CI-centric mode: current CI at center, sibling infra as peers. */
+  centerCi?: CIItem | null;
+  /** Pre-fetched peers for CI mode (optional — avoids duplicate fetch). */
+  ciPeers?: InfraCIPeer[];
   onViewCI?: (ci: CIItem) => void;
   canEditCenterRecord?: boolean;
   refreshKey?: number;
-  onEditRelationships: (app: { sysId: string; name: string }) => void;
+  onEditRelationships?: (app: { sysId: string; name: string }) => void;
   onEditCiDetails: (ci: { sysId: string; name: string; table: string }) => void;
 }
 
@@ -106,10 +110,10 @@ function buildDiagram(
   selectedApp: AppItem | null | undefined,
   openMenu: NodeData['onOpenMenu'],
   filters: InfraDiagramFilters,
-): { nodes: Node[]; edges: Edge[]; infoMap: Map<string, { name: string; sysClass: string; ciType: InfraCIType }> } {
+): { nodes: Node[]; edges: Edge[]; infoMap: Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }> } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
-  const infoMap = new Map<string, { name: string; sysClass: string; ciType: InfraCIType }>();
+  const infoMap = new Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }>();
 
   nodes.push({
     id: 'center',
@@ -172,6 +176,92 @@ function buildDiagram(
   return { nodes, edges, infoMap };
 }
 
+function buildCiDiagram(
+  peers: InfraCIPeer[],
+  centerCi: CIItem,
+  openMenu: NodeData['onOpenMenu'],
+  filters: InfraDiagramFilters,
+): { nodes: Node[]; edges: Edge[]; infoMap: Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }> } {
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  const infoMap = new Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }>();
+
+  const centerTable = centerCi.table || centerCi.class || 'cmdb_ci';
+  const centerType = resolveInfraCIType(centerTable);
+
+  nodes.push({
+    id: 'center',
+    type: 'infraNode',
+    position: { x: CENTER_X, y: TOP_Y },
+    hidden: false,
+    data: {
+      label: centerCi.name || 'Selected CI',
+      ciType: centerType ?? 'center',
+      isCenter: true,
+      sysClass: centerTable,
+      searchHighlight: 'none',
+      onOpenMenu: openMenu,
+    } satisfies NodeData,
+  });
+
+  const uniqueByType = new Map<InfraCIType, Map<string, InfraCIPeer>>();
+  for (const t of INFRA_COLUMN_ORDER) uniqueByType.set(t, new Map());
+
+  for (const p of peers) {
+    if (p.sysId === centerCi.id) continue;
+    const bucket = uniqueByType.get(p.ciType);
+    if (bucket && !bucket.has(p.sysId)) bucket.set(p.sysId, p);
+  }
+
+  for (const ciType of INFRA_COLUMN_ORDER) {
+    const uniquePeers = [...(uniqueByType.get(ciType)?.values() ?? [])];
+    uniquePeers.sort((a, b) => a.name.localeCompare(b.name));
+    const hidden = !filters[ciType];
+    const x = COLUMN_X[ciType];
+
+    uniquePeers.forEach((peer, i) => {
+      const y = STACK_START_Y + i * ROW_GAP;
+      const relTypes = peers
+        .filter(p => p.sysId === peer.sysId && p.sysId !== centerCi.id)
+        .map(p => p.relType)
+        .filter(Boolean);
+      infoMap.set(peer.sysId, { name: peer.name, sysClass: peer.sysClass, ciType, relTypes });
+
+      nodes.push({
+        id: peer.sysId,
+        type: 'infraNode',
+        position: { x, y },
+        hidden,
+        data: {
+          label: peer.name || peer.sysId,
+          ciType,
+          isCenter: false,
+          sysClass: peer.sysClass,
+          searchHighlight: 'none',
+          onOpenMenu: openMenu,
+        } satisfies NodeData,
+      });
+    });
+  }
+
+  for (const p of peers) {
+    if (p.sysId === centerCi.id) continue;
+    const hidden = !filters[p.ciType];
+    const centerRole = p.centerRole ?? 'parent';
+    const edgeSource = centerRole === 'parent' ? 'center' : p.sysId;
+    const edgeTarget = centerRole === 'parent' ? p.sysId : 'center';
+    edges.push(buildInfraEdge(
+      p.relSysId,
+      edgeSource,
+      edgeTarget,
+      p.ciType,
+      hidden,
+    ));
+  }
+
+  return { nodes, edges, infoMap };
+}
+
 // ─── Node component ───────────────────────────────────────────────────────────
 
 const SEARCH_EXTRA: Record<SearchHighlight, React.CSSProperties> = {
@@ -183,17 +273,17 @@ const SEARCH_EXTRA: Record<SearchHighlight, React.CSSProperties> = {
 const InfraNode = memo(({ id, data }: NodeProps) => {
   const d = data as NodeData;
   const isCenter = d.isCenter;
-  const style = d.ciType === 'center' ? null : INFRA_CI_STYLE[d.ciType];
+  const style = d.ciType === 'center' ? null : INFRA_CI_STYLE[d.ciType as InfraCIType];
   const w = isCenter ? CW : NW;
   const h = isCenter ? CH : NH;
-  const borderClr = isCenter ? '#374151' : style!.border;
+  const borderClr = isCenter && !style ? '#374151' : (style?.border ?? '#374151');
   const searchSty = SEARCH_EXTRA[d.searchHighlight ?? 'none'];
 
   return (
     <div style={{
       width: w,
       minHeight: h,
-      background: isCenter ? '#F3F4F6' : style!.bg,
+      background: isCenter && !style ? '#F3F4F6' : (style?.bg ?? '#F3F4F6'),
       border: `1.5px solid ${borderClr}`,
       borderRadius: 8,
       display: 'flex',
@@ -213,7 +303,7 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
         flex: 1,
         fontSize: isCenter ? 12 : 11,
         fontWeight: isCenter ? 600 : 400,
-        color: isCenter ? '#111827' : style!.text,
+        color: isCenter && !style ? '#111827' : (style?.text ?? '#111827'),
         fontFamily: 'var(--font-sans)',
         whiteSpace: 'normal',
         wordBreak: 'break-word',
@@ -272,6 +362,8 @@ function InfrastructureDiagramInner({
   filters,
   nodeSearch = '',
   selectedApp,
+  centerCi,
+  ciPeers,
   onViewCI,
   canEditCenterRecord = false,
   refreshKey = 0,
@@ -286,7 +378,7 @@ function InfrastructureDiagramInner({
   const nodeMenuRef = useRef<HTMLDivElement>(null);
   const [menuPermissions, setMenuPermissions] = useState<{ loading: boolean; canEdit: boolean } | null>(null);
 
-  const infoMapRef = useRef(new Map<string, { name: string; sysClass: string; ciType: InfraCIType }>());
+  const infoMapRef = useRef(new Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }>());
   const onViewCIRef = useRef(onViewCI);
   onViewCIRef.current = onViewCI;
 
@@ -322,6 +414,47 @@ function InfrastructureDiagramInner({
   }, [canEditCenterRecord]);
 
   useEffect(() => {
+    const ciMode = !!centerCi?.id;
+
+    if (ciMode) {
+      if (ciPeers) {
+        const siblingCount = ciPeers.filter(p => p.sysId !== centerCi!.id).length;
+        setPeerCount(siblingCount);
+        const { nodes: n, edges: e, infoMap } = buildCiDiagram(ciPeers, centerCi!, openMenu, filters);
+        infoMapRef.current = infoMap;
+        setNodes(n);
+        setEdges(e);
+        setLoading(false);
+        setTimeout(() => fitView({ padding: 0.18, duration: 300 }), 80);
+        return;
+      }
+
+      let cancelled = false;
+      setLoading(true);
+
+      fetchInfraPeersForCi(centerCi!.id)
+        .then(({ peers }) => {
+          if (cancelled) return;
+          const siblingCount = peers.filter(p => p.sysId !== centerCi!.id).length;
+          setPeerCount(siblingCount);
+          const { nodes: n, edges: e, infoMap } = buildCiDiagram(peers, centerCi!, openMenu, filters);
+          infoMapRef.current = infoMap;
+          setNodes(n);
+          setEdges(e);
+          setTimeout(() => fitView({ padding: 0.18, duration: 300 }), 80);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setNodes([]);
+            setEdges([]);
+            setPeerCount(0);
+          }
+        })
+        .finally(() => { if (!cancelled) setLoading(false); });
+
+      return () => { cancelled = true; };
+    }
+
     const sysId = selectedApp?.sysId;
     if (!sysId) {
       setNodes([]);
@@ -355,7 +488,7 @@ function InfrastructureDiagramInner({
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedApp?.sysId, selectedApp?.name, refreshKey]);
+  }, [selectedApp?.sysId, selectedApp?.name, centerCi?.id, centerCi?.name, ciPeers, refreshKey]);
 
   useEffect(() => {
     setNodes(prev => prev.map(node => {
@@ -377,9 +510,20 @@ function InfrastructureDiagramInner({
   useEffect(() => {
     const q = nodeSearch.trim().toLowerCase();
     setNodes(prev => prev.map(node => {
-      if (node.id === 'center') return node;
+      if (node.id === 'center') {
+        if (!q) {
+          if ((node.data as NodeData).searchHighlight === 'none') return node;
+          return { ...node, data: { ...node.data, searchHighlight: 'none' as SearchHighlight } };
+        }
+        const centerLabel = ((node.data as NodeData).label as string).toLowerCase();
+        const sh: SearchHighlight = centerLabel.includes(q) ? 'match' : 'dim';
+        if ((node.data as NodeData).searchHighlight === sh) return node;
+        return { ...node, data: { ...node.data, searchHighlight: sh } };
+      }
       const label = ((node.data as NodeData).label as string).toLowerCase();
-      const sh: SearchHighlight = q && label.includes(q) ? 'match' : q ? 'dim' : 'none';
+      const info = infoMapRef.current.get(node.id);
+      const relMatch = info?.relTypes?.some(rt => rt.toLowerCase().includes(q)) ?? false;
+      const sh: SearchHighlight = q && (label.includes(q) || relMatch) ? 'match' : q ? 'dim' : 'none';
       if ((node.data as NodeData).searchHighlight === sh) return node;
       return { ...node, data: { ...node.data, searchHighlight: sh } };
     }));
@@ -397,11 +541,19 @@ function InfrastructureDiagramInner({
         </div>
       )}
 
-      {!loading && peerCount === 0 && selectedApp?.sysId && (
+      {!loading && peerCount === 0 && (selectedApp?.sysId || centerCi?.id) && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="text-center text-gray-400 px-6">
-            <p className="typo-body font-medium text-gray-500">No infrastructure relationships found</p>
-            <p className="typo-caption mt-1">Servers, network gears, network links, and databases linked to this application will appear here.</p>
+            <p className="typo-body font-medium text-gray-500">
+              {centerCi?.id
+                ? 'No direct infrastructure relationships found for this CI'
+                : 'No infrastructure relationships found'}
+            </p>
+            <p className="typo-caption mt-1">
+              {centerCi?.id
+                ? 'Infrastructure CIs directly linked as parent or child in cmdb_rel_ci will appear here.'
+                : 'Servers, network gears, network links, and databases linked to this application will appear here.'}
+            </p>
           </div>
         </div>
       )}
@@ -436,7 +588,9 @@ function InfrastructureDiagramInner({
             <div className="min-w-0">
               <p className="typo-panel-title truncate">{nodeMenu.label}</p>
               <p className="typo-caption mt-0.5">
-                {nodeMenu.isCenter ? 'Current Application' : 'Infrastructure CI'}
+                {nodeMenu.isCenter
+                  ? (centerCi?.id ? 'Current CI' : 'Current Application')
+                  : 'Infrastructure CI'}
               </p>
             </div>
             <button
@@ -470,11 +624,19 @@ function InfrastructureDiagramInner({
 
             {(() => {
               const info = nodeMenu.isCenter
-                ? { sysClass: selectedApp?.table ?? 'cmdb_ci_service' }
+                ? {
+                    sysClass: centerCi?.id
+                      ? (centerCi.table || centerCi.class || 'cmdb_ci')
+                      : (selectedApp?.table ?? 'cmdb_ci_service'),
+                  }
                 : infoMapRef.current.get(nodeMenu.nodeId);
-              const sysId = nodeMenu.isCenter ? selectedApp?.sysId : nodeMenu.nodeId;
+              const sysId = nodeMenu.isCenter
+                ? (centerCi?.id ?? selectedApp?.sysId)
+                : nodeMenu.nodeId;
               const table = nodeMenu.isCenter
-                ? (selectedApp?.table ?? 'cmdb_ci_service')
+                ? (centerCi?.id
+                    ? (centerCi.table || centerCi.class || 'cmdb_ci')
+                    : (selectedApp?.table ?? 'cmdb_ci_service'))
                 : (info?.sysClass ?? 'cmdb_ci');
               if (!sysId) return null;
               return (
@@ -491,7 +653,7 @@ function InfrastructureDiagramInner({
               );
             })()}
 
-            {nodeMenu.isCenter && menuPermissions?.canEdit && selectedApp?.sysId && (
+            {nodeMenu.isCenter && !centerCi?.id && menuPermissions?.canEdit && selectedApp?.sysId && onEditRelationships && (
               <>
                 <div className="border-t border-gray-100 my-1" />
                 <MI
@@ -510,6 +672,24 @@ function InfrastructureDiagramInner({
                       sysId: selectedApp.sysId!,
                       name: selectedApp.name,
                       table: selectedApp.table ?? 'cmdb_ci_service',
+                    });
+                    closeMenu();
+                  }}
+                />
+              </>
+            )}
+
+            {nodeMenu.isCenter && centerCi?.id && menuPermissions?.canEdit && (
+              <>
+                <div className="border-t border-gray-100 my-1" />
+                <MI
+                  icon={<Edit2 size={14} className="text-gray-400" />}
+                  label="Edit CI Details"
+                  onClick={() => {
+                    onEditCiDetails({
+                      sysId: centerCi.id,
+                      name: centerCi.name,
+                      table: centerCi.table || centerCi.class || 'cmdb_ci',
                     });
                     closeMenu();
                   }}

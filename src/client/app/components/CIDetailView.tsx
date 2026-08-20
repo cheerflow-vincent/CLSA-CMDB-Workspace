@@ -4,7 +4,7 @@ import {
   Edit2, ExternalLink, MapPin,
   AlertCircle, Calendar, Activity, Server, Database,
   Network, Shield, User,
-  ArrowUpDown, Layers, Loader2, RefreshCw,
+  ArrowUpDown, Loader2, RefreshCw,
 } from 'lucide-react';
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
@@ -18,9 +18,12 @@ import {
 } from '../utils/viewFields';
 import { CI_OVERVIEW_VIEW, CI_CONTACT_VIEW, resolveCiSearchParentTable } from '../utils/ciTables';
 import { readRecordUrlParams, isCmdbTableName } from '../utils/routing';
-import RelatedApplicationsPanel from './RelatedApplicationsPanel';
 import RelatedListSection from './RelatedListSection';
 import HealthResultsPanel from './HealthResultsPanel';
+import CiRelatedComponentsSection, {
+  shouldShowRelatedComponents,
+  RelatedComponentsSectionIcon,
+} from './CiRelatedComponentsSection';
 import { INCIDENT_TASK_CONFIG, CHANGE_TASK_CONFIG, fetchRelatedTaskCount } from '../utils/relatedTasks';
 import CollapsibleFormSection from './formLayout/CollapsibleFormSection';
 
@@ -45,6 +48,7 @@ interface CIDetailViewProps {
   ci: CIItem;
   onBack: () => void;
   onSelectApp?: (app: AppItem) => void;
+  onViewCI?: (ci: CIItem) => void;
   fromApp?: AppItem | null;
   hierarchyMode?: boolean;
   sidebarCollapsed?: boolean;
@@ -246,11 +250,13 @@ export default function CIDetailView({
   ci,
   onBack,
   onSelectApp,
+  onViewCI,
   fromApp,
   hierarchyMode = true,
   sidebarCollapsed = false,
 }: CIDetailViewProps) {
   const detail  = getDetail(ci);
+  const [opsTab, setOpsTab] = useState<'trend' | 'tasks'>('trend');
   const [taskTab, setTaskTab] = useState<'incidents' | 'changes'>('incidents');
   const [incidentCount, setIncidentCount] = useState(0);
   const [changeCount, setChangeCount] = useState(0);
@@ -277,6 +283,7 @@ export default function CIDetailView({
   const [trendAccess, setTrendAccess] = useState<TableAccess>('ok');
   const [healthAccess, setHealthAccess] = useState<TableAccess>('ok');
   const [relatedAppsAccess, setRelatedAppsAccess] = useState<TableAccess>('ok');
+  const [infraAccess, setInfraAccess] = useState<TableAccess>('ok');
 
   useEffect(() => {
     let cancelled = false;
@@ -412,6 +419,8 @@ export default function CIDetailView({
       .catch(() => { setChangeCount(0); setChangeAccess('error'); });
   }, [ci.id, pageRefreshKey]);
 
+  const showTaskSection = !isAccessDenied(incidentAccess) || !isAccessDenied(changeAccess);
+
   useEffect(() => {
     if (isAccessDenied(incidentAccess) && taskTab === 'incidents' && !isAccessDenied(changeAccess)) {
       setTaskTab('changes');
@@ -420,7 +429,13 @@ export default function CIDetailView({
     }
   }, [incidentAccess, changeAccess, taskTab]);
 
-  const showTaskSection = !isAccessDenied(incidentAccess) || !isAccessDenied(changeAccess);
+  useEffect(() => {
+    if (isAccessDenied(trendAccess) && opsTab === 'trend' && showTaskSection) {
+      setOpsTab('tasks');
+    } else if (!showTaskSection && opsTab === 'tasks' && !isAccessDenied(trendAccess)) {
+      setOpsTab('trend');
+    }
+  }, [trendAccess, showTaskSection, opsTab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -457,102 +472,130 @@ export default function CIDetailView({
     !isAccessDenied(recordAccess)
     && (contactLoading || filterFormSections(contactSections, contactValues).length > 0);
 
-  const trendSection = !isAccessDenied(trendAccess) && (
-    <Section title="Incident & Change Trend (Last 6 Months)" icon={<Activity className="w-4 h-4 text-blue-500" />}>
-      <div className="p-5">
-        {trendLoading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
-            <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
-          </div>
-        ) : trendData.length === 0 ? (
-          <p className="typo-body text-gray-400 italic text-center py-16">No trend data available.</p>
-        ) : (
-          <>
-            <TaskTrendChart data={trendData} />
-            <p className="typo-caption text-center mt-3">
-              Click a data point to open the filtered list in ServiceNow.
-            </p>
-          </>
-        )}
-      </div>
-    </Section>
-  );
+  const showOpsSection =
+    !isAccessDenied(trendAccess) || showTaskSection;
 
-  const tasksSection = showTaskSection && (
-    <Section title="Related Incidents & Changes" icon={<AlertCircle className="w-4 h-4 text-blue-500" />}>
+  const operationalSection = showOpsSection && (
+    <Section title="Operational Activity" icon={<Activity className="w-4 h-4 text-blue-500" />}>
       <div className="p-5">
         <div className="flex gap-2 mb-4 flex-wrap">
-          {!isAccessDenied(incidentAccess) && (
+          {!isAccessDenied(trendAccess) && (
             <button
               type="button"
-              onClick={() => setTaskTab('incidents')}
-              className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              onClick={() => setOpsTab('trend')}
+              className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${opsTab === 'trend' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
             >
-              <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
-              Incidents ({incidentCount})
+              <Activity className="w-3.5 h-3.5 inline mr-1" />
+              Trend
             </button>
           )}
-          {!isAccessDenied(changeAccess) && (
+          {showTaskSection && (
             <button
               type="button"
-              onClick={() => setTaskTab('changes')}
-              className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              onClick={() => setOpsTab('tasks')}
+              className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${opsTab === 'tasks' ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:bg-gray-100'}`}
             >
-              <Calendar className="w-3.5 h-3.5 inline mr-1" />
-              Changes ({changeCount})
+              <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
+              Incidents & Changes
             </button>
           )}
         </div>
 
-        {taskTab === 'incidents' && !isAccessDenied(incidentAccess) ? (
-          <RelatedListSection
-            embedded
-            config={INCIDENT_TASK_CONFIG}
-            recordSysId={ci.id}
-            refreshKey={pageRefreshKey}
-            variant="cards"
-            isOpen
-            onToggle={() => {}}
-            title="Active Incidents"
-            Icon={AlertCircle}
-            iconBg="bg-red-100"
-            iconColor="text-red-600"
-            badgeBg="bg-red-50"
-            badgeText="text-red-700"
-            badgeBorder="border-red-200"
-            recordContext="ci"
-          />
-        ) : (
-          <RelatedListSection
-            embedded
-            config={CHANGE_TASK_CONFIG}
-            recordSysId={ci.id}
-            refreshKey={pageRefreshKey}
-            variant="cards"
-            isOpen
-            onToggle={() => {}}
-            title="Change Requests"
-            Icon={Calendar}
-            iconBg="bg-amber-100"
-            iconColor="text-amber-600"
-            badgeBg="bg-amber-50"
-            badgeText="text-amber-700"
-            badgeBorder="border-amber-200"
-            recordContext="ci"
-          />
-        )}
+        {opsTab === 'trend' && !isAccessDenied(trendAccess) ? (
+          trendLoading ? (
+            <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
+              <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
+            </div>
+          ) : trendData.length === 0 ? (
+            <p className="typo-body text-gray-400 italic text-center py-16">No trend data available.</p>
+          ) : (
+            <>
+              <TaskTrendChart data={trendData} />
+              <p className="typo-caption text-center mt-3">
+                Click a data point to open the filtered list in ServiceNow.
+              </p>
+            </>
+          )
+        ) : showTaskSection ? (
+          <>
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {!isAccessDenied(incidentAccess) && (
+                <button
+                  type="button"
+                  onClick={() => setTaskTab('incidents')}
+                  className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                >
+                  <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
+                  Incidents ({incidentCount})
+                </button>
+              )}
+              {!isAccessDenied(changeAccess) && (
+                <button
+                  type="button"
+                  onClick={() => setTaskTab('changes')}
+                  className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                >
+                  <Calendar className="w-3.5 h-3.5 inline mr-1" />
+                  Changes ({changeCount})
+                </button>
+              )}
+            </div>
+
+            {taskTab === 'incidents' && !isAccessDenied(incidentAccess) ? (
+              <RelatedListSection
+                embedded
+                config={INCIDENT_TASK_CONFIG}
+                recordSysId={ci.id}
+                refreshKey={pageRefreshKey}
+                variant="cards"
+                isOpen
+                onToggle={() => {}}
+                title="Active Incidents"
+                Icon={AlertCircle}
+                iconBg="bg-red-100"
+                iconColor="text-red-600"
+                badgeBg="bg-red-50"
+                badgeText="text-red-700"
+                badgeBorder="border-red-200"
+                recordContext="ci"
+              />
+            ) : (
+              <RelatedListSection
+                embedded
+                config={CHANGE_TASK_CONFIG}
+                recordSysId={ci.id}
+                refreshKey={pageRefreshKey}
+                variant="cards"
+                isOpen
+                onToggle={() => {}}
+                title="Change Requests"
+                Icon={Calendar}
+                iconBg="bg-amber-100"
+                iconColor="text-amber-600"
+                badgeBg="bg-amber-50"
+                badgeText="text-amber-700"
+                badgeBorder="border-amber-200"
+                recordContext="ci"
+              />
+            )}
+          </>
+        ) : null}
       </div>
     </Section>
   );
 
-  const relatedAppsSection = !isAccessDenied(relatedAppsAccess) && (
-    <Section title="Related Applications" icon={<Layers className="w-4 h-4 text-blue-500" />}>
-      <RelatedApplicationsPanel
-        ciSysId={ci.id}
+  const relatedComponentsSection = shouldShowRelatedComponents(relatedAppsAccess, infraAccess) && (
+    <Section title="Related Components" icon={<RelatedComponentsSectionIcon />}>
+      <CiRelatedComponentsSection
+        ci={ci}
         hierarchyMode={hierarchyMode}
         onSelectApp={onSelectApp}
-        onAccessResolved={setRelatedAppsAccess}
+        onViewCI={onViewCI}
         refreshKey={pageRefreshKey}
+        canEditCenterRecord={canWriteRecord}
+        onEditCiDetails={() => setShowRecordEditModal(true)}
+        onAppsAccessResolved={setRelatedAppsAccess}
+        onInfraAccessResolved={setInfraAccess}
       />
     </Section>
   );
@@ -717,9 +760,8 @@ export default function CIDetailView({
 
         {/* Operational & related */}
         <div className="detail-pane flex-1 min-w-0 space-y-4">
-          {trendSection}
-          {tasksSection}
-          {relatedAppsSection}
+          {operationalSection}
+          {relatedComponentsSection}
           {healthSection}
         </div>
       </div>

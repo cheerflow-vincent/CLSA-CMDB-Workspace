@@ -31,6 +31,9 @@ export interface RelatedCIRow {
   values: Record<string, string>;
   incidents: number;
   changes: number;
+  /** Direct CI relationship type (CI detail infra table only). */
+  relType?: string;
+  relSysId?: string;
 }
 
 export interface RelatedCIPage {
@@ -48,6 +51,8 @@ export interface InfraCIPeer {
   relType: string;
   relSysId: string;
   appRole: 'parent' | 'child';
+  /** Current CI's role in cmdb_rel_ci (CI detail direct query only). */
+  centerRole?: 'parent' | 'child';
 }
 
 export interface InfraRelationshipRow {
@@ -343,6 +348,217 @@ export async function fetchAllInfraPeers(appSysId: string): Promise<{
   }
 
   return { peers, access };
+}
+
+/** Map a CMDB table/class name to an infrastructure CI type for diagram styling. */
+export function resolveInfraCIType(tableOrClass: string): InfraCIType | null {
+  const normalized = tableOrClass.toLowerCase();
+  for (const config of INFRA_REL_CONFIGS) {
+    if (normalized === config.baseClass || normalized.includes(config.baseClass)) {
+      return config.ciType;
+    }
+  }
+  if (normalized.includes('server')) return 'server';
+  if (normalized.includes('netgear') || normalized.includes('switch')) return 'netgear';
+  if (normalized.includes('network_link')) return 'network_link';
+  if (normalized.includes('db_instance') || normalized.includes('database')) return 'database';
+  return null;
+}
+
+async function fetchInfraPeersForCiByConfig(
+  ciSysId: string,
+  config: RelatedCIConfig,
+): Promise<{ peers: InfraCIPeer[]; access: TableAccess }> {
+  if (!ciSysId) return { peers: [], access: 'ok' };
+
+  const peerSideForCenter = (centerRole: 'parent' | 'child'): 'child' | 'parent' =>
+    centerRole === 'parent' ? 'child' : 'parent';
+
+  const directRelFields = (centerRole: 'parent' | 'child'): string[] => {
+    const peerSide = peerSideForCenter(centerRole);
+    return [
+      'sys_id',
+      'type.name',
+      `${peerSide}.sys_id`,
+      `${peerSide}.name`,
+      `${peerSide}.sys_class_name`,
+    ];
+  };
+
+  const parseDirectInfraPeer = (
+    row: Record<string, unknown>,
+    centerRole: 'parent' | 'child',
+  ): InfraCIPeer | null => {
+    const peerSide = peerSideForCenter(centerRole);
+    const sysId = raw(row[`${peerSide}.sys_id`]);
+    if (!sysId || sysId === ciSysId) return null;
+    const relSysId = raw(row.sys_id);
+    if (!relSysId) return null;
+    return {
+      sysId,
+      name: str(row[`${peerSide}.name`]) || sysId,
+      sysClass: raw(row[`${peerSide}.sys_class_name`]) || config.baseClass,
+      ciType: config.ciType,
+      relType: str(row['type.name']) || '',
+      relSysId,
+      appRole: appRole(config),
+      centerRole,
+    };
+  };
+
+  const buildDirectInfraRelQuery = (
+    centerRole: 'parent' | 'child',
+  ): string => {
+    const peerSide = peerSideForCenter(centerRole);
+    return `${centerRole}.sys_id=${ciSysId}^${peerSide}.sys_class_nameINSTANCEOF${config.baseClass}^ORDERBY${peerSide}.name`;
+  };
+
+  let access: TableAccess = 'ok';
+  const seenRelIds = new Set<string>();
+  const peers: InfraCIPeer[] = [];
+
+  for (const centerRole of ['parent', 'child'] as const) {
+    const { result = [], access: chunkAccess } = await queryTableWithAccess<Record<string, unknown>>({
+      table: 'cmdb_rel_ci',
+      query: buildDirectInfraRelQuery(centerRole),
+      fields: directRelFields(centerRole),
+      limit: INFRA_PEER_LIMIT,
+      displayValue: 'all',
+    });
+
+    if (chunkAccess === 'denied') return { peers: [], access: 'denied' };
+    if (chunkAccess === 'error') access = 'error';
+
+    for (const row of result) {
+      const peer = parseDirectInfraPeer(row, centerRole);
+      if (!peer || seenRelIds.has(peer.relSysId)) continue;
+      seenRelIds.add(peer.relSysId);
+      peers.push(peer);
+    }
+  }
+
+  peers.sort((a, b) => a.name.localeCompare(b.name) || a.relType.localeCompare(b.relType));
+  return { peers, access };
+}
+
+/** Direct infrastructure peers linked to this CI via cmdb_rel_ci (parent or child). */
+export async function fetchInfraPeersForCi(ciSysId: string): Promise<{
+  peers: InfraCIPeer[];
+  access: TableAccess;
+}> {
+  if (!ciSysId) return { peers: [], access: 'ok' };
+
+  const results = await Promise.all(
+    INFRA_REL_CONFIGS.map(config => fetchInfraPeersForCiByConfig(ciSysId, config)),
+  );
+
+  let access: TableAccess = 'ok';
+  const seenRelIds = new Set<string>();
+  const peers: InfraCIPeer[] = [];
+  for (const r of results) {
+    if (r.access === 'denied') return { peers: [], access: 'denied' };
+    if (r.access === 'error') access = 'error';
+    for (const p of r.peers) {
+      if (seenRelIds.has(p.relSysId)) continue;
+      seenRelIds.add(p.relSysId);
+      peers.push(p);
+    }
+  }
+
+  return { peers, access };
+}
+
+export async function fetchRelatedCICountForCi(
+  ciSysId: string,
+  config: RelatedCIConfig,
+): Promise<{ totalCount: number; access: TableAccess }> {
+  if (!ciSysId) return { totalCount: 0, access: 'ok' };
+  const { peers, access } = await fetchInfraPeersForCiByConfig(ciSysId, config);
+  return { totalCount: peers.length, access };
+}
+
+export async function fetchRelatedCIPageForCi(
+  ciSysId: string,
+  config: RelatedCIConfig,
+  page: number,
+  pageSize = RELATED_CI_PAGE_SIZE,
+): Promise<RelatedCIPage> {
+  const layoutColumns = await loadListFields(
+    config.baseClass,
+    config.listTitle,
+    config.defaultColumns,
+  );
+
+  if (!ciSysId) {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'ok' };
+  }
+
+  const { peers, access: peerAccess } = await fetchInfraPeersForCiByConfig(ciSysId, config);
+  if (peerAccess === 'denied') {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'denied' };
+  }
+
+  const totalCount = peers.length;
+  const pagePeers = peers.slice(page * pageSize, (page + 1) * pageSize);
+
+  if (!pagePeers.length) {
+    return { rows: [], columns: layoutColumns, totalCount, access: peerAccess };
+  }
+
+  const uniquePeerIds = [...new Set(pagePeers.map(p => p.sysId))];
+  const classById = new Map(pagePeers.map(p => [p.sysId, p.sysClass]));
+  const fields = [...new Set(['sys_id', 'name', 'sys_class_name', ...layoutColumns.map(c => c.element)])];
+  const { result: ciRows = [], access: ciAccess } = await queryTableWithAccess<Record<string, unknown>>({
+    table: config.ciTable,
+    query: `sys_idIN${uniquePeerIds.join(',')}`,
+    fields,
+    limit: uniquePeerIds.length + 5,
+    displayValue: true,
+  });
+
+  if (ciAccess === 'denied') {
+    return { rows: [], columns: layoutColumns, totalCount, access: 'denied' };
+  }
+
+  const access: TableAccess = peerAccess === 'error' || ciAccess === 'error' ? 'error' : 'ok';
+  const columns = filterColumnsByRecords(layoutColumns, ciRows);
+  const ciById = new Map(ciRows.map(r => [raw(r.sys_id), r]));
+
+  const rows: RelatedCIRow[] = pagePeers.map(peer => {
+    const id = peer.sysId;
+    const rec = ciById.get(id);
+    const sysClass = rec
+      ? (raw(rec.sys_class_name) || classById.get(id) || config.baseClass)
+      : (classById.get(id) || config.baseClass);
+    const values: Record<string, string> = {};
+    for (const col of columns) {
+      if (rec && col.element in rec) {
+        values[col.element] = str(rec[col.element]);
+      }
+    }
+    if (!values.name && rec && 'name' in rec) values.name = str(rec.name);
+    if (!values.name) values.name = peer.name;
+    return {
+      sysId: id,
+      sysClass,
+      values,
+      incidents: 0,
+      changes: 0,
+      relType: peer.relType,
+      relSysId: peer.relSysId,
+    };
+  });
+
+  const flagCounts = await fetchCITaskFlagCounts(uniquePeerIds);
+  for (const row of rows) {
+    const flags = flagCounts.get(row.sysId);
+    if (flags) {
+      row.incidents = flags.incidents;
+      row.changes = flags.changes;
+    }
+  }
+
+  return { rows, columns, totalCount, access };
 }
 
 export async function fetchInfraRelationshipsForEdit(

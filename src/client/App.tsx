@@ -411,6 +411,7 @@ export function App() {
                 ci={selectedCI}
                 onBack={handleBack}
                 onSelectApp={handleSelectApp}
+                onViewCI={(peer) => handleViewCI(peer, 'ci-search')}
                 fromApp={ciSource === 'app-details' ? selectedApp : null}
                 hierarchyMode={hierarchyMode}
                 sidebarCollapsed={sidebarCollapsed}

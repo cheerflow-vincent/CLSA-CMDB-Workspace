@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ChevronDown, ChevronUp, ChevronRight,
   Layers, Building2, Package, LayoutGrid, List, Loader2,
@@ -181,19 +181,22 @@ export default function RelatedApplicationsPanel({
     recordSysId: string;
   } | null>(null);
 
+  const onAccessResolvedRef = useRef(onAccessResolved);
+  onAccessResolvedRef.current = onAccessResolved;
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     loadRelatedApplicationsForCi(ciSysId, hierarchyMode)
       .then(result => {
         if (cancelled) return;
-        onAccessResolved?.(result.access);
+        onAccessResolvedRef.current?.(result.access);
         setThreeLevel(result.threeLevel);
         setTwoLevel(result.twoLevel);
       })
       .catch(() => {
         if (!cancelled) {
-          onAccessResolved?.('error');
+          onAccessResolvedRef.current?.('error');
           setThreeLevel([]);
           setTwoLevel([]);
         }
@@ -202,7 +205,7 @@ export default function RelatedApplicationsPanel({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [ciSysId, hierarchyMode, onAccessResolved, refreshKey]);
+  }, [ciSysId, hierarchyMode, refreshKey]);
 
   const hasData = hierarchyMode ? threeLevel.length > 0 : twoLevel.length > 0;
   const handleSelect = onSelectApp ?? (() => {});
