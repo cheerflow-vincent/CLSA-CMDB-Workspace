@@ -18,13 +18,11 @@ import {
 import { useEffectiveGridList, useNarrowContainer } from '../utils/useNarrowLayout';
 import {
   type LiveInstance,
-  type SidebarFilterCriteria,
   type TwoLevelMapping,
   type ThreeLevelMapping,
   fetchFlagCountsForIds,
   loadInstanceCatalog,
   mergeFilterCriteria,
-  criteriaForHierarchy,
   hasActiveLiveFilters,
   sidebarFiltersEqual,
   fetchApplicationHomePageUnified,
@@ -34,7 +32,14 @@ import {
   FAMILY_PAGE_SIZE,
   SEARCH_DEBOUNCE_MS,
   isOthersFamilyId,
+  type SidebarFilterCriteria,
 } from '../utils/appHomeLoader';
+import {
+  type ResolvedAppHomeFilter,
+  filtersForHierarchy,
+  emptySidebarFromFilters,
+  defaultsSidebarFromFilters,
+} from '../utils/appHomeFilterConfig';
 import type { CITaskFlagCounts } from '../utils/relatedCIFlags';
 import {
   envAccent,
@@ -47,8 +52,6 @@ import {
 interface ApplicationHomeProps {
   onSelectApp: (app: AppItem) => void;
 }
-
-interface FilterOption { label: string; value: string }
 
 type LivePanelState =
   | { kind: 'instance'; title: string; flagType: FlagType; recordSysId: string }
@@ -225,11 +228,7 @@ function assembleTwoLevelFamilies(
 
 const safe = str;
 
-const EMPTY_SIDEBAR: SidebarFilterCriteria = {
-  env: [], status: [], dept: [], bizUnit: [], tier: [],
-};
-
-// ─── Live Service Group (2nd level) ──────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
 function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }: {
   svc: LiveService;
   viewMode: 'grid' | 'list';
@@ -649,44 +648,12 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const effectiveViewMode = useEffectiveGridList(viewMode, narrow);
 
   // Sidebar filter draft (checkbox UI) vs applied (drives server queries)
-  const [draftSidebar, setDraftSidebar]     = useState<SidebarFilterCriteria>({ ...EMPTY_SIDEBAR });
-  const [appliedSidebar, setAppliedSidebar] = useState<SidebarFilterCriteria>({ ...EMPTY_SIDEBAR });
-
-  // Mock data panel
-  const [panel, setPanel] = useState<{ app: AppItem; flagType: FlagType } | null>(null);
-
-  // Live data panel
-  const [livePanel, setLivePanel] = useState<LivePanelState | null>(null);
-
-  // ── Live filter options ────────────────────────────────────────────────────
-  const [envOptions,     setEnvOptions]     = useState<FilterOption[]>([]);
-  const [statusOptions,  setStatusOptions]  = useState<FilterOption[]>([]);
-  const [bizUnitOptions, setBizUnitOptions] = useState<FilterOption[]>([]);
-  const [deptOptions,    setDeptOptions]    = useState<FilterOption[]>([]);
-  const [tierOptions,    setTierOptions]    = useState<FilterOption[]>([]);
+  const [filterDefs, setFilterDefs] = useState<ResolvedAppHomeFilter[]>([]);
+  const [draftSidebar, setDraftSidebar] = useState<SidebarFilterCriteria>({});
+  const [appliedSidebar, setAppliedSidebar] = useState<SidebarFilterCriteria>({});
   const [filtersLoading, setFiltersLoading] = useState(true);
+  const filterConfigKeyRef = useRef('');
 
-  useEffect(() => {
-    const TIER_FALLBACK: FilterOption[] = [
-      { label: 'Tier 0', value: '0' }, { label: 'Tier 1', value: '1' },
-      { label: 'Tier 2', value: '2' }, { label: 'Tier 3', value: '3' },
-    ];
-
-    fetchPortalMetadata()
-      .then(meta => {
-        setEnvOptions(meta.filter_options.environment);
-        setStatusOptions(meta.filter_options.operational_status);
-        setTierOptions(
-          meta.filter_options.u_tier.length ? meta.filter_options.u_tier : TIER_FALLBACK,
-        );
-        setBizUnitOptions(meta.business_units);
-        setDeptOptions(meta.departments);
-      })
-      .catch(() => {})
-      .finally(() => setFiltersLoading(false));
-  }, []);
-
-  // ── Live hierarchy ─────────────────────────────────────────────────────────
   const [hierarchyMode, setHierarchyMode] = useState<boolean | null>(null);
   const [threeLevelMapping, setThreeLevelMapping] = useState<ThreeLevelMapping | null>(null);
   const [twoLevelMapping, setTwoLevelMapping] = useState<TwoLevelMapping | null>(null);
@@ -703,24 +670,58 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const filterTokenRef = useRef<string | null>(null);
   const criteriaKeyRef = useRef('');
 
+  // Mock data panel
+  const [panel, setPanel] = useState<{ app: AppItem; flagType: FlagType } | null>(null);
+
+  // Live data panel
+  const [livePanel, setLivePanel] = useState<LivePanelState | null>(null);
+
+  useEffect(() => {
+    if (hierarchyMode === null) return;
+
+    let cancelled = false;
+    setFiltersLoading(true);
+
+    fetchPortalMetadata()
+      .then(meta => {
+        if (cancelled) return;
+        const defs = filtersForHierarchy(meta.app_home_filter_config, hierarchyMode);
+        setFilterDefs(defs);
+        const configKey = JSON.stringify(defs.map(d => d.field)) + String(hierarchyMode);
+        if (configKey !== filterConfigKeyRef.current) {
+          filterConfigKeyRef.current = configKey;
+          const initial = defaultsSidebarFromFilters(defs);
+          setDraftSidebar(initial);
+          setAppliedSidebar(initial);
+          filterTokenRef.current = null;
+          criteriaKeyRef.current = '';
+          setFamilyPage(0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFilterDefs([]);
+          setDraftSidebar({});
+          setAppliedSidebar({});
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFiltersLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [hierarchyMode]);
+
   const rawFilterCriteria = useMemo(
     () => mergeFilterCriteria(appliedSearch, appliedSidebar),
     [appliedSearch, appliedSidebar],
   );
   const appliedFilterCriteria = useMemo(
-    () => (hierarchyMode === false
-      ? criteriaForHierarchy(rawFilterCriteria, false)
-      : rawFilterCriteria),
-    [rawFilterCriteria, hierarchyMode],
+    () => rawFilterCriteria,
+    [rawFilterCriteria],
   );
   const filtersActive = hasActiveLiveFilters(appliedFilterCriteria);
   const hasPendingFilterChanges = !sidebarFiltersEqual(draftSidebar, appliedSidebar);
-
-  useEffect(() => {
-    if (hierarchyMode !== false) return;
-    setDraftSidebar(prev => (prev.env.length ? { ...prev, env: [] } : prev));
-    setAppliedSidebar(prev => (prev.env.length ? { ...prev, env: [] } : prev));
-  }, [hierarchyMode]);
 
   // Debounced toolbar search → applied server query
   useEffect(() => {
@@ -805,6 +806,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       try {
         const result = await fetchApplicationHomePageUnified(
           appliedFilterCriteria,
+          filterDefs,
           hierarchyMode,
           familyPage,
           FAMILY_PAGE_SIZE,
@@ -875,6 +877,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     familyPage,
     appliedFilterCriteria,
     filtersActive,
+    filterDefs,
   ]);
 
   const ensureInstancesLoaded = useCallback(async (ids: string[], key: string, table: string) => {
@@ -932,14 +935,11 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const familyRangeEnd = Math.min((familyPage + 1) * FAMILY_PAGE_SIZE, totalFamilies);
   const showFamilyPagination = totalFamilies > FAMILY_PAGE_SIZE;
 
-  const toggleDraftFilter = (
-    key: keyof SidebarFilterCriteria,
-    val: string,
-  ) => {
+  const toggleDraftFilter = (field: string, val: string) => {
     setDraftSidebar(prev => {
-      const arr = prev[key];
+      const arr = prev[field] ?? [];
       const next = arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val];
-      return { ...prev, [key]: next };
+      return { ...prev, [field]: next };
     });
   };
 
@@ -953,8 +953,9 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const handleResetFilters = () => {
     filterTokenRef.current = null;
     criteriaKeyRef.current = '';
-    setDraftSidebar({ ...EMPTY_SIDEBAR });
-    setAppliedSidebar({ ...EMPTY_SIDEBAR });
+    const cleared = emptySidebarFromFilters(filterDefs);
+    setDraftSidebar(cleared);
+    setAppliedSidebar(cleared);
     setCardSearch('');
     setAppliedSearch('');
     setFamilyPage(0);
@@ -964,12 +965,11 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const filtered = mockApplications.filter(a => {
     const q = cardSearch.toLowerCase();
     const matchesSearch  = !q || a.name.toLowerCase().includes(q) || a.app.toLowerCase().includes(q) || a.dept.toLowerCase().includes(q);
-    const matchesEnv     = draftSidebar.env.length     === 0 || draftSidebar.env.includes(a.env);
-    const matchesStatus  = draftSidebar.status.length  === 0 || draftSidebar.status.includes(a.status);
-    // Dept / business unit filters use ServiceNow sys_ids — apply to live data only
-    const matchesBizUnit = draftSidebar.bizUnit.length === 0;
-    const matchesDept    = draftSidebar.dept.length    === 0;
-    const matchesTier    = draftSidebar.tier.length    === 0 || (a.tier !== undefined && draftSidebar.tier.includes(a.tier));
+    const matchesEnv     = !(draftSidebar.environment?.length) || draftSidebar.environment.includes(a.env);
+    const matchesStatus  = !(draftSidebar.operational_status?.length) || draftSidebar.operational_status.includes(a.status);
+    const matchesBizUnit = !(draftSidebar.business_unit?.length);
+    const matchesDept    = !(draftSidebar.department?.length);
+    const matchesTier    = !(draftSidebar.u_tier?.length) || (a.tier !== undefined && draftSidebar.u_tier.includes(a.tier));
     return matchesSearch && matchesEnv && matchesStatus && matchesBizUnit && matchesDept && matchesTier;
   });
 
@@ -1004,76 +1004,24 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
               )}
             </div>
 
-            {hierarchyMode === true && (
-            <FilterSection title="Environment">
-              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
-                : envOptions.length === 0 ? <p className="typo-caption italic">No options</p>
-                : envOptions.map(opt => (
-                    <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={draftSidebar.env.includes(opt.value)}
-                        onChange={() => toggleDraftFilter('env', opt.value)}
-                        className="rounded border-gray-300 text-blue-600" />
-                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
-                    </label>
-                  ))
-              }
-            </FilterSection>
-            )}
-
-            <FilterSection title="Status">
-              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
-                : statusOptions.length === 0 ? <p className="typo-caption italic">No options</p>
-                : statusOptions.map(opt => (
-                    <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={draftSidebar.status.includes(opt.value)}
-                        onChange={() => toggleDraftFilter('status', opt.value)}
-                        className="rounded border-gray-300 text-blue-600" />
-                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
-                    </label>
-                  ))
-              }
-            </FilterSection>
-
-            <FilterSection title="Business Unit">
-              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
-                : bizUnitOptions.length === 0 ? <p className="typo-caption italic">No options</p>
-                : bizUnitOptions.map(opt => (
-                    <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={draftSidebar.bizUnit.includes(opt.value)}
-                        onChange={() => toggleDraftFilter('bizUnit', opt.value)}
-                        className="rounded border-gray-300 text-blue-600" />
-                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
-                    </label>
-                  ))
-              }
-            </FilterSection>
-
-            <FilterSection title="Department">
-              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
-                : deptOptions.length === 0 ? <p className="typo-caption italic">No options</p>
-                : deptOptions.map(opt => (
-                    <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={draftSidebar.dept.includes(opt.value)}
-                        onChange={() => toggleDraftFilter('dept', opt.value)}
-                        className="rounded border-gray-300 text-blue-600" />
-                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
-                    </label>
-                  ))
-              }
-            </FilterSection>
-
-            <FilterSection title="Tier">
-              {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
-                : tierOptions.map(opt => (
-                    <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                      <input type="checkbox" checked={draftSidebar.tier.includes(opt.value)}
-                        onChange={() => toggleDraftFilter('tier', opt.value)}
-                        className="rounded border-gray-300 text-blue-600" />
-                      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
-                    </label>
-                  ))
-              }
-            </FilterSection>
+            {filterDefs.map(def => (
+              <FilterSection key={def.field} title={def.label} defaultOpen={def.defaultOpen}>
+                {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
+                  : def.options.length === 0 ? <p className="typo-caption italic">No options</p>
+                  : def.options.map(opt => (
+                      <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={(draftSidebar[def.field] ?? []).includes(opt.value)}
+                          onChange={() => toggleDraftFilter(def.field, opt.value)}
+                          className="rounded border-gray-300 text-blue-600"
+                        />
+                        <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
+                      </label>
+                    ))
+                }
+              </FilterSection>
+            ))}
           </div>
 
           <div className="sticky bottom-0 border-t border-gray-200 bg-white p-4 flex gap-2 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">

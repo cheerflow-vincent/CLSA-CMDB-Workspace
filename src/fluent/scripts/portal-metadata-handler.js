@@ -9,6 +9,9 @@ PortalMetadataHandler.prototype = {
 
   CHOICE_TABLES: ['cmdb_ci_service_auto', 'cmdb_ci_service', 'cmdb_ci'],
 
+  FILTER_CONFIG_PROP_2: 'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.2',
+  FILTER_CONFIG_PROP_3: 'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.3',
+
   PROPERTY_NAMES: [
     'x_citi4_clsa_cmd_0.enable.new.app.hierarchy',
     'x_citi4_clsa_cmd_0.ci.filter',
@@ -18,6 +21,8 @@ PortalMetadataHandler.prototype = {
     'x_citi4_clsa_cmd_0.global.search.result.field',
     'x_citi4_clsa_cmd_0.app.relationship.depth',
     'x_citi4_clsa_cmd_0.app.to.app.relationship.types',
+    'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.2',
+    'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.3',
   ],
 
   ALLOWED_VIEW_TITLES: {
@@ -176,6 +181,324 @@ PortalMetadataHandler.prototype = {
     return out;
   },
 
+  parseJsonProperty: function (raw) {
+    if (!raw || !String(raw).trim()) return null;
+    try {
+      return JSON.parse(String(raw));
+    } catch (e1) {
+      try {
+        var parser = new global.JSON();
+        return parser.decode(String(raw));
+      } catch (e2) {
+        return null;
+      }
+    }
+  },
+
+  defaultFilterConfig: function (threeLevel) {
+    if (threeLevel) {
+      return {
+        version: 1,
+        filters: [
+          {
+            label: 'Environment',
+            field: 'environment',
+            order: 10,
+            defaultOpen: true,
+            optionsSource: {
+              type: 'choice',
+              element: 'environment',
+              query: 'name=cmdb_ci_service_auto^element=environment^inactive=false^language=en',
+              orderByField: 'label',
+              orderByDirection: 'asc',
+            },
+          },
+          {
+            label: 'Status',
+            field: 'operational_status',
+            order: 20,
+            defaultOpen: true,
+            optionsSource: {
+              type: 'choice',
+              element: 'operational_status',
+              query: 'name=cmdb_ci_service_auto^element=operational_status^inactive=false^language=en',
+              orderByField: 'sequence',
+              orderByDirection: 'asc',
+            },
+          },
+          {
+            label: 'Business Unit',
+            field: 'business_unit',
+            order: 30,
+            defaultOpen: true,
+            optionsSource: {
+              type: 'reference',
+              table: 'business_unit',
+              labelField: 'name',
+              valueField: 'sys_id',
+              query: '',
+              limit: 100,
+              orderByField: 'name',
+              orderByDirection: 'asc',
+            },
+          },
+          {
+            label: 'Department',
+            field: 'department',
+            order: 40,
+            defaultOpen: true,
+            optionsSource: {
+              type: 'reference',
+              table: 'cmn_department',
+              labelField: 'description',
+              labelFallbackField: 'name',
+              valueField: 'sys_id',
+              query: 'u_it_department=true',
+              limit: 100,
+              orderByField: 'name',
+              orderByDirection: 'asc',
+            },
+          },
+          {
+            label: 'Tier',
+            field: 'u_tier',
+            order: 50,
+            defaultOpen: true,
+            dotWalk: true,
+            optionsSource: {
+              type: 'choice',
+              element: 'u_tier',
+              query: 'name=cmdb_ci_service_auto^element=u_tier^inactive=false^language=en',
+              orderByField: 'sequence',
+              orderByDirection: 'asc',
+              fallback: this.TIER_FALLBACK,
+            },
+          },
+        ],
+      };
+    }
+
+    return {
+      version: 1,
+      filters: [
+        {
+          label: 'Status',
+          field: 'operational_status',
+          order: 10,
+          defaultOpen: true,
+          optionsSource: {
+            type: 'choice',
+            element: 'operational_status',
+            query: 'name=cmdb_ci_service^element=operational_status^inactive=false^language=en',
+            orderByField: 'sequence',
+            orderByDirection: 'asc',
+          },
+        },
+        {
+          label: 'Business Unit',
+          field: 'business_unit',
+          order: 20,
+          defaultOpen: true,
+          optionsSource: {
+            type: 'reference',
+            table: 'business_unit',
+            labelField: 'name',
+            valueField: 'sys_id',
+            query: '',
+            limit: 100,
+            orderByField: 'name',
+            orderByDirection: 'asc',
+          },
+        },
+        {
+          label: 'Department',
+          field: 'department',
+          order: 30,
+          defaultOpen: true,
+          optionsSource: {
+            type: 'reference',
+            table: 'cmn_department',
+            labelField: 'description',
+            labelFallbackField: 'name',
+            valueField: 'sys_id',
+            query: 'u_it_department=true',
+            limit: 100,
+            orderByField: 'name',
+            orderByDirection: 'asc',
+          },
+        },
+        {
+          label: 'Tier',
+          field: 'u_tier',
+          order: 40,
+          defaultOpen: true,
+          dotWalk: true,
+          optionsSource: {
+            type: 'choice',
+            element: 'u_tier',
+            query: 'name=cmdb_ci_service^element=u_tier^inactive=false^language=en',
+            orderByField: 'sequence',
+            orderByDirection: 'asc',
+            fallback: this.TIER_FALLBACK,
+          },
+        },
+      ],
+    };
+  },
+
+  loadFilterConfigRaw: function (props, threeLevel) {
+    var propName = threeLevel ? this.FILTER_CONFIG_PROP_3 : this.FILTER_CONFIG_PROP_2;
+    var parsed = this.parseJsonProperty(props[propName]);
+    if (!parsed || !parsed.filters || !parsed.filters.length) {
+      return this.defaultFilterConfig(threeLevel);
+    }
+    return parsed;
+  },
+
+  applyOptionsOrderBy: function (gr, source, defaultField) {
+    var field = String((source && source.orderByField) || defaultField || 'name');
+    var dir = String((source && source.orderByDirection) || 'asc').toLowerCase();
+    if (dir === 'desc') gr.orderByDesc(field);
+    else gr.orderBy(field);
+  },
+
+  getChoiceOptionsFromSource: function (source) {
+    if (!source) return [];
+    var out = [];
+    var seen = {};
+    var gr = new GlideRecord('sys_choice');
+    if (source.query) {
+      gr.addEncodedQuery(String(source.query));
+    } else if (source.element) {
+      gr.addQuery('element', String(source.element));
+      gr.addQuery('inactive', false);
+      gr.addQuery('language', 'en');
+    }
+    this.applyOptionsOrderBy(gr, source, 'sequence');
+    gr.query();
+    while (gr.next()) {
+      var value = String(gr.getValue('value') || '');
+      var label = String(gr.getValue('label') || value);
+      if (!value || seen[value]) continue;
+      seen[value] = true;
+      out.push({ value: value, label: label });
+    }
+
+    var allowed = source.allowedValues;
+    if (allowed && allowed.length) {
+      var allowMap = {};
+      for (var a = 0; a < allowed.length; a++) allowMap[String(allowed[a])] = true;
+      out = out.filter(function (c) { return allowMap[c.value]; });
+      var byValue = {};
+      for (var i = 0; i < out.length; i++) byValue[out[i].value] = out[i];
+      var ordered = [];
+      for (var j = 0; j < allowed.length; j++) {
+        var key = String(allowed[j]);
+        if (byValue[key]) ordered.push(byValue[key]);
+      }
+      out = ordered;
+    }
+
+    if (!out.length && source.fallback && source.fallback.length) {
+      out = source.fallback;
+    }
+    return out;
+  },
+
+  getReferenceOptionsFromSource: function (source) {
+    if (!source || !source.table) return [];
+    var table = String(source.table);
+    var labelField = String(source.labelField || 'name');
+    var fallbackField = String(source.labelFallbackField || '');
+    var limit = parseInt(source.limit, 10) || 100;
+    var out = [];
+    var gr = new GlideRecord(table);
+    if (source.query) gr.addEncodedQuery(String(source.query));
+    this.applyOptionsOrderBy(gr, source, labelField);
+    gr.setLimit(limit);
+    gr.query();
+    while (gr.next()) {
+      var label = String(gr.getValue(labelField) || gr.getDisplayValue(labelField) || '').trim();
+      if (!label && fallbackField) {
+        label = String(gr.getValue(fallbackField) || gr.getDisplayValue(fallbackField) || '').trim();
+      }
+      if (!label) label = gr.getUniqueValue();
+      out.push({ label: label, value: gr.getUniqueValue() });
+    }
+    return out;
+  },
+
+  resolveFilterOptions: function (source) {
+    if (!source || !source.type) return [];
+    if (source.type === 'choice') return this.getChoiceOptionsFromSource(source);
+    if (source.type === 'reference') return this.getReferenceOptionsFromSource(source);
+    if (source.type === 'static' && source.options && source.options.length) {
+      return source.options;
+    }
+    return [];
+  },
+
+  resolveFilterDefaults: function (defaultsSpec, options) {
+    var values = [];
+    if (!defaultsSpec) return values;
+
+    if (Object.prototype.toString.call(defaultsSpec) === '[object Array]') {
+      values = defaultsSpec;
+    } else if (defaultsSpec.type === 'userField' && defaultsSpec.field) {
+      var user = new GlideRecord('sys_user');
+      if (user.get(gs.getUserID())) {
+        var userVal = String(user.getValue(String(defaultsSpec.field)) || '');
+        if (userVal) values = [userVal];
+      }
+    }
+
+    if (!options || !options.length) return values;
+    var optionValues = {};
+    for (var i = 0; i < options.length; i++) optionValues[String(options[i].value)] = true;
+    var filtered = [];
+    for (var j = 0; j < values.length; j++) {
+      var v = String(values[j]);
+      if (optionValues[v]) filtered.push(v);
+    }
+    return filtered;
+  },
+
+  getCurrentUserContext: function () {
+    var user = new GlideRecord('sys_user');
+    if (!user.get(gs.getUserID())) {
+      return { department: '', company: '' };
+    }
+    return {
+      department: String(user.getValue('department') || ''),
+      company: String(user.getValue('company') || ''),
+    };
+  },
+
+  resolveAppHomeFilters: function (props, threeLevel) {
+    var raw = this.loadFilterConfigRaw(props, threeLevel);
+    var filters = raw.filters || [];
+    filters.sort(function (a, b) {
+      return (parseInt(a.order, 10) || 0) - (parseInt(b.order, 10) || 0);
+    });
+
+    var resolved = [];
+    for (var i = 0; i < filters.length; i++) {
+      var def = filters[i];
+      if (!def || !def.field) continue;
+      var options = this.resolveFilterOptions(def.optionsSource);
+      resolved.push({
+        field: String(def.field),
+        label: String(def.label || def.field),
+        order: parseInt(def.order, 10) || 0,
+        defaultOpen: def.defaultOpen !== false,
+        dotWalk: Boolean(def.dotWalk),
+        options: options,
+        defaults: this.resolveFilterDefaults(def.defaults, options),
+      });
+    }
+    return resolved;
+  },
+
   handleMetadata: function (request, response) {
     var props = this.getPropertyMap();
     var hierarchyVal = (props['x_citi4_clsa_cmd_0.enable.new.app.hierarchy'] || '').toLowerCase();
@@ -192,6 +515,11 @@ PortalMetadataHandler.prototype = {
       },
       business_units: this.getReferenceOptions('business_unit', ['sys_id', 'name'], '', 'name'),
       departments: this.getDepartmentOptions(),
+      app_home_filter_config: {
+        two_level: this.resolveAppHomeFilters(props, false),
+        three_level: this.resolveAppHomeFilters(props, true),
+      },
+      current_user: this.getCurrentUserContext(),
     });
   },
 

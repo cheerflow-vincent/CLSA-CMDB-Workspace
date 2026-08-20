@@ -26,6 +26,26 @@ export interface FilterOptionDto {
   value: string
 }
 
+export interface ResolvedAppHomeFilterDto {
+  field: string
+  label: string
+  order: number
+  defaultOpen: boolean
+  dotWalk: boolean
+  options: FilterOptionDto[]
+  defaults: string[]
+}
+
+export interface AppHomeFilterConfigDto {
+  two_level: ResolvedAppHomeFilterDto[]
+  three_level: ResolvedAppHomeFilterDto[]
+}
+
+export interface PortalCurrentUserContext {
+  department: string
+  company: string
+}
+
 export interface PortalMetadataResponse {
   hierarchy_mode: boolean
   properties: Record<string, string>
@@ -36,6 +56,8 @@ export interface PortalMetadataResponse {
   }
   business_units: FilterOptionDto[]
   departments: FilterOptionDto[]
+  app_home_filter_config?: AppHomeFilterConfigDto
+  current_user?: PortalCurrentUserContext
 }
 
 let _portalMetadataCache: PortalMetadataResponse | null = null
@@ -48,6 +70,8 @@ const EMPTY_PORTAL_METADATA: PortalMetadataResponse = {
   filter_options: { environment: [], operational_status: [], u_tier: [] },
   business_units: [],
   departments: [],
+  app_home_filter_config: { two_level: [], three_level: [] },
+  current_user: { department: '', company: '' },
 }
 
 /** Server-brokered portal metadata (choices, properties, reference lists). */
@@ -344,6 +368,9 @@ export type ApplicationHomeHierarchyMode = 'two_level' | 'three_level'
 
 export interface ApplicationHomeRequest {
   search?: string
+  /** Field-keyed filter values, e.g. { operational_status: ["1"] } */
+  filters?: Record<string, string[]>
+  /** @deprecated legacy keys — used when filters is omitted */
   env?: string[]
   status?: string[]
   dept?: string[]

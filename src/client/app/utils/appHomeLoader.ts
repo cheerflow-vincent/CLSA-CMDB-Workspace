@@ -58,22 +58,25 @@ export interface LiveInstance {
   changes: number;
 }
 
-export interface LiveFilterCriteria {
-  search: string;
-  env: string[];
-  status: string[];
-  dept: string[];
-  bizUnit: string[];
-  tier: string[];
-}
+import {
+  type LiveFilterCriteria,
+  type SidebarFilterState,
+  type ResolvedAppHomeFilter,
+  mergeFilterCriteria,
+  hasActiveLiveFilters,
+  sidebarFiltersEqual,
+  buildRelCiInstanceEdgeQuery,
+  buildInstanceFilterQuery,
+} from './appHomeFilterConfig';
 
-export interface SidebarFilterCriteria {
-  env: string[];
-  status: string[];
-  dept: string[];
-  bizUnit: string[];
-  tier: string[];
-}
+export type { LiveFilterCriteria, SidebarFilterState as SidebarFilterCriteria, ResolvedAppHomeFilter };
+export {
+  mergeFilterCriteria,
+  hasActiveLiveFilters,
+  sidebarFiltersEqual,
+  buildRelCiInstanceEdgeQuery,
+  buildInstanceFilterQuery,
+};
 
 export interface FamilyMeta {
   sys_id: string;
@@ -242,77 +245,36 @@ export async function loadInstanceCatalog(
   return result;
 }
 
-export function buildInstanceFilterQuery(
+export function buildInstanceFilterQueryLegacy(
   criteria: LiveFilterCriteria,
+  filterDefs: ResolvedAppHomeFilter[],
   twoLevel: boolean,
 ): string {
-  const parts: string[] = [];
-  if (twoLevel) {
-    parts.push('u_service_type=instance');
-  }
-
-  const q = criteria.search.trim();
-  if (q) parts.push(`nameLIKE${q}`);
-
-  if (criteria.env.length) {
-    parts.push(`environmentIN${criteria.env.join(',')}`);
-  }
-  if (criteria.status.length) {
-    parts.push(`operational_statusIN${criteria.status.join(',')}`);
-  }
-  if (criteria.dept.length) {
-    parts.push(`departmentIN${criteria.dept.join(',')}`);
-  }
-  if (criteria.bizUnit.length) {
-    parts.push(`business_unitIN${criteria.bizUnit.join(',')}`);
-  }
-  if (criteria.tier.length) {
-    parts.push(`u_tierIN${criteria.tier.join(',')}`);
-  }
-
-  return parts.join('^');
+  return buildInstanceFilterQuery(criteria, filterDefs, twoLevel);
 }
 
-/** Filter on cmdb_rel_ci instance edge via child.* dot-walk (hierarchy-aware). */
-export function buildRelCiInstanceEdgeQuery(
+export function buildRelCiInstanceEdgeQueryLegacy(
   criteria: LiveFilterCriteria,
+  filterDefs: ResolvedAppHomeFilter[],
   twoLevel: boolean,
 ): string {
-  const parts = [
-    twoLevel
-      ? 'type.name=Connects to::Connected by'
-      : 'type.name=Contains::Contained by',
-  ];
-
-  const child = 'child.';
-  // u_service_type / u_tier exist only on specific CI tables — use ref_* dot-walk.
-  const childRef = twoLevel ? 'child.ref_cmdb_ci_service.' : 'child.ref_cmdb_ci_service_auto.';
-  if (twoLevel) {
-    parts.push(`${childRef}u_service_type=instance`);
-  }
-
-  const q = criteria.search.trim();
-  if (q) parts.push(`${child}nameLIKE${q}`);
-  if (criteria.env.length) parts.push(`${child}environmentIN${criteria.env.join(',')}`);
-  if (criteria.status.length) parts.push(`${child}operational_statusIN${criteria.status.join(',')}`);
-  if (criteria.dept.length) parts.push(`${child}departmentIN${criteria.dept.join(',')}`);
-  if (criteria.bizUnit.length) parts.push(`${child}business_unitIN${criteria.bizUnit.join(',')}`);
-  if (criteria.tier.length) parts.push(`${childRef}u_tierIN${criteria.tier.join(',')}`);
-
-  return parts.join('^');
+  return buildRelCiInstanceEdgeQuery(criteria, filterDefs, twoLevel);
 }
 
-export interface FilterResolveResult {
-  instanceIds: Set<string>;
-  families: FamilyMeta[];
-  access: TableAccess;
+/** @deprecated unused — filters are hierarchy-specific via config property */
+export function criteriaForHierarchy(
+  criteria: LiveFilterCriteria,
+  _hierarchyMode: boolean,
+): LiveFilterCriteria {
+  return criteria;
 }
 
 /** 2-level: filter instance edges on cmdb_rel_ci, then walk to app-family services. */
 export async function resolveFilteredTwoLevelFromRelCi(
   criteria: LiveFilterCriteria,
+  filterDefs: ResolvedAppHomeFilter[],
 ): Promise<FilterResolveResult> {
-  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, true);
+  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, filterDefs, true);
 
   const edgeRes = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
     table: 'cmdb_rel_ci',
@@ -372,8 +334,9 @@ export async function resolveFilteredTwoLevelFromRelCi(
 /** 3-level: filter instance edges on cmdb_rel_ci, then walk to business apps. */
 export async function resolveFilteredThreeLevelFromRelCi(
   criteria: LiveFilterCriteria,
+  filterDefs: ResolvedAppHomeFilter[],
 ): Promise<FilterResolveResult> {
-  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, false);
+  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, filterDefs, false);
 
   const edgeRes = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
     table: 'cmdb_rel_ci',
@@ -430,47 +393,10 @@ export async function resolveFilteredThreeLevelFromRelCi(
   };
 }
 
-export function hasActiveLiveFilters(criteria: LiveFilterCriteria): boolean {
-  return Boolean(
-    criteria.search.trim()
-    || criteria.env.length
-    || criteria.status.length
-    || criteria.dept.length
-    || criteria.bizUnit.length
-    || criteria.tier.length,
-  );
-}
-
-export function sidebarFiltersEqual(a: SidebarFilterCriteria, b: SidebarFilterCriteria): boolean {
-  const norm = (arr: string[]) => [...arr].sort().join('\0');
-  return norm(a.env) === norm(b.env)
-    && norm(a.status) === norm(b.status)
-    && norm(a.dept) === norm(b.dept)
-    && norm(a.bizUnit) === norm(b.bizUnit)
-    && norm(a.tier) === norm(b.tier);
-}
-
-export function mergeFilterCriteria(
-  search: string,
-  sidebar: SidebarFilterCriteria,
-): LiveFilterCriteria {
-  return {
-    search,
-    env: sidebar.env,
-    status: sidebar.status,
-    dept: sidebar.dept,
-    bizUnit: sidebar.bizUnit,
-    tier: sidebar.tier,
-  };
-}
-
-/** Omit Environment filter in 2-level hierarchy (field not exposed in sidebar). */
-export function criteriaForHierarchy(
-  criteria: LiveFilterCriteria,
-  hierarchyMode: boolean,
-): LiveFilterCriteria {
-  if (hierarchyMode) return criteria;
-  return { ...criteria, env: [] };
+export interface FilterResolveResult {
+  instanceIds: Set<string>;
+  families: FamilyMeta[];
+  access: TableAccess;
 }
 
 export function buildAppHomeHierarchyTaskPrefix(hierarchyMode: boolean): string {
@@ -1201,6 +1127,7 @@ export interface ApplicationHomePageResult {
 
 async function fetchApplicationHomePageLegacy(
   criteria: LiveFilterCriteria,
+  filterDefs: ResolvedAppHomeFilter[],
   hierarchyMode: boolean,
   page: number,
   pageSize: number,
@@ -1209,8 +1136,8 @@ async function fetchApplicationHomePageLegacy(
 
   if (filtersActive) {
     const resolved = hierarchyMode
-      ? await resolveFilteredThreeLevelFromRelCi(criteria)
-      : await resolveFilteredTwoLevelFromRelCi(criteria);
+      ? await resolveFilteredThreeLevelFromRelCi(criteria, filterDefs)
+      : await resolveFilteredTwoLevelFromRelCi(criteria, filterDefs);
 
     if (resolved.access === 'denied') {
       return {
@@ -1259,6 +1186,7 @@ async function fetchApplicationHomePageLegacy(
 
 export async function fetchApplicationHomePageUnified(
   criteria: LiveFilterCriteria,
+  filterDefs: ResolvedAppHomeFilter[],
   hierarchyMode: boolean,
   page: number,
   pageSize: number,
@@ -1270,11 +1198,7 @@ export async function fetchApplicationHomePageUnified(
     page,
     page_size: pageSize,
     search: criteria.search,
-    env: criteria.env,
-    status: criteria.status,
-    dept: criteria.dept,
-    biz_unit: criteria.bizUnit,
-    tier: criteria.tier,
+    filters: criteria.filters,
   };
   if (filtersActive && filterToken) {
     body.filter_token = filterToken;
@@ -1287,7 +1211,7 @@ export async function fetchApplicationHomePageUnified(
     || (!res.mapping && res.total_families === 0 && !filtersActive);
 
   if (shouldFallback) {
-    return fetchApplicationHomePageLegacy(criteria, hierarchyMode, page, pageSize);
+    return fetchApplicationHomePageLegacy(criteria, filterDefs, hierarchyMode, page, pageSize);
   }
 
   if (res.access === 'denied') {

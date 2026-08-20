@@ -14,6 +14,17 @@ ApplicationHomeHandler.prototype = {
   OTHERS_SVC_ID: '__others_svc__',
   OTHERS_FAMILY_NAME: '[Others]',
 
+  APP_SCOPE: 'x_citi4_clsa_cmd_0',
+  FILTER_CONFIG_PROP_2: 'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.2',
+  FILTER_CONFIG_PROP_3: 'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.3',
+
+  TIER_FALLBACK: [
+    { label: 'Tier 0', value: '0' },
+    { label: 'Tier 1', value: '1' },
+    { label: 'Tier 2', value: '2' },
+    { label: 'Tier 3', value: '3' },
+  ],
+
   /** Writes to System Logs → Application Logs (filter source: CLSA.AppHome). */
   logQuery: function (label, message) {
     gs.info('[CLSA AppHome] ' + label + ' | ' + message, this.LOG_SOURCE);
@@ -119,25 +130,93 @@ ApplicationHomeHandler.prototype = {
   },
 
   normalizeCriteria: function (body) {
+    var filters = {};
+    var rawFilters = body.filters;
+    if (rawFilters && typeof rawFilters === 'object' && !Array.isArray(rawFilters)) {
+      for (var key in rawFilters) {
+        if (!rawFilters.hasOwnProperty(key)) continue;
+        var vals = this.readStringArray(rawFilters, key);
+        if (vals.length) filters[key] = vals;
+      }
+    } else {
+      var env = this.readStringArray(body, 'env');
+      var status = this.readStringArray(body, 'status');
+      var dept = this.readStringArray(body, 'dept');
+      var bizUnit = this.readStringArray(body, 'biz_unit');
+      var tier = this.readStringArray(body, 'tier');
+      if (env.length) filters.environment = env;
+      if (status.length) filters.operational_status = status;
+      if (dept.length) filters.department = dept;
+      if (bizUnit.length) filters.business_unit = bizUnit;
+      if (tier.length) filters.u_tier = tier;
+    }
     return {
       search: this.readField(body, 'search'),
-      env: this.readStringArray(body, 'env'),
-      status: this.readStringArray(body, 'status'),
-      dept: this.readStringArray(body, 'dept'),
-      biz_unit: this.readStringArray(body, 'biz_unit'),
-      tier: this.readStringArray(body, 'tier'),
+      filters: filters,
     };
   },
 
   hasActiveFilters: function (criteria) {
-    return Boolean(
-      (criteria.search && criteria.search.trim())
-      || criteria.env.length
-      || criteria.status.length
-      || criteria.dept.length
-      || criteria.biz_unit.length
-      || criteria.tier.length
-    );
+    if (criteria.search && String(criteria.search).trim()) return true;
+    var filters = criteria.filters || {};
+    for (var key in filters) {
+      if (!filters.hasOwnProperty(key)) continue;
+      if (filters[key] && filters[key].length) return true;
+    }
+    return false;
+  },
+
+  parseJsonProperty: function (raw) {
+    return this.bodyToObject(raw);
+  },
+
+  defaultFilterConfig: function (threeLevel) {
+    if (threeLevel) {
+      return {
+        version: 1,
+        filters: [
+          { field: 'environment', dotWalk: false },
+          { field: 'operational_status', dotWalk: false },
+          { field: 'business_unit', dotWalk: false },
+          { field: 'department', dotWalk: false },
+          { field: 'u_tier', dotWalk: true },
+        ],
+      };
+    }
+    return {
+      version: 1,
+      filters: [
+        { field: 'operational_status', dotWalk: false },
+        { field: 'business_unit', dotWalk: false },
+        { field: 'department', dotWalk: false },
+        { field: 'u_tier', dotWalk: true },
+      ],
+    };
+  },
+
+  loadFilterConfigRaw: function (threeLevel) {
+    var propName = threeLevel ? this.FILTER_CONFIG_PROP_3 : this.FILTER_CONFIG_PROP_2;
+    var raw = gs.getProperty(propName, '');
+    var parsed = this.parseJsonProperty(raw);
+    if (!parsed || !parsed.filters || !parsed.filters.length) {
+      return this.defaultFilterConfig(threeLevel);
+    }
+    return parsed;
+  },
+
+  getFilterDefsForHierarchy: function (threeLevel) {
+    var raw = this.loadFilterConfigRaw(threeLevel);
+    var filters = raw.filters || [];
+    var defs = [];
+    for (var i = 0; i < filters.length; i++) {
+      var def = filters[i];
+      if (!def || !def.field) continue;
+      defs.push({
+        field: String(def.field),
+        dotWalk: Boolean(def.dotWalk),
+      });
+    }
+    return defs;
   },
 
   refSysId: function (gr, field) {
@@ -173,24 +252,28 @@ ApplicationHomeHandler.prototype = {
   },
 
   /** Mirror client buildRelCiInstanceEdgeQuery — Table API encoded query on cmdb_rel_ci. */
-  buildRelCiInstanceEdgeQuery: function (criteria, twoLevel) {
+  buildRelCiInstanceEdgeQuery: function (criteria, twoLevel, filterDefs) {
     var parts = [
       twoLevel
         ? 'type.name=Connects to::Connected by'
         : 'type.name=Contains::Contained by',
     ];
     var child = 'child.';
-    // u_service_type / u_tier exist only on specific CI tables — use ref_* dot-walk.
     var childRef = twoLevel ? 'child.ref_cmdb_ci_service.' : 'child.ref_cmdb_ci_service_auto.';
     if (twoLevel) parts.push(childRef + 'u_service_type=instance');
 
     var q = (criteria.search || '').trim();
     if (q) parts.push(child + 'nameLIKE' + q);
-    if (criteria.env.length) parts.push(child + 'environmentIN' + criteria.env.join(','));
-    if (criteria.status.length) parts.push(child + 'operational_statusIN' + criteria.status.join(','));
-    if (criteria.dept.length) parts.push(child + 'departmentIN' + criteria.dept.join(','));
-    if (criteria.biz_unit.length) parts.push(child + 'business_unitIN' + criteria.biz_unit.join(','));
-    if (criteria.tier.length) parts.push(childRef + 'u_tierIN' + criteria.tier.join(','));
+
+    var defs = filterDefs && filterDefs.length ? filterDefs : this.getFilterDefsForHierarchy(!twoLevel);
+    var filters = criteria.filters || {};
+    for (var i = 0; i < defs.length; i++) {
+      var def = defs[i];
+      var values = filters[def.field];
+      if (!values || !values.length) continue;
+      var prefix = def.dotWalk ? childRef : child;
+      parts.push(prefix + def.field + 'IN' + values.join(','));
+    }
 
     return parts.join('^');
   },
@@ -563,9 +646,9 @@ ApplicationHomeHandler.prototype = {
     return families;
   },
 
-  queryFilteredInstanceEdges: function (criteria, twoLevel, limit, offset) {
+  queryFilteredInstanceEdges: function (criteria, twoLevel, filterDefs, limit, offset) {
     var rows = [];
-    var encoded = this.buildRelCiInstanceEdgeQuery(criteria, twoLevel);
+    var encoded = this.buildRelCiInstanceEdgeQuery(criteria, twoLevel, filterDefs);
     var gr = new GlideRecord('cmdb_rel_ci');
     gr.addEncodedQuery(encoded);
     gr.orderBy('child.name');
@@ -592,7 +675,7 @@ ApplicationHomeHandler.prototype = {
     return rows;
   },
 
-  resolveFilteredTwoLevel: function (criteria) {
+  resolveFilteredTwoLevel: function (criteria, filterDefs) {
     var instanceIdMap = {};
     var intermediateIdMap = {};
     var offset = 0;
@@ -600,7 +683,7 @@ ApplicationHomeHandler.prototype = {
     var totalEdges = 0;
 
     while (true) {
-      var batch = this.queryFilteredInstanceEdges(criteria, true, this.EDGE_BATCH, offset);
+      var batch = this.queryFilteredInstanceEdges(criteria, true, filterDefs, this.EDGE_BATCH, offset);
       if (!batch.length) break;
 
       for (var i = 0; i < batch.length; i++) {
@@ -677,7 +760,7 @@ ApplicationHomeHandler.prototype = {
     };
   },
 
-  resolveFilteredThreeLevel: function (criteria) {
+  resolveFilteredThreeLevel: function (criteria, filterDefs) {
     var instanceIdMap = {};
     var serviceIdMap = {};
     var offset = 0;
@@ -685,7 +768,7 @@ ApplicationHomeHandler.prototype = {
     var totalEdges = 0;
 
     while (true) {
-      var batch = this.queryFilteredInstanceEdges(criteria, false, this.EDGE_BATCH, offset);
+      var batch = this.queryFilteredInstanceEdges(criteria, false, filterDefs, this.EDGE_BATCH, offset);
       if (!batch.length) break;
 
       for (var i = 0; i < batch.length; i++) {
@@ -1012,6 +1095,7 @@ ApplicationHomeHandler.prototype = {
       }
 
       var twoLevel = hierarchyMode === 'two_level';
+      var filterDefs = this.getFilterDefsForHierarchy(!twoLevel);
       var criteria = this.normalizeCriteria(body);
       var page = parseInt(this.readField(body, 'page') || '0', 10);
       if (isNaN(page) || page < 0) page = 0;
@@ -1069,8 +1153,8 @@ ApplicationHomeHandler.prototype = {
             );
           }
           var resolved = twoLevel
-            ? this.resolveFilteredTwoLevel(criteria)
-            : this.resolveFilteredThreeLevel(criteria);
+            ? this.resolveFilteredTwoLevel(criteria, filterDefs)
+            : this.resolveFilteredThreeLevel(criteria, filterDefs);
 
           families = resolved.families || [];
           instanceIds = resolved.instance_ids || [];

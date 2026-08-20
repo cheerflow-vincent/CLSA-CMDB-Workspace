@@ -1,9 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Search, X, ArrowRight, ChevronRight, ChevronDown, Loader2, ExternalLink, Edit2, RefreshCw, Network } from 'lucide-react';
-import { queryTable, getSysProperties, APP_SCOPE } from '../../api/servicenow';
+import { queryTable, fetchPortalMetadata } from '../../api/servicenow';
 import { mockApplications, type AppItem } from '../data/appData';
-
-const HIERARCHY_PROP = `${APP_SCOPE}.enable.new.app.hierarchy`;
 
 interface AppSearchHeaderProps {
   onSelectApp: (app: AppItem) => void;
@@ -130,36 +128,50 @@ export default function AppSearchHeader({
   const [servicesLoading, setServicesLoading] = useState(false);
 
   const [selectedServiceId, setSelectedServiceId] = useState('');
+  const userDeptPreselectedRef = useRef(false);
 
-  // Read hierarchy mode once on mount
+  // Fetch IT departments and pre-select the logged-in user's department
   useEffect(() => {
-    getSysProperties([HIERARCHY_PROP])
-      .then(props => {
-        const val = props[HIERARCHY_PROP];
-        setHierarchyMode(val === undefined || val.toLowerCase() === 'true');
-      })
-      .catch(() => setHierarchyMode(true));
-  }, []);
-
-  // Fetch IT departments on mount
-  useEffect(() => {
+    let cancelled = false;
     setDeptsLoading(true);
-    queryTable<{ sys_id: string; name: string }>({
-      table:   'cmn_department',
-      query:   'u_it_department=true',
-      fields:  ['sys_id', 'name'],
-      limit:   500,
-      orderBy: 'name',
-    })
-      .then(({ result }) =>
-        setDepts(
-          (result ?? [])
-            .map(r => ({ id: r.sys_id, label: r.name }))
-            .sort((a, b) => a.label.localeCompare(b.label))
-        )
-      )
-      .catch(() => setDepts([]))
-      .finally(() => setDeptsLoading(false));
+
+    Promise.all([
+      queryTable<{ sys_id: string; name: string }>({
+        table: 'cmn_department',
+        query: 'u_it_department=true',
+        fields: ['sys_id', 'name'],
+        limit: 500,
+        orderBy: 'name',
+      }),
+      fetchPortalMetadata(),
+    ])
+      .then(([deptRes, meta]) => {
+        if (cancelled) return;
+        setHierarchyMode(meta.hierarchy_mode);
+
+        const deptOptions = (deptRes.result ?? [])
+          .map(r => ({ id: r.sys_id, label: r.name }))
+          .sort((a, b) => a.label.localeCompare(b.label));
+        setDepts(deptOptions);
+
+        const userDeptId = meta.current_user?.department ?? '';
+        if (
+          !userDeptPreselectedRef.current
+          && userDeptId
+          && deptOptions.some(d => d.id === userDeptId)
+        ) {
+          userDeptPreselectedRef.current = true;
+          setSelectedDeptId(userDeptId);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setDepts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDeptsLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, [mode]);
 
   // Fetch business service instances when a department is selected.
