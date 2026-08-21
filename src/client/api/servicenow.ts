@@ -296,23 +296,39 @@ export async function queryStatsCount(
   }
 }
 
+function parseStatsGroupPage(data: unknown): number {
+  const d = data as { result?: unknown[] }
+  if (Array.isArray(d?.result)) return d.result.length
+  return 0
+}
+
+const STATS_GROUP_PAGE_SIZE = 1000
+
 /** Distinct group count via Stats API (sysparm_group_by). */
 export async function queryStatsGroupCount(
   params: StatsQueryParams & { groupBy: string },
 ): Promise<{ totalCount: number; access: TableAccess }> {
-  const reqParams: Record<string, string> = {
-    sysparm_count: 'true',
-    sysparm_group_by: params.groupBy,
-  }
-  if (params.query) reqParams.sysparm_query = params.query
-
   try {
-    const r = await axios.get(`/api/now/stats/${params.table}`, { params: reqParams })
-    const headerCount = parseInt(r.headers['x-total-count'] ?? '', 10)
-    if (Number.isFinite(headerCount) && headerCount >= 0) {
-      return { totalCount: headerCount, access: 'ok' }
+    let offset = 0
+    let totalGroups = 0
+
+    while (true) {
+      const reqParams: Record<string, string | number> = {
+        sysparm_count: 'true',
+        sysparm_group_by: params.groupBy,
+        sysparm_limit: STATS_GROUP_PAGE_SIZE,
+        sysparm_offset: offset,
+      }
+      if (params.query) reqParams.sysparm_query = params.query
+
+      const r = await axios.get(`/api/now/stats/${params.table}`, { params: reqParams })
+      const pageCount = parseStatsGroupPage(r.data)
+      totalGroups += pageCount
+      if (pageCount < STATS_GROUP_PAGE_SIZE) break
+      offset += STATS_GROUP_PAGE_SIZE
     }
-    return { totalCount: parseStatsCount(r.data), access: 'ok' }
+
+    return { totalCount: totalGroups, access: 'ok' }
   } catch (err) {
     if (isAxiosForbidden(err)) {
       return { totalCount: 0, access: 'denied' }

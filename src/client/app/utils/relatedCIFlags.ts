@@ -11,7 +11,8 @@ function emptyCounts(): CITaskFlagCounts {
   return { incidents: 0, changes: 0 };
 }
 
-function countTasksByCi(rows: Record<string, unknown>[]): Map<string, number> {
+/** Distinct linked task count per CI (deduped by task.sys_id, not raw task_ci rows). */
+function countDistinctTasksByCi(rows: Record<string, unknown>[]): Map<string, number> {
   const perCi = new Map<string, Set<string>>();
   for (const r of rows) {
     const ciId = raw(r['ci_item.sys_id']);
@@ -46,11 +47,12 @@ async function fetchTaskCiRowsForQuery(
     query,
     fields: ['ci_item.sys_id', 'task.sys_id'],
     limit: countRes.totalCount,
+    displayValue: 'all',
   });
   return { rows: result, access };
 }
 
-/** Active incident / upcoming change counts per CI (task_ci affected items). */
+/** Active incident / upcoming change counts per CI (distinct tasks via task_ci). */
 export async function fetchCITaskFlagCounts(
   ciSysIds: string[],
 ): Promise<Map<string, CITaskFlagCounts>> {
@@ -67,14 +69,14 @@ export async function fetchCITaskFlagCounts(
   ]);
 
   if (incRes.access !== 'denied') {
-    for (const [ciId, count] of countTasksByCi(incRes.rows)) {
+    for (const [ciId, count] of countDistinctTasksByCi(incRes.rows)) {
       const entry = result.get(ciId);
       if (entry) entry.incidents = count;
     }
   }
 
   if (chgRes.access !== 'denied') {
-    for (const [ciId, count] of countTasksByCi(chgRes.rows)) {
+    for (const [ciId, count] of countDistinctTasksByCi(chgRes.rows)) {
       const entry = result.get(ciId);
       if (entry) entry.changes = count;
     }

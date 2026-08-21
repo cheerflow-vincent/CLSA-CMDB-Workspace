@@ -160,7 +160,7 @@ export async function fetchRelatedTaskPageByQuery(
   return { rows, columns, totalCount, access };
 }
 
-const BRANCH_FETCH_CAP = 500;
+const TASK_CI_SCAN_BATCH = 200;
 
 function mapTaskCiResultRows(
   taskRows: Record<string, unknown>[],
@@ -187,15 +187,9 @@ function mapTaskCiResultRows(
   return { rows, columns };
 }
 
-function mergeAccess(current: TableAccess, next: TableAccess): TableAccess {
-  if (next === 'denied' || current === 'denied') return 'denied';
-  if (next === 'error' || current === 'error') return 'error';
-  return 'ok';
-}
-
-/** Fetch tasks for multiple encoded-query branches, merge distinct tasks, paginate client-side. */
-export async function fetchRelatedTasksFromBranches(
-  branches: string[],
+/** Fetch one page of distinct tasks from a combined task_ci encoded query. */
+export async function fetchDistinctRelatedTaskPageByQuery(
+  encodedQuery: string,
   config: RelatedTaskConfig,
   page: number,
   pageSize = RELATED_CI_PAGE_SIZE,
@@ -206,41 +200,84 @@ export async function fetchRelatedTasksFromBranches(
     config.defaultColumns,
   );
 
-  if (!branches.length) {
+  if (!encodedQuery) {
     return { rows: [], columns: layoutColumns, totalCount: 0, access: 'ok' };
   }
 
-  if (branches.length === 1) {
-    return fetchAllTasksForBranch(branches[0], config, layoutColumns, page, pageSize);
+  const countRes = await countDistinctRelatedTasksFromBranches([encodedQuery]);
+  if (countRes.access === 'denied') {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'denied' };
+  }
+
+  const totalCount = countRes.totalCount;
+  if (!totalCount) {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: countRes.access };
   }
 
   const taskFields = [...new Set(['task.sys_id', ...layoutColumns.map(c => `task.${c.element}`)])];
-  let access: TableAccess = 'ok';
-  const merged: RelatedTaskRow[] = [];
+  const skip = page * pageSize;
+  let distinctSkipped = 0;
+  let tableOffset = 0;
   const seenTasks = new Set<string>();
-  let columns = layoutColumns;
+  const pageTaskRows: Record<string, unknown>[] = [];
+  let access: TableAccess = countRes.access;
 
-  for (const encodedQuery of branches) {
-    const branchResult = await loadAllTasksForBranch(encodedQuery, taskFields, layoutColumns);
-    access = mergeAccess(access, branchResult.access);
-    if (branchResult.access === 'denied') {
+  while (pageTaskRows.length < pageSize) {
+    const { result = [], access: batchAccess } = await queryTableWithAccess<Record<string, unknown>>({
+      table: 'task_ci',
+      query: `${encodedQuery}^ORDERBYtask.number`,
+      fields: taskFields,
+      limit: TASK_CI_SCAN_BATCH,
+      offset: tableOffset,
+      displayValue: true,
+    });
+
+    if (batchAccess === 'denied') {
       return { rows: [], columns: layoutColumns, totalCount: 0, access: 'denied' };
     }
-    if (branchResult.columns.length) columns = branchResult.columns;
-    for (const row of branchResult.rows) {
-      if (seenTasks.has(row.sysId)) continue;
-      seenTasks.add(row.sysId);
-      merged.push(row);
+    if (batchAccess === 'error') access = 'error';
+    if (!result.length) break;
+
+    for (const row of result) {
+      const taskId = raw(row['task.sys_id']);
+      if (!taskId || seenTasks.has(taskId)) continue;
+      seenTasks.add(taskId);
+
+      if (distinctSkipped < skip) {
+        distinctSkipped++;
+        continue;
+      }
+
+      pageTaskRows.push(row);
+      if (pageTaskRows.length >= pageSize) break;
     }
+
+    tableOffset += result.length;
+    if (result.length < TASK_CI_SCAN_BATCH) break;
   }
 
-  merged.sort((a, b) =>
-    (a.values.number || '').localeCompare(b.values.number || '', undefined, { numeric: true }),
-  );
-
-  const totalCount = merged.length;
-  const rows = merged.slice(page * pageSize, (page + 1) * pageSize);
+  const { rows, columns } = mapTaskCiResultRows(pageTaskRows, layoutColumns);
   return { rows, columns, totalCount, access };
+}
+
+/** Fetch distinct tasks for encoded-query branches with server-backed pagination. */
+export async function fetchRelatedTasksFromBranches(
+  branches: string[],
+  config: RelatedTaskConfig,
+  page: number,
+  pageSize = RELATED_CI_PAGE_SIZE,
+): Promise<RelatedTaskPage> {
+  if (!branches.length) {
+    const layoutColumns = await loadListFields(
+      config.taskTable,
+      config.listTitle,
+      config.defaultColumns,
+    );
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'ok' };
+  }
+
+  const combined = joinOrEncodedQueries(branches);
+  return fetchDistinctRelatedTaskPageByQuery(combined, config, page, pageSize);
 }
 
 /** Count distinct tasks across encoded-query branches (matches sidebar dedupe). */
@@ -250,53 +287,6 @@ export async function countDistinctRelatedTasksFromBranches(
   const query = joinOrEncodedQueries(branches);
   if (!query) return { totalCount: 0, access: 'ok' };
   return queryStatsGroupCount({ table: 'task_ci', query, groupBy: 'task' });
-}
-
-async function loadAllTasksForBranch(
-  encodedQuery: string,
-  taskFields: string[],
-  layoutColumns: ViewField[],
-): Promise<{ rows: RelatedTaskRow[]; columns: ViewField[]; access: TableAccess }> {
-  const countRes = await queryTableWithAccess({
-    table: 'task_ci',
-    query: `${encodedQuery}^ORDERBYtask.number`,
-    fields: ['sys_id'],
-    limit: 1,
-  });
-  if (countRes.access === 'denied') {
-    return { rows: [], columns: layoutColumns, access: 'denied' };
-  }
-  if (!countRes.totalCount) {
-    return { rows: [], columns: layoutColumns, access: countRes.access };
-  }
-
-  const { result = [], access } = await queryTableWithAccess<Record<string, unknown>>({
-    table: 'task_ci',
-    query: `${encodedQuery}^ORDERBYtask.number`,
-    fields: taskFields,
-    limit: Math.min(countRes.totalCount, BRANCH_FETCH_CAP),
-    displayValue: true,
-  });
-
-  const mapped = mapTaskCiResultRows(result, layoutColumns);
-  return { ...mapped, access };
-}
-
-async function fetchAllTasksForBranch(
-  encodedQuery: string,
-  config: RelatedTaskConfig,
-  layoutColumns: ViewField[],
-  page: number,
-  pageSize: number,
-): Promise<RelatedTaskPage> {
-  const taskFields = [...new Set(['task.sys_id', ...layoutColumns.map(c => `task.${c.element}`)])];
-  const branchResult = await loadAllTasksForBranch(encodedQuery, taskFields, layoutColumns);
-  if (branchResult.access === 'denied') {
-    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'denied' };
-  }
-  const totalCount = branchResult.rows.length;
-  const rows = branchResult.rows.slice(page * pageSize, (page + 1) * pageSize);
-  return { rows, columns: branchResult.columns, totalCount, access: branchResult.access };
 }
 
 export async function fetchRelatedTaskCount(

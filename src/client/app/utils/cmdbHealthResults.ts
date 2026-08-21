@@ -38,6 +38,12 @@ function buildHealthQueryByPrefix(queryPrefix: string): string {
   return `active=true^${queryPrefix}`;
 }
 
+function buildCombinedHealthQuery(branches: string[]): string {
+  return joinOrEncodedQueries(
+    branches.map(branchQuery => buildHealthQueryByPrefix(branchQuery)),
+  );
+}
+
 export async function fetchCmdbHealthCountByQuery(
   queryPrefix: string,
 ): Promise<{ totalCount: number; access: TableAccess }> {
@@ -97,137 +103,41 @@ export async function fetchCmdbHealthPageByQuery(
   return { rows, columns: readableColumns, totalCount, access };
 }
 
-const HEALTH_BRANCH_FETCH_CAP = 500;
-
-function mergeHealthAccess(current: TableAccess, next: TableAccess): TableAccess {
-  if (next === 'denied' || current === 'denied') return 'denied';
-  if (next === 'error' || current === 'error') return 'error';
-  return 'ok';
-}
-
-function mapHealthResultRows(
-  records: Record<string, unknown>[],
-  columns: ViewField[],
-): { rows: HealthResultRow[]; columns: ViewField[] } {
-  const readableColumns = filterColumnsByRecords(columns, records);
-  const rows: HealthResultRow[] = records.map(rec => {
-    const sysId = raw(rec.sys_id);
-    const values: Record<string, string> = {};
-    for (const col of readableColumns) {
-      if (col.element in rec) {
-        values[col.element] = str(rec[col.element]);
-      }
-    }
-    return { sysId, values };
-  }).filter(r => r.sysId);
-  return { rows, columns: readableColumns };
-}
-
-/** Fetch health metrics for multiple query branches, merge, paginate client-side. */
+/** Fetch health metrics for query branches with server-backed pagination. */
 export async function fetchCmdbHealthFromBranches(
   branches: string[],
   page: number,
   pageSize = 10,
 ): Promise<HealthResultsPage> {
-  const columns = await loadListFields(
-    CMDB_HEALTH_TABLE,
-    LIST_VIEW_TITLE,
-    HEALTH_DEFAULT_COLUMNS,
-  );
-
   if (!branches.length) {
+    const columns = await loadListFields(
+      CMDB_HEALTH_TABLE,
+      LIST_VIEW_TITLE,
+      HEALTH_DEFAULT_COLUMNS,
+    );
     return { rows: [], columns, totalCount: 0, access: 'ok' };
   }
 
-  if (branches.length === 1) {
-    return fetchAllHealthForBranch(branches[0], columns, page, pageSize);
+  const combined = buildCombinedHealthQuery(branches);
+  const [countRes, pageRes] = await Promise.all([
+    countDistinctHealthFromBranches(branches),
+    fetchCmdbHealthPageByQuery(combined, page, pageSize),
+  ]);
+
+  if (countRes.access === 'denied') {
+    return { ...pageRes, rows: [], totalCount: 0, access: 'denied' };
   }
 
-  const fields = [...new Set(['sys_id', ...columns.map(c => c.element)])];
-  let access: TableAccess = 'ok';
-  const merged: HealthResultRow[] = [];
-  const seen = new Set<string>();
-  let readableColumns = columns;
-
-  for (const branchQuery of branches) {
-    const branchResult = await loadAllHealthForBranch(branchQuery, fields, columns);
-    access = mergeHealthAccess(access, branchResult.access);
-    if (branchResult.access === 'denied') {
-      return { rows: [], columns, totalCount: 0, access: 'denied' };
-    }
-    if (branchResult.columns.length) readableColumns = branchResult.columns;
-    for (const row of branchResult.rows) {
-      if (seen.has(row.sysId)) continue;
-      seen.add(row.sysId);
-      merged.push(row);
-    }
-  }
-
-  merged.sort((a, b) =>
-    (a.values.name || '').localeCompare(b.values.name || '', undefined, { sensitivity: 'base' }),
-  );
-
-  const totalCount = merged.length;
-  const rows = merged.slice(page * pageSize, (page + 1) * pageSize);
-  return { rows, columns: readableColumns, totalCount, access };
+  return { ...pageRes, totalCount: countRes.totalCount };
 }
 
 /** Count distinct health metrics across query branches (matches sidebar dedupe). */
 export async function countDistinctHealthFromBranches(
   branches: string[],
 ): Promise<{ totalCount: number; access: TableAccess }> {
-  const query = joinOrEncodedQueries(
-    branches.map(branchQuery => buildHealthQueryByPrefix(branchQuery)),
-  );
+  const query = buildCombinedHealthQuery(branches);
   if (!query) return { totalCount: 0, access: 'ok' };
   return queryStatsGroupCount({ table: CMDB_HEALTH_TABLE, query, groupBy: 'sys_id' });
-}
-
-async function loadAllHealthForBranch(
-  branchQuery: string,
-  fields: string[],
-  columns: ViewField[],
-): Promise<{ rows: HealthResultRow[]; columns: ViewField[]; access: TableAccess }> {
-  const query = `${buildHealthQueryByPrefix(branchQuery)}^ORDERBYname`;
-  const countRes = await queryTableWithAccess({
-    table: CMDB_HEALTH_TABLE,
-    query,
-    fields: ['sys_id'],
-    limit: 1,
-  });
-  if (countRes.access === 'denied') {
-    return { rows: [], columns, access: 'denied' };
-  }
-  if (!countRes.totalCount) {
-    return { rows: [], columns, access: countRes.access };
-  }
-
-  const { result = [], access } = await queryTableWithAccess<Record<string, unknown>>({
-    table: CMDB_HEALTH_TABLE,
-    query,
-    fields,
-    limit: Math.min(countRes.totalCount, HEALTH_BRANCH_FETCH_CAP),
-    displayValue: true,
-  });
-
-  const mapped = mapHealthResultRows(result, columns);
-  return { ...mapped, access };
-}
-
-async function fetchAllHealthForBranch(
-  branchQuery: string,
-  columns: ViewField[],
-  page: number,
-  pageSize: number,
-): Promise<HealthResultsPage> {
-  const fields = [...new Set(['sys_id', ...columns.map(c => c.element)])];
-  const branchResult = await loadAllHealthForBranch(branchQuery, fields, columns);
-  if (branchResult.access === 'denied') {
-    return { rows: [], columns, totalCount: 0, access: 'denied' };
-  }
-  const totalCount = branchResult.rows.length;
-  const rows = branchResult.rows.slice(page * pageSize, (page + 1) * pageSize);
-  return { rows, columns: branchResult.columns, totalCount, access: branchResult.access };
 }
 
 export async function fetchCmdbHealthResults(ciSysId: string): Promise<HealthResultsPage> {
