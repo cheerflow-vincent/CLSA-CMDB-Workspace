@@ -373,7 +373,6 @@ function InfrastructureDiagramInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [loading, setLoading] = useState(true);
-  const [peerCount, setPeerCount] = useState(0);
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; label: string; isCenter: boolean } | null>(null);
   const nodeMenuRef = useRef<HTMLDivElement>(null);
   const [menuPermissions, setMenuPermissions] = useState<{ loading: boolean; canEdit: boolean } | null>(null);
@@ -418,8 +417,6 @@ function InfrastructureDiagramInner({
 
     if (ciMode) {
       if (ciPeers) {
-        const siblingCount = ciPeers.filter(p => p.sysId !== centerCi!.id).length;
-        setPeerCount(siblingCount);
         const { nodes: n, edges: e, infoMap } = buildCiDiagram(ciPeers, centerCi!, openMenu, filters);
         infoMapRef.current = infoMap;
         setNodes(n);
@@ -435,8 +432,6 @@ function InfrastructureDiagramInner({
       fetchInfraPeersForCi(centerCi!.id)
         .then(({ peers }) => {
           if (cancelled) return;
-          const siblingCount = peers.filter(p => p.sysId !== centerCi!.id).length;
-          setPeerCount(siblingCount);
           const { nodes: n, edges: e, infoMap } = buildCiDiagram(peers, centerCi!, openMenu, filters);
           infoMapRef.current = infoMap;
           setNodes(n);
@@ -447,7 +442,6 @@ function InfrastructureDiagramInner({
           if (!cancelled) {
             setNodes([]);
             setEdges([]);
-            setPeerCount(0);
           }
         })
         .finally(() => { if (!cancelled) setLoading(false); });
@@ -459,7 +453,6 @@ function InfrastructureDiagramInner({
     if (!sysId) {
       setNodes([]);
       setEdges([]);
-      setPeerCount(0);
       setLoading(false);
       return;
     }
@@ -470,7 +463,6 @@ function InfrastructureDiagramInner({
     fetchAllInfraPeers(sysId)
       .then(({ peers }) => {
         if (cancelled) return;
-        setPeerCount(peers.length);
         const { nodes: n, edges: e, infoMap } = buildDiagram(peers, selectedApp, openMenu, filters);
         infoMapRef.current = infoMap;
         setNodes(n);
@@ -481,7 +473,6 @@ function InfrastructureDiagramInner({
         if (!cancelled) {
           setNodes([]);
           setEdges([]);
-          setPeerCount(0);
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -537,23 +528,6 @@ function InfrastructureDiagramInner({
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
             <span className="typo-page-subtitle">Loading infrastructure…</span>
-          </div>
-        </div>
-      )}
-
-      {!loading && peerCount === 0 && (selectedApp?.sysId || centerCi?.id) && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="text-center text-gray-400 px-6">
-            <p className="typo-body font-medium text-gray-500">
-              {centerCi?.id
-                ? 'No direct infrastructure relationships found for this CI'
-                : 'No infrastructure relationships found'}
-            </p>
-            <p className="typo-caption mt-1">
-              {centerCi?.id
-                ? 'Infrastructure CIs directly linked as parent or child in cmdb_rel_ci will appear here.'
-                : 'Servers, network gears, network links, and databases linked to this application will appear here.'}
-            </p>
           </div>
         </div>
       )}
