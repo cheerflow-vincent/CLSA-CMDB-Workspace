@@ -89,9 +89,9 @@ function grafanaPropertyName(table: string): string {
   return `${APP_SCOPE}.grafana.url.${table}`;
 }
 
-/** Substitute `{0}` in a Grafana URL template with the CI name. */
+/** Substitute `{0}` in a Grafana URL template with the CI name (uppercase). */
 function buildGrafanaUrl(template: string, ciName: string): string {
-  return template.replace(/\{0\}/g, encodeURIComponent(ciName));
+  return template.replace(/\{0\}/g, encodeURIComponent(ciName.toUpperCase()));
 }
 
 function formatClassLabel(cls: string): string {
