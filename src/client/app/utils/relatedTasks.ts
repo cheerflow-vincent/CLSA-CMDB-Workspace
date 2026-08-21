@@ -1,7 +1,8 @@
-import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { queryTableWithAccess, queryStatsGroupCount, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import { LIST_VIEW_TITLE, RELATED_CI_PAGE_SIZE } from './relatedCIs';
+import { joinOrEncodedQueries } from './searchQuery';
 
 export { RELATED_CI_PAGE_SIZE as RELATED_TASK_PAGE_SIZE };
 
@@ -242,57 +243,13 @@ export async function fetchRelatedTasksFromBranches(
   return { rows, columns, totalCount, access };
 }
 
-async function loadDistinctTaskIdsForBranch(
-  encodedQuery: string,
-): Promise<{ taskIds: string[]; access: TableAccess }> {
-  const countRes = await queryTableWithAccess({
-    table: 'task_ci',
-    query: `${encodedQuery}^ORDERBYtask.number`,
-    fields: ['sys_id'],
-    limit: 1,
-  });
-  if (countRes.access === 'denied') {
-    return { taskIds: [], access: 'denied' };
-  }
-  if (!countRes.totalCount) {
-    return { taskIds: [], access: countRes.access };
-  }
-
-  const { result = [], access } = await queryTableWithAccess<Record<string, unknown>>({
-    table: 'task_ci',
-    query: `${encodedQuery}^ORDERBYtask.number`,
-    fields: ['task.sys_id'],
-    limit: Math.min(countRes.totalCount, BRANCH_FETCH_CAP),
-    displayValue: true,
-  });
-
-  const seen = new Set<string>();
-  for (const r of result) {
-    const id = raw(r['task.sys_id']);
-    if (id) seen.add(id);
-  }
-  return { taskIds: [...seen], access };
-}
-
 /** Count distinct tasks across encoded-query branches (matches sidebar dedupe). */
 export async function countDistinctRelatedTasksFromBranches(
   branches: string[],
 ): Promise<{ totalCount: number; access: TableAccess }> {
-  if (!branches.length) return { totalCount: 0, access: 'ok' };
-
-  let access: TableAccess = 'ok';
-  const seen = new Set<string>();
-
-  for (const encodedQuery of branches) {
-    const branchResult = await loadDistinctTaskIdsForBranch(encodedQuery);
-    access = mergeAccess(access, branchResult.access);
-    if (branchResult.access === 'denied') {
-      return { totalCount: 0, access: 'denied' };
-    }
-    for (const id of branchResult.taskIds) seen.add(id);
-  }
-
-  return { totalCount: seen.size, access };
+  const query = joinOrEncodedQueries(branches);
+  if (!query) return { totalCount: 0, access: 'ok' };
+  return queryStatsGroupCount({ table: 'task_ci', query, groupBy: 'task' });
 }
 
 async function loadAllTasksForBranch(

@@ -1,7 +1,8 @@
-import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { queryTableWithAccess, queryStatsGroupCount, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import { LIST_VIEW_TITLE } from './relatedCIs';
+import { joinOrEncodedQueries } from './searchQuery';
 
 export const CMDB_HEALTH_TABLE = 'cmdb_health_result';
 
@@ -171,58 +172,15 @@ export async function fetchCmdbHealthFromBranches(
   return { rows, columns: readableColumns, totalCount, access };
 }
 
-async function loadDistinctHealthIdsForBranch(
-  branchQuery: string,
-): Promise<{ ids: string[]; access: TableAccess }> {
-  const query = `${buildHealthQueryByPrefix(branchQuery)}^ORDERBYname`;
-  const countRes = await queryTableWithAccess({
-    table: CMDB_HEALTH_TABLE,
-    query,
-    fields: ['sys_id'],
-    limit: 1,
-  });
-  if (countRes.access === 'denied') {
-    return { ids: [], access: 'denied' };
-  }
-  if (!countRes.totalCount) {
-    return { ids: [], access: countRes.access };
-  }
-
-  const { result = [], access } = await queryTableWithAccess<Record<string, unknown>>({
-    table: CMDB_HEALTH_TABLE,
-    query,
-    fields: ['sys_id'],
-    limit: Math.min(countRes.totalCount, HEALTH_BRANCH_FETCH_CAP),
-    displayValue: true,
-  });
-
-  const seen = new Set<string>();
-  for (const r of result) {
-    const id = raw(r.sys_id);
-    if (id) seen.add(id);
-  }
-  return { ids: [...seen], access };
-}
-
 /** Count distinct health metrics across query branches (matches sidebar dedupe). */
 export async function countDistinctHealthFromBranches(
   branches: string[],
 ): Promise<{ totalCount: number; access: TableAccess }> {
-  if (!branches.length) return { totalCount: 0, access: 'ok' };
-
-  let access: TableAccess = 'ok';
-  const seen = new Set<string>();
-
-  for (const branchQuery of branches) {
-    const branchResult = await loadDistinctHealthIdsForBranch(branchQuery);
-    access = mergeHealthAccess(access, branchResult.access);
-    if (branchResult.access === 'denied') {
-      return { totalCount: 0, access: 'denied' };
-    }
-    for (const id of branchResult.ids) seen.add(id);
-  }
-
-  return { totalCount: seen.size, access };
+  const query = joinOrEncodedQueries(
+    branches.map(branchQuery => buildHealthQueryByPrefix(branchQuery)),
+  );
+  if (!query) return { totalCount: 0, access: 'ok' };
+  return queryStatsGroupCount({ table: CMDB_HEALTH_TABLE, query, groupBy: 'sys_id' });
 }
 
 async function loadAllHealthForBranch(

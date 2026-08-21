@@ -14,7 +14,6 @@ export interface CiSearchSummaryBannerProps {
   };
   loading: boolean;
   matchingCiCount: number;
-  showMergeCapNote: boolean;
   onChipClick: (flagType: SummaryFlagType) => void;
 }
 
@@ -25,7 +24,6 @@ export default function CISearchSummaryBanner({
   access,
   loading,
   matchingCiCount,
-  showMergeCapNote,
   onChipClick,
 }: CiSearchSummaryBannerProps) {
   const showIncidents = !isAccessDenied(access.incidents) && incidents > 0;
@@ -81,9 +79,6 @@ export default function CISearchSummaryBanner({
       </div>
       <p className="typo-caption text-gray-500 mt-2">
         Across {matchingCiCount.toLocaleString()} matching CI{matchingCiCount !== 1 ? 's' : ''}
-        {showMergeCapNote && (
-          <span className="text-gray-400"> (list capped at 500; counts reflect full filter)</span>
-        )}
       </p>
     </div>
   );

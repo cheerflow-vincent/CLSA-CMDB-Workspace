@@ -25,6 +25,31 @@ function countTasksByCi(rows: Record<string, unknown>[]): Map<string, number> {
   return counts;
 }
 
+async function fetchTaskCiRowsForQuery(
+  query: string,
+): Promise<{ rows: Record<string, unknown>[]; access: 'ok' | 'denied' | 'error' }> {
+  const countRes = await queryTableWithAccess<Record<string, unknown>>({
+    table: 'task_ci',
+    query,
+    fields: ['ci_item.sys_id', 'task.sys_id'],
+    limit: 1,
+  });
+  if (countRes.access === 'denied') {
+    return { rows: [], access: 'denied' };
+  }
+  if (!countRes.totalCount) {
+    return { rows: [], access: countRes.access };
+  }
+
+  const { result = [], access } = await queryTableWithAccess<Record<string, unknown>>({
+    table: 'task_ci',
+    query,
+    fields: ['ci_item.sys_id', 'task.sys_id'],
+    limit: countRes.totalCount,
+  });
+  return { rows: result, access };
+}
+
 /** Active incident / upcoming change counts per CI (task_ci affected items). */
 export async function fetchCITaskFlagCounts(
   ciSysIds: string[],
@@ -37,29 +62,19 @@ export async function fetchCITaskFlagCounts(
   const idsQuery = ciSysIds.join(',');
 
   const [incRes, chgRes] = await Promise.all([
-    queryTableWithAccess<Record<string, unknown>>({
-      table: 'task_ci',
-      query: `ci_item.sys_idIN${idsQuery}^${INCIDENT_TASK_CONFIG.extraQuery}`,
-      fields: ['ci_item.sys_id', 'task.sys_id'],
-      limit: 500,
-    }),
-    queryTableWithAccess<Record<string, unknown>>({
-      table: 'task_ci',
-      query: `ci_item.sys_idIN${idsQuery}^${CHANGE_TASK_CONFIG.extraQuery}`,
-      fields: ['ci_item.sys_id', 'task.sys_id'],
-      limit: 500,
-    }),
+    fetchTaskCiRowsForQuery(`ci_item.sys_idIN${idsQuery}^${INCIDENT_TASK_CONFIG.extraQuery}`),
+    fetchTaskCiRowsForQuery(`ci_item.sys_idIN${idsQuery}^${CHANGE_TASK_CONFIG.extraQuery}`),
   ]);
 
   if (incRes.access !== 'denied') {
-    for (const [ciId, count] of countTasksByCi(incRes.result ?? [])) {
+    for (const [ciId, count] of countTasksByCi(incRes.rows)) {
       const entry = result.get(ciId);
       if (entry) entry.incidents = count;
     }
   }
 
   if (chgRes.access !== 'denied') {
-    for (const [ciId, count] of countTasksByCi(chgRes.result ?? [])) {
+    for (const [ciId, count] of countTasksByCi(chgRes.rows)) {
       const entry = result.get(ciId);
       if (entry) entry.changes = count;
     }

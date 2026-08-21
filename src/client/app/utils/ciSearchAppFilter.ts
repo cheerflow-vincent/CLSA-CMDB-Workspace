@@ -9,8 +9,15 @@ import {
   type RelatedCIConfig,
 } from './relatedCIs';
 import { raw } from './viewFields';
-import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms, appendEncodedQuery, buildColumnFiltersQuery, escapeLikeTerm } from './searchQuery';
-import type { CISearchInventoryTab } from './ciSearchTabs';
+import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms, appendEncodedQuery, buildColumnFiltersQuery, escapeLikeTerm, joinOrEncodedQueries } from './searchQuery';
+import { CI_INVENTORY_TABS, type CISearchInventoryTab } from './ciSearchTabs';
+
+export const CI_INVENTORY_CLASSES = [
+  'cmdb_ci_server',
+  'cmdb_ci_netgear',
+  'cmdb_ci_db_instance',
+  'cmdb_ci_network_link',
+] as const;
 
 export type AppFilterKind = 'family' | 'instance';
 
@@ -211,6 +218,29 @@ export function buildAppScopedCiQuery(
   const idPart = `sys_idIN${relatedIds.slice(0, CHUNK_SIZE).join(',')}`;
   const base = [idPart, ciFilter, keywordPart].filter(Boolean).join('^');
   return appendEncodedQuery(base, columnFilterPart);
+}
+
+/** Combined encoded query for the All Results tab against cmdb_ci. */
+export function buildAllTabSnQuery(
+  snQueriesByTab: Record<CISearchInventoryTab, string>,
+  colFilters: Record<string, string>,
+  allowedFieldsByTab: Record<CISearchInventoryTab, string[]>,
+  appFilterActive: boolean,
+): string {
+  const tabTable: Record<CISearchInventoryTab, string> = {
+    servers: 'cmdb_ci_server',
+    switches: 'cmdb_ci_netgear',
+    databases: 'cmdb_ci_db_instance',
+    network_links: 'cmdb_ci_network_link',
+  };
+  const branches = CI_INVENTORY_TABS.map(({ tab }) => {
+    let base = snQueriesByTab[tab];
+    if (!appFilterActive) {
+      base = appendEncodedQuery(`sys_class_nameINSTANCEOF${tabTable[tab]}`, base);
+    }
+    return buildResultSnQueryForTab(base, colFilters, allowedFieldsByTab[tab]);
+  }).filter(Boolean);
+  return joinOrEncodedQueries(branches);
 }
 
 /** Append column header filters to a base encoded query. */

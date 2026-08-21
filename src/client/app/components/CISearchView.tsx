@@ -26,6 +26,7 @@ import { enrichRowsWithTaskFlags } from '../utils/relatedCIFlags';
 import {
   buildSnQueriesByTab,
   buildResultSnQueryForTab,
+  buildAllTabSnQuery,
   fetchRelatedInfraCiIdsByTable,
   resolveInstanceIdsForAppSelection,
   fetchAllScopedCiRows,
@@ -43,12 +44,13 @@ import {
 } from '../utils/ciSearchSummary';
 
 const PROP_CI_SEARCH_FIELDS = `${APP_SCOPE}.ci.search.filter.table.field`;
+const PROP_CSV_EXPORT_LIMIT = 'glide.csv.export.limit';
 const DEFAULT_SEARCH_FIELDS = ['name'];
+const DEFAULT_CSV_EXPORT_LIMIT = 10_000;
 const LIST_VIEW = 'CLSA CMDB Workspace';
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50] as const;
 const DEFAULT_PAGE_SIZE = 10;
-const MERGE_CAP = 500;
-const EXPORT_ROW_CAP = 10_000;
+const ALL_CI_TABLE = 'cmdb_ci';
 
 interface CISearchViewProps {
   onViewDetails: (ci: CIItem) => void;
@@ -224,16 +226,44 @@ async function fetchTabPage(
   };
 }
 
+async function fetchAllTabPage(
+  snQuery: string,
+  columns: ViewField[],
+  page: number,
+  pageSize: number,
+): Promise<{ rows: SearchRow[]; totalCount: number; access: TableAccess; columns: ViewField[] }> {
+  const { result, totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
+    table: ALL_CI_TABLE,
+    query: `${snQuery}^ORDERBYname`,
+    fields: apiFieldsForColumns(columns),
+    limit: pageSize,
+    offset: page * pageSize,
+    displayValue: true,
+  });
+  if (access === 'denied') {
+    return { rows: [], totalCount: 0, access, columns: [] };
+  }
+  const records = result ?? [];
+  const readableColumns = filterColumnsByRecords(columns, records);
+  return {
+    rows: records.map(r => mapApiRow(r, readableColumns)),
+    totalCount,
+    access,
+    columns: readableColumns,
+  };
+}
+
 async function fetchTabAll(
-  cfg: V2TabCfg,
+  table: string,
   snQuery: string,
   columns: ViewField[],
   totalCount: number,
+  csvExportLimit: number,
 ): Promise<{ rows: SearchRow[]; access: TableAccess }> {
   if (!totalCount) return { rows: [], access: 'ok' };
-  const limit = Math.min(totalCount, EXPORT_ROW_CAP);
+  const limit = Math.min(totalCount, csvExportLimit);
   const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
-    table: cfg.table,
+    table,
     query: `${snQuery}^ORDERBYname`,
     fields: apiFieldsForColumns(columns),
     limit,
@@ -243,67 +273,9 @@ async function fetchTabAll(
   const records = result ?? [];
   const readableColumns = filterColumnsByRecords(columns, records);
   return {
-    rows: records.map(r => mapApiRow(r, readableColumns, cfg)),
+    rows: records.map(r => mapApiRow(r, readableColumns)),
     access,
   };
-}
-
-async function fetchAllForExport(
-  snQueriesByTab: Record<SpecificTab, string>,
-  columns: ViewField[],
-  tabCounts: Record<SpecificTab, number>,
-  tabAccess: Record<SpecificTab, TableAccess>,
-): Promise<SearchRow[]> {
-  const parts = await Promise.all(
-    V2_TABS.map(async cfg => {
-      if (isAccessDenied(tabAccess[cfg.tab])) return [] as SearchRow[];
-      const count = tabCounts[cfg.tab];
-      if (!count) return [] as SearchRow[];
-      const { rows } = await fetchTabAll(cfg, snQueriesByTab[cfg.tab], columns, count);
-      return rows;
-    }),
-  );
-  return parts
-    .flat()
-    .sort((a, b) =>
-      (a.values.name || '').localeCompare(b.values.name || '', undefined, { sensitivity: 'base' }),
-    );
-}
-
-async function fetchAllMerged(
-  snQueriesByTab: Record<SpecificTab, string>,
-  columns: ViewField[],
-): Promise<{ rows: SearchRow[]; totalCount: number; tabAccess: Record<SpecificTab, TableAccess> }> {
-  const apiFields = apiFieldsForColumns(columns);
-  const tabAccess = {} as Record<SpecificTab, TableAccess>;
-  const parts = await Promise.all(
-    V2_TABS.map(async cfg => {
-      const { result, totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
-        table: cfg.table,
-        query: `${snQueriesByTab[cfg.tab]}^ORDERBYname`,
-        fields: apiFields,
-        limit: MERGE_CAP,
-        displayValue: true,
-      });
-      tabAccess[cfg.tab] = access;
-      if (access === 'denied') {
-        return { totalCount: 0, rows: [] as SearchRow[] };
-      }
-      const records = result ?? [];
-      const readableColumns = filterColumnsByRecords(columns, records);
-      return {
-        totalCount,
-        rows: records.map(r => mapApiRow(r, readableColumns, cfg)),
-      };
-    }),
-  );
-  const totalCount = parts.reduce((s, p) => s + p.totalCount, 0);
-  const rows = parts
-    .flatMap(p => p.rows)
-    .sort((a, b) =>
-      (a.values.name || '').localeCompare(b.values.name || '', undefined, { sensitivity: 'base' }),
-    );
-  return { rows, totalCount, tabAccess };
 }
 
 type PillCounts = { servers: number | null; switches: number | null; databases: number | null; network_links: number | null };
@@ -324,11 +296,13 @@ function ExportButton({
   columns,
   disabled,
   truncated,
+  csvExportLimit,
   onFetchRows,
 }: {
   columns: ViewField[];
   disabled: boolean;
   truncated?: boolean;
+  csvExportLimit: number;
   onFetchRows: () => Promise<SearchRow[]>;
 }) {
   const [exporting, setExporting] = useState(false);
@@ -374,7 +348,7 @@ function ExportButton({
       </button>
       {truncated && (
         <p className="typo-caption text-amber-600">
-          Export limited to {EXPORT_ROW_CAP.toLocaleString()} rows per CI type.
+          Export limited to {csvExportLimit.toLocaleString()} rows.
         </p>
       )}
     </div>
@@ -534,9 +508,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     network_links: { ...EMPTY_TAB_DATA },
   });
   const [allColumns, setAllColumns] = useState<ViewField[]>(ALL_DEFAULT_COLUMNS);
-  const [allMergedRows, setAllMergedRows] = useState<SearchRow[]>([]);
-  const [allTotalCount, setAllTotalCount] = useState(0);
-  const [allLoading, setAllLoading] = useState(false);
+  const [allTabData, setAllTabData] = useState<TabData>({ ...EMPTY_TAB_DATA });
+  const [csvExportLimit, setCsvExportLimit] = useState(DEFAULT_CSV_EXPORT_LIMIT);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const { ref: narrowRef, narrow } = useNarrowContainer(720);
@@ -632,9 +605,27 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     return out;
   }, [baseSnQueriesByTab, appliedColFiltersByTab.all, allColumns, ciFilter, columnsLoadedKey]);
 
-  const mergeQueryKey = useMemo(
-    () => JSON.stringify(mergeQueriesByTab),
-    [mergeQueriesByTab],
+  const allowedFieldsByTab = useMemo((): Record<SpecificTab, string[]> => {
+    const out = {} as Record<SpecificTab, string[]>;
+    for (const cfg of V2_TABS) {
+      out[cfg.tab] = mergeAllowedFieldsFromCache(allColumns, cfg.tab, columnsCache.current);
+    }
+    return out;
+  }, [allColumns, columnsLoadedKey]);
+
+  const allTabSnQuery = useMemo(() => {
+    if (ciFilter === null) return '';
+    return buildAllTabSnQuery(
+      baseSnQueriesByTab,
+      appliedColFiltersByTab.all,
+      allowedFieldsByTab,
+      appFilterActive,
+    );
+  }, [baseSnQueriesByTab, appliedColFiltersByTab.all, allowedFieldsByTab, ciFilter, appFilterActive]);
+
+  const allTabQueryKey = useMemo(
+    () => JSON.stringify(allTabSnQuery),
+    [allTabSnQuery],
   );
 
   const summaryQueriesByTab = useMemo(() => {
@@ -668,16 +659,23 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
 
   const queriesReady = ciFilter !== null && (!appFilterActive || (!appFilterLoading && appRelatedIdsByTab !== null));
 
-  // Load CI filter, searchable fields, and hierarchy mode
+  // Load CI filter, searchable fields, hierarchy mode, and CSV export limit
   useEffect(() => {
     getCIFilter().then(setCiFilter);
-    getSysProperties([PROP_CI_SEARCH_FIELDS])
+    getSysProperties([PROP_CI_SEARCH_FIELDS, PROP_CSV_EXPORT_LIMIT])
       .then(props => {
         const rawVal = props[PROP_CI_SEARCH_FIELDS] ?? DEFAULT_SEARCH_FIELDS.join(',');
         const fields = rawVal.split(',').map(s => s.trim()).filter(Boolean);
         setSearchFields(fields.length ? fields : DEFAULT_SEARCH_FIELDS);
+        const parsedLimit = parseInt(props[PROP_CSV_EXPORT_LIMIT] ?? '', 10);
+        setCsvExportLimit(Number.isFinite(parsedLimit) && parsedLimit > 0
+          ? parsedLimit
+          : DEFAULT_CSV_EXPORT_LIMIT);
       })
-      .catch(() => setSearchFields(DEFAULT_SEARCH_FIELDS));
+      .catch(() => {
+        setSearchFields(DEFAULT_SEARCH_FIELDS);
+        setCsvExportLimit(DEFAULT_CSV_EXPORT_LIMIT);
+      });
     fetchPortalMetadata()
       .then(meta => setHierarchyMode(meta.hierarchy_mode))
       .catch(() => setHierarchyMode(true));
@@ -777,40 +775,71 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     return () => { cancelled = true; };
   }, [queryKey, resultQueryKey, tabBadgeQueryKey, queriesReady]);
 
-  // Load All Results merged data when on All tab
+  // Fetch All Results tab count when query changes
   useEffect(() => {
-    if (!queriesReady || activeTab !== 'all') return;
+    if (!queriesReady || !allTabSnQuery) return;
     let cancelled = false;
-    setAllLoading(true);
-    getColumns('cmdb_ci', ALL_DEFAULT_COLUMNS)
+    queryTableWithAccess({
+      table: ALL_CI_TABLE,
+      query: allTabSnQuery,
+      fields: ['sys_id'],
+      limit: 1,
+    })
+      .then(({ totalCount, access }) => {
+        if (cancelled) return;
+        setAllTabData(prev => ({
+          ...prev,
+          totalCount: access === 'denied' ? 0 : totalCount,
+          access,
+        }));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [queryKey, resultQueryKey, allTabQueryKey, queriesReady, allTabSnQuery]);
+
+  // Load All Results tab page with server-side pagination
+  useEffect(() => {
+    if (!queriesReady || activeTab !== 'all' || !allTabSnQuery) return;
+    let cancelled = false;
+
+    setAllTabData(prev => ({ ...prev, loading: true }));
+
+    getColumns(ALL_CI_TABLE, ALL_DEFAULT_COLUMNS)
       .then(cols => {
         if (cancelled) return null;
         setAllColumns(cols);
-        return fetchAllMerged(mergeQueriesByTab, cols);
+        return fetchAllTabPage(allTabSnQuery, cols, page, pageSize);
       })
       .then(async result => {
         if (cancelled || !result) return;
         const enriched = await enrichRowsWithTaskFlags(result.rows);
         if (cancelled) return;
-        setAllMergedRows(enriched);
-        setAllTotalCount(result.totalCount);
-        setTabData(prev => {
-          const next = { ...prev };
-          for (const cfg of V2_TABS) {
-            next[cfg.tab] = { ...next[cfg.tab], access: result.tabAccess[cfg.tab] };
-          }
-          return next;
+        setAllTabData({
+          columns: result.columns,
+          rows: enriched,
+          totalCount: result.totalCount,
+          loading: false,
+          access: result.access,
         });
       })
       .catch(() => {
         if (!cancelled) {
-          setAllMergedRows([]);
-          setAllTotalCount(0);
+          setAllTabData(prev => ({ ...prev, rows: [], loading: false }));
         }
-      })
-      .finally(() => { if (!cancelled) setAllLoading(false); });
+      });
+
     return () => { cancelled = true; };
-  }, [queryKey, resultQueryKey, mergeQueryKey, queriesReady, getColumns, activeTab]);
+  }, [
+    queryKey,
+    resultQueryKey,
+    allTabQueryKey,
+    queriesReady,
+    activeTab,
+    page,
+    pageSize,
+    getColumns,
+    allTabSnQuery,
+  ]);
 
   // Load specific tab rows when app filter is active (client-side pagination)
   useEffect(() => {
@@ -985,29 +1014,25 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     : (tabData[activeTab].columns.length
       ? tabData[activeTab].columns
       : (V2_TABS.find(t => t.tab === activeTab)?.defaultColumns ?? []));
-  const loading = appFilterLoading || (activeTab === 'all' ? allLoading : tabData[activeTab].loading);
+  const loading = appFilterLoading || (activeTab === 'all' ? allTabData.loading : tabData[activeTab].loading);
   const totalCount = activeTab === 'all'
-    ? allTotalCount
+    ? allTabData.totalCount
     : tabData[activeTab].totalCount;
 
-  const tabFullRows = activeTab === 'all'
-    ? allMergedRows
-    : tabData[activeTab].rows;
-
-  const pageRows = (activeTab === 'all' || appFilterActive)
-    ? tabFullRows.slice(page * pageSize, (page + 1) * pageSize)
-    : tabData[activeTab].rows;
+  const pageRows = (activeTab !== 'all' && appFilterActive)
+    ? tabData[activeTab].rows.slice(page * pageSize, (page + 1) * pageSize)
+    : (activeTab === 'all' ? allTabData.rows : tabData[activeTab].rows);
 
   const displayRows = pageRows;
 
   const tabResultCount = (tab: Tab): number | string => {
-    if (tab === 'all') return allTotalCount;
+    if (tab === 'all') return allTabData.totalCount;
     return tabData[tab].totalCount;
   };
 
-  const paginationTotal = activeTab === 'all'
-    ? allMergedRows.length
-    : (appFilterActive ? tabData[activeTab].rows.length : totalCount);
+  const paginationTotal = (activeTab !== 'all' && appFilterActive)
+    ? tabData[activeTab].rows.length
+    : totalCount;
   const start = paginationTotal === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, paginationTotal);
   const canPrev = page > 0;
@@ -1025,7 +1050,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
 
   const markTabResultsLoading = () => {
     if (activeTab === 'all') {
-      setAllLoading(true);
+      setAllTabData(prev => ({ ...prev, loading: true, rows: [] }));
       return;
     }
     setTabData(prev => ({
@@ -1093,7 +1118,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       columnFilterPartByTab,
       appRelatedIdsByTab,
       tabCounts,
-      allTotalCount,
+      allTabData.totalCount,
       ciFilter,
       searchFields,
     );
@@ -1104,7 +1129,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     columnFilterPartByTab,
     appRelatedIdsByTab,
     tabCounts,
-    allTotalCount,
+    allTabData.totalCount,
     ciFilter,
     searchFields,
   ]);
@@ -1163,45 +1188,52 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     });
   }, []);
 
-  const tabAccess = useMemo((): Record<SpecificTab, TableAccess> => ({
-    servers:   tabData.servers.access,
-    switches:  tabData.switches.access,
-    databases: tabData.databases.access,
-    network_links:  tabData.network_links.access,
-  }), [tabData]);
 
   const handleExportRows = useCallback(async (): Promise<SearchRow[]> => {
     if (!queriesReady) return [];
-    const exportQueries = activeTab === 'all' ? mergeQueriesByTab : tabBadgeQueriesByTab;
     if (activeTab === 'all') {
-      return fetchAllForExport(exportQueries, columns, tabCounts, tabAccess);
+      if (isAccessDenied(allTabData.access) || !allTabSnQuery) return [];
+      const { rows } = await fetchTabAll(
+        ALL_CI_TABLE,
+        allTabSnQuery,
+        columns,
+        allTabData.totalCount,
+        csvExportLimit,
+      );
+      return rows;
     }
     const cfg = V2_TABS.find(t => t.tab === activeTab);
     if (!cfg || isAccessDenied(tabData[activeTab].access)) return [];
     if (appFilterActive) {
       return tabData[activeTab].rows;
     }
-    const { rows } = await fetchTabAll(cfg, exportQueries[activeTab], columns, tabData[activeTab].totalCount);
+    const { rows } = await fetchTabAll(
+      cfg.table,
+      tabBadgeQueriesByTab[activeTab],
+      columns,
+      tabData[activeTab].totalCount,
+      csvExportLimit,
+    );
     return rows;
   }, [
     queriesReady,
-    mergeQueriesByTab,
+    allTabSnQuery,
     tabBadgeQueriesByTab,
     activeTab,
     columns,
-    tabCounts,
-    tabAccess,
+    allTabData,
     tabData,
     appFilterActive,
+    csvExportLimit,
   ]);
 
   const exportTruncated = useMemo(() => {
     if (activeTab === 'all') {
-      return V2_TABS.some(cfg => tabData[cfg.tab].totalCount > EXPORT_ROW_CAP);
+      return allTabData.totalCount > csvExportLimit;
     }
     const specificTab = activeTab as SpecificTab;
-    return (tabData[specificTab]?.totalCount ?? 0) > EXPORT_ROW_CAP;
-  }, [activeTab, tabData]);
+    return (tabData[specificTab]?.totalCount ?? 0) > csvExportLimit;
+  }, [activeTab, allTabData.totalCount, tabData, csvExportLimit]);
 
   function renderCell(row: SearchRow, col: ViewField, colIdx: number) {
     if (!(col.element in row.values)) return null;
@@ -1364,7 +1396,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           <p className="typo-body text-red-600 mt-3">{appFilterError}</p>
         )}
 
-        {applied.appFilter && !appFilterLoading && appRelatedIdsByTab && allTotalCount === 0 && !applied.keyword.trim() && (
+        {applied.appFilter && !appFilterLoading && appRelatedIdsByTab && allTabData.totalCount === 0 && !applied.keyword.trim() && (
           <p className="typo-body text-amber-700 mt-3">
             No infrastructure CIs are linked to the selected application.
           </p>
@@ -1405,7 +1437,6 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           access={summary.access}
           loading={summary.loading}
           matchingCiCount={totalCount}
-          showMergeCapNote={activeTab === 'all' && allTotalCount > allMergedRows.length}
           onChipClick={handleSummaryChipClick}
         />
 
@@ -1429,6 +1460,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               columns={columns}
               disabled={totalCount === 0}
               truncated={exportTruncated}
+              csvExportLimit={csvExportLimit}
               onFetchRows={handleExportRows}
             />
           </div>
@@ -1569,9 +1601,6 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           <div className="flex items-center gap-4">
             <span className="typo-body">
               {paginationTotal === 0 ? '0 of 0' : `${start}–${end} of ${paginationTotal.toLocaleString()}`}
-              {activeTab === 'all' && allTotalCount > allMergedRows.length && (
-                <span className="text-gray-400 ml-1">({allTotalCount.toLocaleString()} total)</span>
-              )}
             </span>
             <div className="flex gap-2">
               <button

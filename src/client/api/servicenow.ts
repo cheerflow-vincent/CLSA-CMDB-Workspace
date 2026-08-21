@@ -259,6 +259,68 @@ export async function queryTableWithAccess<T>(params: TableQueryParams): Promise
   return executeTableQuery<T>(params)
 }
 
+interface StatsQueryParams {
+  table: string
+  query?: string
+}
+
+function parseStatsCount(data: unknown): number {
+  const d = data as { result?: { stats?: { count?: string | number } } | unknown[] }
+  if (d?.result && typeof d.result === 'object' && !Array.isArray(d.result)) {
+    const count = (d.result as { stats?: { count?: string | number } }).stats?.count
+    if (count != null) return parseInt(String(count), 10) || 0
+  }
+  if (Array.isArray(d?.result)) return d.result.length
+  return 0
+}
+
+/** Row count via Stats API — no record fetch. */
+export async function queryStatsCount(
+  params: StatsQueryParams,
+): Promise<{ totalCount: number; access: TableAccess }> {
+  const reqParams: Record<string, string> = { sysparm_count: 'true' }
+  if (params.query) reqParams.sysparm_query = params.query
+
+  try {
+    const r = await axios.get(`/api/now/stats/${params.table}`, { params: reqParams })
+    const headerCount = parseInt(r.headers['x-total-count'] ?? '', 10)
+    const totalCount = Number.isFinite(headerCount) && headerCount > 0
+      ? headerCount
+      : parseStatsCount(r.data)
+    return { totalCount, access: 'ok' }
+  } catch (err) {
+    if (isAxiosForbidden(err)) {
+      return { totalCount: 0, access: 'denied' }
+    }
+    return { totalCount: 0, access: 'error' }
+  }
+}
+
+/** Distinct group count via Stats API (sysparm_group_by). */
+export async function queryStatsGroupCount(
+  params: StatsQueryParams & { groupBy: string },
+): Promise<{ totalCount: number; access: TableAccess }> {
+  const reqParams: Record<string, string> = {
+    sysparm_count: 'true',
+    sysparm_group_by: params.groupBy,
+  }
+  if (params.query) reqParams.sysparm_query = params.query
+
+  try {
+    const r = await axios.get(`/api/now/stats/${params.table}`, { params: reqParams })
+    const headerCount = parseInt(r.headers['x-total-count'] ?? '', 10)
+    if (Number.isFinite(headerCount) && headerCount >= 0) {
+      return { totalCount: headerCount, access: 'ok' }
+    }
+    return { totalCount: parseStatsCount(r.data), access: 'ok' }
+  } catch (err) {
+    if (isAxiosForbidden(err)) {
+      return { totalCount: 0, access: 'denied' }
+    }
+    return { totalCount: 0, access: 'error' }
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // System property helpers
 // ──────────────────────────────────────────────────────────────────────────────

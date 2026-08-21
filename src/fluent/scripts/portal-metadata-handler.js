@@ -23,6 +23,7 @@ PortalMetadataHandler.prototype = {
     'x_citi4_clsa_cmd_0.app.to.app.relationship.types',
     'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.2',
     'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.3',
+    'glide.csv.export.limit',
   ],
 
   ALLOWED_VIEW_TITLES: {
