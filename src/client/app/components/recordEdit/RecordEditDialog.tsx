@@ -4,6 +4,7 @@ import { X, Loader2 } from 'lucide-react';
 import {
   loadFormLayout,
   flattenLayoutFields,
+  buildLayoutFieldLabelMap,
   fetchRecordFieldValuesForEdit,
   type FormSectionLayout,
   type EditFieldValue,
@@ -14,7 +15,7 @@ import {
   updateRecord,
   type FieldAccessEntry,
 } from '../../../api/servicenow';
-import { buildPatchPayload } from '../../utils/editValues';
+import { buildPatchPayload, validateMandatoryEditFields } from '../../utils/editValues';
 import { Z_INDEX } from '../../utils/layering';
 import {
   mergeEditFieldAccess,
@@ -122,6 +123,18 @@ export default function RecordEditDialog({
   const handleSave = async () => {
     setSaving(true);
     setError(null);
+
+    const validationError = validateMandatoryEditFields(
+      accessMap,
+      values,
+      buildLayoutFieldLabelMap(sections),
+    );
+    if (validationError) {
+      setError(validationError);
+      setSaving(false);
+      return;
+    }
+
     const writable = new Set(
       Object.entries(accessMap)
         .filter(([, a]) => a.read && a.write)

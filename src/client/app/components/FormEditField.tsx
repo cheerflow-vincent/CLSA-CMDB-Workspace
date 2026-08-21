@@ -2,6 +2,7 @@ import { Calendar, Clock } from 'lucide-react';
 import type { FieldAccessEntry } from '../../api/servicenow';
 import type { EditFieldValue } from '../utils/viewFields';
 import { editDisplayValue } from '../utils/editValues';
+import EditFieldLabel from './EditFieldLabel';
 import ReferenceAutocomplete from './ReferenceAutocomplete';
 import ListCollectorField from './ListCollectorField';
 
@@ -80,6 +81,7 @@ export default function FormEditField({
   onChange,
 }: FormEditFieldProps) {
   const disabled = !access.write;
+  const required = access.mandatory === true && !disabled;
   const internalType = access.internal_type || 'string';
   const display = editDisplayValue(value);
   const maxLength = access.max_length && access.max_length > 0 ? access.max_length : undefined;
@@ -88,7 +90,7 @@ export default function FormEditField({
   if (READONLY_TYPES.has(internalType) || isJournalType(internalType)) {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className={`${inputClass(true)} min-h-[38px] whitespace-pre-wrap break-words`}>
           {display || '—'}
         </div>
@@ -108,18 +110,21 @@ export default function FormEditField({
             onChange={e => onChange(element, e.target.checked ? 'true' : 'false')}
             className="rounded border-gray-300 text-blue-600 focus:ring-blue-400 disabled:opacity-60"
           />
-          {label}
+          <span>
+            {label}
+            {required && <span className="text-red-600 ml-0.5" aria-hidden="true">*</span>}
+          </span>
         </label>
       </div>
     );
   }
 
-  if (internalType === 'choice') {
-    const choices = access.choices ?? [];
-    const current = typeof value === 'object' ? value.value : value;
+  const choices = access.choices ?? [];
+  if (choices.length > 0) {
+    const current = String(typeof value === 'object' ? value.value : value ?? '');
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <select
           value={current}
           disabled={disabled}
@@ -139,6 +144,7 @@ export default function FormEditField({
     return (
       <ListCollectorField
         label={label}
+        required={required}
         referenceTable={referenceTable}
         value={value}
         disabled={disabled}
@@ -151,6 +157,7 @@ export default function FormEditField({
     return (
       <ReferenceAutocomplete
         label={label}
+        required={required}
         referenceTable={referenceTable}
         value={value}
         disabled={disabled}
@@ -162,7 +169,7 @@ export default function FormEditField({
   if (internalType === 'glide_date') {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className={pickerShellClass(disabled)}>
           <Calendar className="w-4 h-4 text-gray-400 shrink-0 pointer-events-none" />
           <input
@@ -181,7 +188,7 @@ export default function FormEditField({
     const { date, time } = splitDateTime(display);
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className="flex flex-wrap gap-2">
           <div className={`${pickerShellClass(disabled)} flex-1 min-w-[140px]`}>
             <Calendar className="w-4 h-4 text-gray-400 shrink-0 pointer-events-none" />
@@ -211,7 +218,7 @@ export default function FormEditField({
   if (internalType === 'glide_time') {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className={pickerShellClass(disabled)}>
           <Clock className="w-4 h-4 text-gray-400 shrink-0 pointer-events-none" />
           <input
@@ -229,7 +236,7 @@ export default function FormEditField({
   if (internalType === 'integer' || internalType === 'long') {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <input
           type="number"
           step="1"
@@ -245,7 +252,7 @@ export default function FormEditField({
   if (internalType === 'float' || internalType === 'decimal' || internalType === 'currency') {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <input
           type="number"
           step="any"
@@ -262,7 +269,7 @@ export default function FormEditField({
     const num = Math.min(100, Math.max(0, parseInt(display, 10) || 0));
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className="flex items-center gap-3">
           <input
             type="range"
@@ -283,7 +290,7 @@ export default function FormEditField({
     const colorVal = display.startsWith('#') ? display : '#000000';
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className="flex items-center gap-2">
           <input
             type="color"
@@ -307,7 +314,7 @@ export default function FormEditField({
   if (internalType === 'table_name' || internalType === 'GUID' || internalType === 'sys_id') {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <input
           type="text"
           value={display}
@@ -332,7 +339,7 @@ export default function FormEditField({
 
   return (
     <div className="min-w-0">
-      <label className="block typo-field-label mb-1">{label}</label>
+      <EditFieldLabel label={label} required={required} />
       {useMultiline ? (
         <textarea
           value={display}

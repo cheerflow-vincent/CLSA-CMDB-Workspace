@@ -5,6 +5,7 @@ import { searchReferenceTable, getTableLabel, resolveReferenceList, type Referen
 import type { EditFieldValue } from '../utils/viewFields';
 import { editDisplayValue, editRawValue } from '../utils/editValues';
 import { needsReferenceDisplayResolve } from '../utils/editFormLoad';
+import EditFieldLabel from './EditFieldLabel';
 
 function inputShellClass(disabled: boolean, focused: boolean): string {
   return `flex items-center border rounded-lg px-3 py-2 gap-2 transition-colors ${
@@ -18,6 +19,7 @@ function inputShellClass(disabled: boolean, focused: boolean): string {
 
 export interface ReferenceAutocompleteProps {
   label: string;
+  required?: boolean;
   referenceTable: string;
   /** Additional encoded query filters prepended to every search (e.g. u_service_type=instance). */
   referenceQuery?: string;
@@ -29,6 +31,7 @@ export interface ReferenceAutocompleteProps {
 
 export default function ReferenceAutocomplete({
   label,
+  required = false,
   referenceTable,
   referenceQuery = '',
   value,
@@ -191,7 +194,7 @@ export default function ReferenceAutocomplete({
   if (disabled) {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className="w-full border border-gray-200 rounded-lg px-3 py-2 typo-body bg-gray-50 text-gray-600 min-h-[38px] break-words">
           {selectedLabel || '—'}
         </div>
@@ -201,7 +204,7 @@ export default function ReferenceAutocomplete({
 
   return (
     <div ref={ref} className="min-w-0 relative">
-      <label className="block typo-field-label mb-1">{label}</label>
+      <EditFieldLabel label={label} required={required} />
       <div className={inputShellClass(false, open)}>
         {loading
           ? <Loader2 className="w-4 h-4 text-gray-400 shrink-0 animate-spin" />

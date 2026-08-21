@@ -57,13 +57,14 @@
     choiceGr.addQuery('name', tableName);
     choiceGr.addQuery('element', element);
     choiceGr.addQuery('inactive', false);
+    choiceGr.addQuery('language', 'en');
     choiceGr.orderBy('sequence');
     choiceGr.query();
     while (choiceGr.next()) {
-      choices.push({
-        value: String(choiceGr.getValue('value')),
-        label: String(choiceGr.getValue('label')),
-      });
+      var value = String(choiceGr.getValue('value') || '');
+      var label = String(choiceGr.getValue('label') || value);
+      if (!value) continue;
+      choices.push({ value: value, label: label });
     }
     return choices;
   }
@@ -81,7 +82,45 @@
     return [];
   }
 
-  function entryFromGlideElement(ge, tableName, name) {
+  function isNoneChoice(choice) {
+    if (choice === null || choice === undefined || choice === '') return true;
+    var normalized = String(choice).replace(/^\s+|\s+$/g, '').toUpperCase();
+    return normalized === '0' || normalized === 'NONE';
+  }
+
+  function shouldLoadChoices(internalType, dict) {
+    if (String(internalType) === 'choice') return true;
+    if (!dict) return false;
+    if (String(dict.getValue('internal_type') || 'string') === 'choice') return true;
+    return !isNoneChoice(dict.getValue('choice'));
+  }
+
+  function attachChoicesSafely(entry, tableName, name, internalType, dict) {
+    try {
+      if (!shouldLoadChoices(internalType, dict)) return entry;
+      var choices = getChoicesForField(tableName, name);
+      if (choices.length) entry.choices = choices;
+    } catch (e) {
+      // Choice metadata must never break field_access (canWriteRecord probe).
+    }
+    return entry;
+  }
+
+  function isMandatoryField(dict) {
+    if (!dict) return false;
+    try {
+      return String(dict.getValue('mandatory')) === 'true';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function attachFieldMeta(entry, tableName, name, internalType, dict) {
+    if (isMandatoryField(dict)) entry.mandatory = true;
+    return attachChoicesSafely(entry, tableName, name, internalType, dict);
+  }
+
+  function entryFromGlideElement(ge, tableName, name, dict) {
     var ed = ge.getED();
     if (!ed) return null;
 
@@ -93,22 +132,19 @@
       reference: String(ed.getReference() || ''),
       max_length: ed.getLength(),
     };
-    if (internalType === 'choice') {
-      entry.choices = getChoicesForField(tableName, name);
-    }
-    return entry;
+    return attachFieldMeta(entry, tableName, name, internalType, dict);
   }
 
   function resolveFieldAccess(tableName, name) {
+    var dict = lookupDictionary(tableName, name);
     var ge = gr.getElement(name);
-    var entry = entryFromGlideElement(ge, tableName, name);
+    var entry = entryFromGlideElement(ge, tableName, name, dict);
     if (entry) return entry;
 
-    var dict = lookupDictionary(tableName, name);
     if (!dict) return null;
 
     ge = gr.getElement(name);
-    entry = entryFromGlideElement(ge, tableName, name);
+    entry = entryFromGlideElement(ge, tableName, name, dict);
     if (entry) return entry;
 
     var dictType = String(dict.getValue('internal_type') || 'string');
@@ -119,10 +155,7 @@
       reference: String(dict.getValue('reference') || ''),
       max_length: parseInt(dict.getValue('max_length'), 10) || 0,
     };
-    if (dictType === 'choice') {
-      dictEntry.choices = getChoicesForField(tableName, name);
-    }
-    return dictEntry;
+    return attachFieldMeta(dictEntry, tableName, name, dictType, dict);
   }
 
   var canWriteRecord = gr.canWrite();
@@ -133,10 +166,13 @@
     var name = fieldNames[i].replace(/^\s+|\s+$/g, '');
     if (!name) continue;
 
-    var entry = resolveFieldAccess(table, name);
-    if (!entry || !entry.read) continue;
-
-    fields[name] = entry;
+    try {
+      var entry = resolveFieldAccess(table, name);
+      if (!entry || !entry.read) continue;
+      fields[name] = entry;
+    } catch (e) {
+      // Skip unreadable/broken fields; keep canWriteRecord response intact.
+    }
   }
 
   response.setContentType('application/json');

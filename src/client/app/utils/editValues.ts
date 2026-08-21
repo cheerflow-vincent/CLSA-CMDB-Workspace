@@ -52,3 +52,29 @@ export function buildPatchPayload(
   }
   return payload;
 }
+
+export function isEditFieldBlank(
+  value: EditFieldValue | undefined,
+  internalType?: string,
+): boolean {
+  if (internalType === 'boolean') return false;
+  return editRawValue(value).trim() === '';
+}
+
+/** Returns an error message when mandatory writable fields are blank. */
+export function validateMandatoryEditFields(
+  accessMap: Record<string, { mandatory?: boolean; write?: boolean; internal_type?: string }>,
+  values: Record<string, EditFieldValue>,
+  labelByElement: Record<string, string> = {},
+): string | null {
+  const missing: string[] = [];
+  for (const [element, access] of Object.entries(accessMap)) {
+    if (!access.mandatory || !access.write) continue;
+    if (isEditFieldBlank(values[element], access.internal_type)) {
+      missing.push(labelByElement[element] || element);
+    }
+  }
+  if (!missing.length) return null;
+  if (missing.length === 1) return `${missing[0]} is required.`;
+  return `Required fields cannot be blank: ${missing.join(', ')}.`;
+}

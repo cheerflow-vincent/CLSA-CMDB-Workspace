@@ -12,9 +12,11 @@ import {
   serializeListFieldValue,
   type ListItemValue,
 } from '../utils/editValues';
+import EditFieldLabel from './EditFieldLabel';
 
 export interface ListCollectorFieldProps {
   label: string;
+  required?: boolean;
   referenceTable: string;
   value: EditFieldValue;
   disabled?: boolean;
@@ -23,6 +25,7 @@ export interface ListCollectorFieldProps {
 
 export default function ListCollectorField({
   label,
+  required = false,
   referenceTable,
   value,
   disabled = false,
@@ -119,7 +122,7 @@ export default function ListCollectorField({
   if (disabled) {
     return (
       <div className="min-w-0">
-        <label className="block typo-field-label mb-1">{label}</label>
+        <EditFieldLabel label={label} required={required} />
         <div className="flex flex-wrap gap-1.5">
           {items.length === 0 && <span className="typo-body text-gray-500">—</span>}
           {items.map(item => (
@@ -137,7 +140,7 @@ export default function ListCollectorField({
 
   return (
     <div ref={ref} className="min-w-0 relative">
-      <label className="block typo-field-label mb-1">{label}</label>
+      <EditFieldLabel label={label} required={required} />
 
       {items.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">

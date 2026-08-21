@@ -239,6 +239,23 @@ export function flattenLayoutFields(sections: FormSectionLayout[]): string[] {
   return [...new Set(sections.flatMap(flattenSectionFields))];
 }
 
+/** Map field element names to form labels for validation messages. */
+export function buildLayoutFieldLabelMap(sections: FormSectionLayout[]): Record<string, string> {
+  const labels: Record<string, string> = {};
+  for (const section of sections) {
+    for (const row of section.rows) {
+      if (row.kind === 'full') {
+        labels[row.field.element] = row.field.label;
+      } else {
+        for (const field of [...row.left, ...row.right]) {
+          labels[field.element] = field.label;
+        }
+      }
+    }
+  }
+  return labels;
+}
+
 /** Fetch display values for a record, including dot-walked reference fields. */
 export async function fetchRecordFieldValues(
   table: string,

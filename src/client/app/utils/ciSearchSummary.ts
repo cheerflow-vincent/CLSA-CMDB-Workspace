@@ -1,4 +1,5 @@
 import type { TableAccess } from '../../api/servicenow';
+import { fetchCiSearchDistinctCounts } from '../../api/servicenow';
 import { CHUNK_SIZE } from './appHomeLoader';
 import {
   buildAppScopedCiQuery,
@@ -8,11 +9,9 @@ import {
 } from './ciSearchAppFilter';
 import type { CISearchInventoryTab, CISearchTab } from './ciSearchTabs';
 import { CI_INVENTORY_TABS } from './ciSearchTabs';
-import { countDistinctHealthFromBranches } from './cmdbHealthResults';
-import { prefixEncodedQuery, joinOrEncodedQueries, appendEncodedQuery } from './searchQuery';
+import { joinOrEncodedQueries, appendEncodedQuery, prefixEncodedQuery } from './searchQuery';
 import {
   CHANGE_TASK_CONFIG,
-  countDistinctRelatedTasksFromBranches,
   INCIDENT_TASK_CONFIG,
   taskCiQuery,
   type RelatedTaskConfig,
@@ -294,20 +293,20 @@ export async function fetchCiSearchSummaryCounts(
   const changeBranches = buildSidebarQueryBranches(context, 'change');
   const healthBranches = buildSidebarQueryBranches(context, 'health');
 
-  const [incidentRes, changeRes, healthRes] = await Promise.all([
-    countDistinctRelatedTasksFromBranches(incidentBranches),
-    countDistinctRelatedTasksFromBranches(changeBranches),
-    countDistinctHealthFromBranches(healthBranches),
-  ]);
+  const incidentQuery = joinOrEncodedQueries(incidentBranches);
+  const changeQuery = joinOrEncodedQueries(changeBranches);
+  const healthQuery = joinOrEncodedQueries(healthBranches);
+
+  const result = await fetchCiSearchDistinctCounts({
+    incident_query: incidentQuery,
+    change_query: changeQuery,
+    health_query: healthQuery,
+  });
 
   return {
-    incidents: incidentRes.totalCount,
-    changes: changeRes.totalCount,
-    health: healthRes.totalCount,
-    access: {
-      incidents: incidentRes.access,
-      changes: changeRes.access,
-      health: healthRes.access,
-    },
+    incidents: result.incidents,
+    changes: result.changes,
+    health: result.health,
+    access: result.access,
   };
 }

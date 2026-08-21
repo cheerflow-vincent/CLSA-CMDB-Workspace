@@ -337,6 +337,125 @@ export async function queryStatsGroupCount(
   }
 }
 
+export interface CiSearchDistinctCountRequest {
+  incident_query: string
+  change_query: string
+  health_query: string
+}
+
+export interface CiSearchDistinctCountResponse {
+  incidents: number
+  changes: number
+  health: number
+  access: {
+    incidents: TableAccess
+    changes: TableAccess
+    health: TableAccess
+  }
+}
+
+const EMPTY_CI_SEARCH_DISTINCT_COUNTS: CiSearchDistinctCountResponse = {
+  incidents: 0,
+  changes: 0,
+  health: 0,
+  access: { incidents: 'denied', changes: 'denied', health: 'denied' },
+}
+
+/** Distinct counts via Scripted REST (GlideAggregate COUNT(DISTINCT)). */
+export async function fetchCiSearchDistinctCounts(
+  body: CiSearchDistinctCountRequest,
+): Promise<CiSearchDistinctCountResponse> {
+  try {
+    const r = await axios.post(`/api/${APP_SCOPE}/portal/ci_search_distinct_count`, body)
+    const result = unwrapRestBody(unwrapRestBody(r.data)) as Record<string, unknown>
+    if (!result || typeof result !== 'object') return EMPTY_CI_SEARCH_DISTINCT_COUNTS
+
+    const accessRaw = result.access as Record<string, unknown> | undefined
+    const toAccess = (v: unknown): TableAccess =>
+      v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
+
+    return {
+      incidents: Number(result.incidents) || 0,
+      changes: Number(result.changes) || 0,
+      health: Number(result.health) || 0,
+      access: {
+        incidents: toAccess(accessRaw?.incidents),
+        changes: toAccess(accessRaw?.changes),
+        health: toAccess(accessRaw?.health),
+      },
+    }
+  } catch (err) {
+    if (isAxiosForbidden(err)) return EMPTY_CI_SEARCH_DISTINCT_COUNTS
+    return {
+      incidents: 0,
+      changes: 0,
+      health: 0,
+      access: { incidents: 'error', changes: 'error', health: 'error' },
+    }
+  }
+}
+
+export interface CiTaskFlagCountsRequest {
+  ci_sys_ids: string[]
+}
+
+export interface CiTaskFlagCountsBatchResponse {
+  counts: Record<string, { incidents: number; changes: number }>
+  access: { incidents: TableAccess; changes: TableAccess }
+}
+
+const EMPTY_CI_TASK_FLAG_COUNTS_BATCH: CiTaskFlagCountsBatchResponse = {
+  counts: {},
+  access: { incidents: 'denied', changes: 'denied' },
+}
+
+/** Per-CI distinct task counts via Scripted REST (GlideAggregate COUNT(DISTINCT) by ci_item). */
+export async function fetchCiTaskFlagCountsBatch(
+  ciSysIds: string[],
+): Promise<CiTaskFlagCountsBatchResponse> {
+  if (!ciSysIds.length) {
+    return { counts: {}, access: { incidents: 'ok', changes: 'ok' } }
+  }
+
+  try {
+    const r = await axios.post(`/api/${APP_SCOPE}/portal/ci_task_flag_counts`, {
+      ci_sys_ids: ciSysIds,
+    })
+    const result = unwrapRestBody(unwrapRestBody(r.data)) as Record<string, unknown>
+    if (!result || typeof result !== 'object') return EMPTY_CI_TASK_FLAG_COUNTS_BATCH
+
+    const accessRaw = result.access as Record<string, unknown> | undefined
+    const toAccess = (v: unknown): TableAccess =>
+      v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
+
+    const countsRaw = result.counts as Record<string, unknown> | undefined
+    const counts: Record<string, { incidents: number; changes: number }> = {}
+    if (countsRaw && typeof countsRaw === 'object') {
+      for (const [id, entry] of Object.entries(countsRaw)) {
+        const row = entry as Record<string, unknown>
+        counts[id] = {
+          incidents: Number(row?.incidents) || 0,
+          changes: Number(row?.changes) || 0,
+        }
+      }
+    }
+
+    return {
+      counts,
+      access: {
+        incidents: toAccess(accessRaw?.incidents),
+        changes: toAccess(accessRaw?.changes),
+      },
+    }
+  } catch (err) {
+    if (isAxiosForbidden(err)) return EMPTY_CI_TASK_FLAG_COUNTS_BATCH
+    return {
+      counts: {},
+      access: { incidents: 'error', changes: 'error' },
+    }
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // System property helpers
 // ──────────────────────────────────────────────────────────────────────────────
@@ -397,6 +516,7 @@ export interface FieldAccessEntry {
   internal_type: string
   reference?: string
   max_length?: number
+  mandatory?: boolean
   choices?: FieldAccessChoice[]
 }
 

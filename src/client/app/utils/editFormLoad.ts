@@ -84,10 +84,11 @@ export async function fetchDictionaryFieldMeta(
         internal_type: unknown;
         reference: unknown;
         max_length: unknown;
+        mandatory: unknown;
       }>({
         table: 'sys_dictionary',
         query: `name=${tbl}^elementIN${batch.join(',')}^active=true`,
-        fields: ['element', 'internal_type', 'reference', 'max_length'],
+        fields: ['element', 'internal_type', 'reference', 'max_length', 'mandatory'],
         limit: batch.length,
       });
 
@@ -101,6 +102,7 @@ export async function fetchDictionaryFieldMeta(
           internal_type: internalType,
           reference: raw(row.reference) || undefined,
           max_length: parseInt(str(row.max_length), 10) || undefined,
+          mandatory: str(row.mandatory) === 'true' || undefined,
         };
         remaining.delete(el);
       }

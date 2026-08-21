@@ -89,6 +89,18 @@ declare global {
                         table: 'sys_module'
                         id: '6c04a20d6676451f84a69aaf721b78f8'
                     }
+                    'ci-search-distinct-count-handler': {
+                        table: 'sys_script_include'
+                        id: '9aa0f5fcbe1b41c8834217a49f47421d'
+                    }
+                    'ci-search-distinct-count-route': {
+                        table: 'sys_ws_operation'
+                        id: '229addbec2cf4bfcb4641bfb6e244728'
+                    }
+                    'ci-task-flag-counts-route': {
+                        table: 'sys_ws_operation'
+                        id: '1bc4f6e35c1e48618385f9b25abbd87e'
+                    }
                     'cmdb-rel-ci-portal-create-acl': {
                         table: 'sys_security_acl'
                         id: '4db0fe301f8a43b3a12fe5be5467a83f'
