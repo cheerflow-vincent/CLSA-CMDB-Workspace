@@ -3,12 +3,13 @@ import {
   Server, Database, Link, Network, Search,
   ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
   X, Check, FilterX,
-  Download, FileText, ExternalLink, Loader2
+  Download, FileText, ExternalLink, Loader2, Columns3,
 } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
 import AppFamilyInstanceAutocomplete from './AppFamilyInstanceAutocomplete';
 import CIFlagBadges from './CIFlagBadges';
 import FlagDetailPanel, { type FlagType } from './FlagDetailPanel';
+import ListColumnPersonalizer from './ListColumnPersonalizer';
 import CISearchSummaryBanner from './CISearchSummaryBanner';
 import {
   queryTableWithAccess,
@@ -19,7 +20,7 @@ import {
   formatCmdbTableLabel,
   type TableAccess,
 } from '../../api/servicenow';
-import { loadListFields, raw, str, type ViewField } from '../utils/viewFields';
+import { loadListFieldsWithMeta, raw, str, type ViewField, type ListLayoutKind } from '../utils/viewFields';
 import { filterColumnsByRecords, isAccessDenied } from '../utils/acl';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
 import { enrichRowsWithTaskFlags } from '../utils/relatedCIFlags';
@@ -406,6 +407,24 @@ const EMPTY_COL_FILTERS_BY_TAB = (): ColFiltersByTab => ({
   network_links: {},
 });
 
+function tableForTab(tab: Tab): string {
+  if (tab === 'all') return ALL_CI_TABLE;
+  return V2_TABS.find(t => t.tab === tab)?.table ?? ALL_CI_TABLE;
+}
+
+function tableLabelForTab(tab: Tab): string {
+  if (tab === 'all') return tabLabels.all;
+  return V2_TABS.find(t => t.tab === tab)?.label ?? tabLabels[tab];
+}
+
+function pruneColFilters(map: ColFilterMap, visibleElements: Set<string>): ColFilterMap {
+  const next = { ...map };
+  for (const key of Object.keys(next)) {
+    if (!visibleElements.has(key)) delete next[key];
+  }
+  return next;
+}
+
 function hasAppliedColFilters(map: ColFilterMap): boolean {
   return Object.values(map).some(v => v.trim());
 }
@@ -550,6 +569,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const [appFilterError, setAppFilterError] = useState<string | null>(null);
   const columnsCache = useRef<Map<string, ViewField[]>>(new Map());
   const [columnsLoadedKey, setColumnsLoadedKey] = useState(0);
+  const [layoutByTable, setLayoutByTable] = useState<Record<string, ListLayoutKind>>({});
+  const [personalizeTarget, setPersonalizeTarget] = useState<{ tab: Tab; table: string; label: string } | null>(null);
 
   const appFilterActive = !!applied.appFilter;
 
@@ -557,13 +578,16 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  const getColumns = useCallback(async (table: string, defaults: ViewField[]) => {
-    const cached = columnsCache.current.get(table);
-    if (cached) return cached;
-    const cols = await loadListFields(table, LIST_VIEW, defaults);
-    columnsCache.current.set(table, cols);
+  const getColumns = useCallback(async (table: string, defaults: ViewField[], force = false) => {
+    if (!force) {
+      const cached = columnsCache.current.get(table);
+      if (cached) return cached;
+    }
+    const meta = await loadListFieldsWithMeta(table, LIST_VIEW, defaults);
+    columnsCache.current.set(table, meta.fields);
+    setLayoutByTable(prev => ({ ...prev, [table]: meta.resolvedLayout }));
     setColumnsLoadedKey(k => k + 1);
-    return cols;
+    return meta.fields;
   }, []);
 
   const queryKey = useMemo(
@@ -886,6 +910,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     allTabSnQuery,
     sortByTab.all.field,
     sortByTab.all.direction,
+    columnsLoadedKey,
   ]);
 
   // Load specific tab rows when app filter is active (client-side pagination)
@@ -975,6 +1000,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     activeTabFilterKey,
     sortByTab[activeTab].field,
     sortByTab[activeTab].direction,
+    columnsLoadedKey,
   ]);
 
   // Load specific tab page with server-side pagination when no app filter
@@ -1031,6 +1057,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     appFilterActive,
     sortByTab[activeTab].field,
     sortByTab[activeTab].direction,
+    columnsLoadedKey,
   ]);
 
   const handleSearch = () => {
@@ -1054,6 +1081,41 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     setActiveTab('all');
     setPage(0);
   };
+
+  const activeTable = tableForTab(activeTab);
+  const activeResolvedLayout = layoutByTable[activeTable] ?? 'shared';
+
+  const handleColumnsPersonalized = useCallback((
+    table: string,
+    tab: Tab,
+    result: { fields: ViewField[]; resolvedLayout: ListLayoutKind },
+  ) => {
+    columnsCache.current.set(table, result.fields);
+    setLayoutByTable(prev => ({ ...prev, [table]: result.resolvedLayout }));
+    setColumnsLoadedKey(k => k + 1);
+
+    const visible = new Set(result.fields.map(c => c.element));
+    if (tab === 'all') {
+      setAllColumns(result.fields);
+      setAllTabData(prev => ({ ...prev, columns: result.fields, loading: true }));
+      setColFiltersByTab(prev => ({ ...prev, all: pruneColFilters(prev.all, visible) }));
+      setAppliedColFiltersByTab(prev => ({ ...prev, all: pruneColFilters(prev.all, visible) }));
+    } else {
+      setTabData(prev => ({
+        ...prev,
+        [tab]: { ...prev[tab], columns: result.fields, loading: true },
+      }));
+      setColFiltersByTab(prev => ({
+        ...prev,
+        [tab]: pruneColFilters(prev[tab] ?? {}, visible),
+      }));
+      setAppliedColFiltersByTab(prev => ({
+        ...prev,
+        [tab]: pruneColFilters(prev[tab] ?? {}, visible),
+      }));
+    }
+    setPage(0);
+  }, []);
 
   const isAtDefault =
     isDefaultFilters(applied)
@@ -1506,6 +1568,23 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
             {totalCount.toLocaleString()} result{totalCount !== 1 ? 's' : ''}
           </p>
           <div className="flex items-center gap-2">
+            {activeResolvedLayout === 'personal' && (
+              <span className="typo-caption text-blue-700 bg-blue-50 border border-blue-100 px-2 py-1 rounded-full">
+                Personalized
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setPersonalizeTarget({
+                tab: activeTab,
+                table: activeTable,
+                label: tableLabelForTab(activeTab),
+              })}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg typo-body text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              <Columns3 className="w-4 h-4" />
+              Personalize columns
+            </button>
             {activeTabHasColFilters && (
               <button
                 type="button"
@@ -1714,6 +1793,21 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           flagType={panel.flagType}
           encodedQueries={panel.encodedQueries}
           onClose={() => setPanel(null)}
+        />
+      )}
+
+      {personalizeTarget && (
+        <ListColumnPersonalizer
+          table={personalizeTarget.table}
+          viewTitle={LIST_VIEW}
+          tableLabel={personalizeTarget.label}
+          initialColumns={columns}
+          resolvedLayout={layoutByTable[personalizeTarget.table] ?? activeResolvedLayout}
+          onClose={() => setPersonalizeTarget(null)}
+          onSaved={result => {
+            handleColumnsPersonalized(personalizeTarget.table, personalizeTarget.tab, result);
+            setPersonalizeTarget(null);
+          }}
         />
       )}
     </div>

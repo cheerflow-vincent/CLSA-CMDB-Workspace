@@ -467,9 +467,10 @@ PortalMetadataHandler.prototype = {
   getCurrentUserContext: function () {
     var user = new GlideRecord('sys_user');
     if (!user.get(gs.getUserID())) {
-      return { department: '', company: '' };
+      return { sys_id: '', department: '', company: '' };
     }
     return {
+      sys_id: String(gs.getUserID() || ''),
       department: String(user.getValue('department') || ''),
       company: String(user.getValue('company') || ''),
     };
@@ -600,35 +601,81 @@ PortalMetadataHandler.prototype = {
     return gr.next() ? gr.getUniqueValue() : '';
   },
 
-  resolveListFieldList: function (tableName, viewTitle) {
-    var listId = this.findListSysId('name=' + tableName + '^view.title=' + viewTitle);
+  findViewSysId: function (viewTitle) {
+    var gr = new GlideRecord('sys_ui_view');
+    gr.addQuery('title', viewTitle);
+    gr.setLimit(1);
+    gr.query();
+    return gr.next() ? gr.getUniqueValue() : '';
+  },
+
+  resolveListElementsByListId: function (listId, limit) {
+    if (!listId) return [];
+    var gr = new GlideRecord('sys_ui_list_element');
+    gr.addQuery('list_id', listId);
+    gr.orderBy('position');
+    gr.setLimit(limit || 50);
+    gr.query();
+    var names = [];
+    while (gr.next()) {
+      var el = String(gr.getValue('element') || '');
+      if (el) names.push(el);
+    }
+    return names;
+  },
+
+  resolveListLayout: function (tableName, viewTitle) {
+    var userId = gs.getUserID();
+    var empty = { fields: [], resolved_layout: 'default', list_sys_id: '' };
+
+    var listId = this.findListSysId(
+      'name=' + tableName + '^view.title=' + viewTitle + '^sys_user=' + userId
+    );
+    if (!listId) {
+      listId = this.findListSysId(
+        'name=' + tableName + '^view.title=' + viewTitle + '^sys_user=' + userId + '^active=true'
+      );
+    }
     if (listId) {
-      var gr = new GlideRecord('sys_ui_list_element');
-      gr.addQuery('list_id', listId);
-      gr.orderBy('position');
-      gr.setLimit(50);
-      gr.query();
-      var names = [];
-      while (gr.next()) {
-        var el = String(gr.getValue('element') || '');
-        if (el) names.push(el);
+      var personalNames = this.resolveListElementsByListId(listId, 50);
+      if (personalNames.length) {
+        return {
+          fields: this.labelFields(tableName, personalNames),
+          resolved_layout: 'personal',
+          list_sys_id: listId,
+        };
       }
-      if (names.length) return this.labelFields(tableName, names);
     }
 
-    listId = this.findListSysId('name=' + tableName + '^view.name=');
+    listId = this.findListSysId(
+      'name=' + tableName + '^view.title=' + viewTitle + '^sys_userISEMPTY^active=true'
+    );
+    if (!listId) {
+      listId = this.findListSysId(
+        'name=' + tableName + '^view.title=' + viewTitle + '^sys_userISEMPTY'
+      );
+    }
     if (listId) {
-      var gr2 = new GlideRecord('sys_ui_list_element');
-      gr2.addQuery('list_id', listId);
-      gr2.orderBy('position');
-      gr2.setLimit(20);
-      gr2.query();
-      var names2 = [];
-      while (gr2.next()) {
-        var el2 = String(gr2.getValue('element') || '');
-        if (el2) names2.push(el2);
+      var sharedNames = this.resolveListElementsByListId(listId, 50);
+      if (sharedNames.length) {
+        return {
+          fields: this.labelFields(tableName, sharedNames),
+          resolved_layout: 'shared',
+          list_sys_id: listId,
+        };
       }
-      if (names2.length) return this.labelFields(tableName, names2);
+    }
+
+    listId = this.findListSysId('name=' + tableName + '^view.name=^sys_userISEMPTY');
+    if (listId) {
+      var defaultNames = this.resolveListElementsByListId(listId, 20);
+      if (defaultNames.length) {
+        return {
+          fields: this.labelFields(tableName, defaultNames),
+          resolved_layout: 'default',
+          list_sys_id: listId,
+        };
+      }
     }
 
     var gr3 = new GlideRecord('sys_ui_list_element');
@@ -637,13 +684,400 @@ PortalMetadataHandler.prototype = {
     );
     gr3.setLimit(50);
     gr3.query();
-    var names3 = [];
+    var dotNames = [];
     while (gr3.next()) {
       var el3 = String(gr3.getValue('element') || '');
-      if (el3) names3.push(el3);
+      if (el3) dotNames.push(el3);
     }
-    if (names3.length) return this.labelFields(tableName, names3);
-    return [];
+    if (dotNames.length) {
+      return {
+        fields: this.labelFields(tableName, dotNames),
+        resolved_layout: 'shared',
+        list_sys_id: '',
+      };
+    }
+    return empty;
+  },
+
+  resolveListFieldList: function (tableName, viewTitle) {
+    return this.resolveListLayout(tableName, viewTitle).fields;
+  },
+
+  LIST_LAYOUT_EXCLUDED_TYPES: {
+    collection: true,
+    glide_list: true,
+    password: true,
+    password2: true,
+    journal_input: true,
+    html: true,
+    user_image: true,
+    template_value: true,
+    conditions: true,
+    composite_name: true,
+    glide_action_list: true,
+    workflow: true,
+  },
+
+  isListLayoutFieldType: function (internalType) {
+    if (!internalType) return true;
+    return !this.LIST_LAYOUT_EXCLUDED_TYPES[String(internalType)];
+  },
+
+  queryDictionaryFields: function (tableName, searchQuery, maxRows) {
+    var out = [];
+    var seen = {};
+    var tablesSeen = {};
+    var current = tableName;
+    var limit = maxRows || 200;
+
+    for (var depth = 0; depth < 12 && out.length < limit; depth++) {
+      if (!current || tablesSeen[current]) break;
+      tablesSeen[current] = true;
+
+      var dict = new GlideRecord('sys_dictionary');
+      dict.addQuery('name', current);
+      dict.addQuery('active', true);
+      dict.addQuery('element', '!=', '');
+      dict.orderBy('column_label');
+      dict.setLimit(limit);
+      dict.query();
+      while (dict.next() && out.length < limit) {
+        var element = String(dict.getValue('element') || '');
+        if (!element || element.indexOf('.') === 0 || seen[element]) continue;
+        var internalType = String(dict.getValue('internal_type') || '');
+        if (!this.isListLayoutFieldType(internalType)) continue;
+        var label = String(dict.getValue('column_label') || element);
+        if (searchQuery) {
+          var q = searchQuery.toLowerCase();
+          if (label.toLowerCase().indexOf(q) === -1 && element.toLowerCase().indexOf(q) === -1) continue;
+        }
+        seen[element] = true;
+        out.push({
+          element: element,
+          label: label,
+          internal_type: internalType,
+        });
+      }
+      current = this.getParentTable(current);
+    }
+
+    out.sort(function (a, b) {
+      return String(a.label).localeCompare(String(b.label));
+    });
+    return out;
+  },
+
+  isValidListColumn: function (tableName, element) {
+    var current = tableName;
+    var tablesSeen = {};
+    for (var depth = 0; depth < 12; depth++) {
+      if (!current || tablesSeen[current]) break;
+      tablesSeen[current] = true;
+      var dict = new GlideRecord('sys_dictionary');
+      dict.addQuery('name', current);
+      dict.addQuery('element', element);
+      dict.addQuery('active', true);
+      dict.setLimit(1);
+      dict.query();
+      if (dict.next()) {
+        var internalType = String(dict.getValue('internal_type') || '');
+        return this.isListLayoutFieldType(internalType);
+      }
+      current = this.getParentTable(current);
+    }
+    return false;
+  },
+
+  findUserListRecord: function (tableName, viewTitle, userId) {
+    var listId = this.findListSysId(
+      'name=' + tableName + '^view.title=' + viewTitle + '^sys_user=' + userId
+    );
+    if (!listId) return null;
+    var gr = new GlideRecord('sys_ui_list');
+    if (!gr.get(listId)) return null;
+    return gr;
+  },
+
+  findSharedListRecord: function (tableName, viewTitle) {
+    var listId = this.findListSysId(
+      'name=' + tableName + '^view.title=' + viewTitle + '^sys_userISEMPTY^active=true'
+    );
+    if (!listId) {
+      listId = this.findListSysId(
+        'name=' + tableName + '^view.title=' + viewTitle + '^sys_userISEMPTY'
+      );
+    }
+    if (!listId) return null;
+    var gr = new GlideRecord('sys_ui_list');
+    if (!gr.get(listId)) return null;
+    return gr;
+  },
+
+  insertListElements: function (listId, columnNames) {
+    for (var i = 0; i < columnNames.length; i++) {
+      var elGr = new GlideRecord('sys_ui_list_element');
+      elGr.initialize();
+      elGr.setValue('list_id', listId);
+      elGr.setValue('element', columnNames[i]);
+      elGr.setValue('position', (i + 1) * 10);
+      if (!elGr.insert()) return false;
+    }
+    return true;
+  },
+
+  deleteListElements: function (listId) {
+    var gr = new GlideRecord('sys_ui_list_element');
+    gr.addQuery('list_id', listId);
+    gr.query();
+    while (gr.next()) gr.deleteRecord();
+  },
+
+  createUserListFromShared: function (tableName, viewTitle, userId) {
+    var sharedGr = this.findSharedListRecord(tableName, viewTitle);
+    var viewId = sharedGr ? String(sharedGr.getValue('view') || '') : '';
+    if (!viewId) viewId = this.findViewSysId(viewTitle);
+    if (!viewId) {
+      return { id: '', error: 'View not found: ' + viewTitle };
+    }
+
+    var listGr = new GlideRecord('sys_ui_list');
+    listGr.initialize();
+    listGr.setValue('name', tableName);
+    listGr.setValue('view', viewId);
+    listGr.setValue('sys_user', userId);
+    listGr.setValue('sys_name', tableName);
+
+    var id = listGr.insert();
+    if (!id) {
+      var msg = '';
+      try {
+        msg = String(listGr.getLastErrorMessage() || '');
+      } catch (e0) {}
+      return { id: '', error: msg || 'Failed to insert sys_ui_list' };
+    }
+    return { id: id, error: '' };
+  },
+
+  savePersonalListLayout: function (tableName, viewTitle, columnNames) {
+    if (!columnNames || !columnNames.length) {
+      return { ok: false, status: 400, message: 'columns must be a non-empty array' };
+    }
+    if (columnNames.length > 30) {
+      return { ok: false, status: 400, message: 'Too many columns (max 30)' };
+    }
+
+    var hasName = false;
+    for (var n = 0; n < columnNames.length; n++) {
+      if (columnNames[n] === 'name') hasName = true;
+      if (!this.isValidListColumn(tableName, columnNames[n])) {
+        return { ok: false, status: 400, message: 'Invalid or unsupported column: ' + columnNames[n] };
+      }
+    }
+    if (!hasName) {
+      return { ok: false, status: 400, message: 'columns must include name' };
+    }
+
+    var userId = gs.getUserID();
+    var listGr = this.findUserListRecord(tableName, viewTitle, userId);
+    var listId = listGr ? listGr.getUniqueValue() : '';
+
+    if (!listId) {
+      var created = this.createUserListFromShared(tableName, viewTitle, userId);
+      listId = created.id;
+      if (!listId) {
+        return {
+          ok: false,
+          status: 500,
+          message: created.error || 'Failed to create personal list layout',
+        };
+      }
+    }
+
+    var backup = this.resolveListElementsByListId(listId, 50);
+    this.deleteListElements(listId);
+    if (!this.insertListElements(listId, columnNames)) {
+      this.deleteListElements(listId);
+      if (backup.length) this.insertListElements(listId, backup);
+      return { ok: false, status: 500, message: 'Failed to save list columns' };
+    }
+
+    var layout = this.resolveListLayout(tableName, viewTitle);
+    return { ok: true, layout: layout };
+  },
+
+  resetPersonalListLayout: function (tableName, viewTitle) {
+    var userId = gs.getUserID();
+    var listGr = this.findUserListRecord(tableName, viewTitle, userId);
+    if (listGr) listGr.deleteRecord();
+    return this.resolveListLayout(tableName, viewTitle);
+  },
+
+  sn: function (v) {
+    if (v === undefined || v === null) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object' && v !== null && 'value' in v) return String(v.value || '');
+    return String(v);
+  },
+
+  readField: function (obj, name) {
+    if (!obj) return '';
+    var v = obj[name];
+    if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
+    try {
+      if (typeof obj.get === 'function') {
+        v = obj.get(name);
+        if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
+      }
+    } catch (e1) {}
+    return '';
+  },
+
+  bodyToObject: function (raw) {
+    if (!raw) return null;
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw);
+      } catch (e1) {
+        try {
+          var parser = new global.JSON();
+          return parser.decode(raw);
+        } catch (e2) {
+          return null;
+        }
+      }
+    }
+    if (typeof raw === 'object') return raw;
+    return null;
+  },
+
+  readStringArray: function (obj, name) {
+    if (!obj || typeof obj !== 'object') return [];
+    var raw = obj[name];
+    if (!raw && typeof obj.get === 'function') {
+      try {
+        raw = obj.get(name);
+      } catch (e0) {}
+    }
+    if (!raw) return [];
+
+    var out = [];
+    var pushValue = function (item) {
+      var s = String(item || '').trim();
+      if (s) out.push(s);
+    };
+
+    if (Array.isArray(raw)) {
+      for (var i = 0; i < raw.length; i++) pushValue(raw[i]);
+      return out;
+    }
+
+    if (typeof raw.size === 'function' && typeof raw.get === 'function') {
+      for (var j = 0; j < raw.size(); j++) pushValue(raw.get(j));
+      return out;
+    }
+
+    if (typeof raw.length === 'number') {
+      for (var k = 0; k < raw.length; k++) pushValue(raw[k]);
+      return out;
+    }
+
+    var single = this.sn(raw);
+    return single ? [single] : [];
+  },
+
+  readJsonBody: function (request) {
+    try {
+      var wrapper = request.body;
+      if (!wrapper) return {};
+
+      var fromData = this.bodyToObject(wrapper.data);
+      if (fromData && typeof fromData === 'object') return fromData;
+
+      if (wrapper.dataString) {
+        var parsed = this.bodyToObject(String(wrapper.dataString));
+        if (parsed) return parsed;
+      }
+
+      if (typeof wrapper.hasNext === 'function' && wrapper.hasNext()) {
+        var entry = wrapper.nextEntry();
+        var fromEntry = this.bodyToObject(entry);
+        if (fromEntry) return fromEntry;
+      }
+
+      if (this.readField(wrapper, 'table') || this.readField(wrapper, 'view_title')) return wrapper;
+
+      if (typeof wrapper === 'string') {
+        var fromString = this.bodyToObject(wrapper);
+        if (fromString) return fromString;
+      }
+
+      return typeof wrapper === 'object' ? wrapper : {};
+    } catch (e) {
+      return {};
+    }
+  },
+
+  handleListLayoutFields: function (request, response) {
+    var table = this.readParam(request, 'table');
+    var viewTitle = this.readParam(request, 'view_title');
+    var q = this.readParam(request, 'q');
+
+    if (!table || !this.isAllowedTable(table)) {
+      this.jsonError(response, 400, 'Invalid or missing table parameter');
+      return;
+    }
+    if (!viewTitle || !this.isAllowedViewTitle(viewTitle)) {
+      this.jsonError(response, 400, 'Invalid or missing view_title parameter');
+      return;
+    }
+
+    this.jsonOk(response, {
+      fields: this.queryDictionaryFields(table, q, 200),
+    });
+  },
+
+  handleListLayoutSave: function (request, response) {
+    var body = this.readJsonBody(request);
+    var table = this.readField(body, 'table').trim();
+    var viewTitle = this.readField(body, 'view_title').trim();
+    var normalized = this.readStringArray(body, 'columns');
+
+    if (!table || !this.isAllowedTable(table)) {
+      this.jsonError(response, 400, 'Invalid or missing table parameter');
+      return;
+    }
+    if (!viewTitle || !this.isAllowedViewTitle(viewTitle)) {
+      this.jsonError(response, 400, 'Invalid or missing view_title parameter');
+      return;
+    }
+    if (!normalized.length) {
+      this.jsonError(response, 400, 'columns must be a non-empty array');
+      return;
+    }
+
+    var result = this.savePersonalListLayout(table, viewTitle, normalized);
+    if (!result.ok) {
+      this.jsonError(response, result.status || 400, result.message || 'Save failed');
+      return;
+    }
+
+    this.jsonOk(response, result.layout);
+  },
+
+  handleListLayoutReset: function (request, response) {
+    var table = this.readParam(request, 'table');
+    var viewTitle = this.readParam(request, 'view_title');
+
+    if (!table || !this.isAllowedTable(table)) {
+      this.jsonError(response, 400, 'Invalid or missing table parameter');
+      return;
+    }
+    if (!viewTitle || !this.isAllowedViewTitle(viewTitle)) {
+      this.jsonError(response, 400, 'Invalid or missing view_title parameter');
+      return;
+    }
+
+    this.jsonOk(response, this.resetPersonalListLayout(table, viewTitle));
   },
 
   markerKind: function (el) {
@@ -947,7 +1381,7 @@ PortalMetadataHandler.prototype = {
         this.jsonError(response, 400, 'Invalid or missing view_title for list layout');
         return;
       }
-      this.jsonOk(response, { fields: this.resolveListFieldList(table, viewTitle) });
+      this.jsonOk(response, this.resolveListLayout(table, viewTitle));
       return;
     }
 

@@ -1,4 +1,4 @@
-import { fetchViewLayout, queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
+import { fetchViewLayout, getCurrentUserSysId, queryTable, queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 
 /** One field configured in a form view */
 export interface ViewField { element: string; label: string }
@@ -153,29 +153,114 @@ async function findListSysId(listQuery: string): Promise<string | null> {
   return id || null;
 }
 
+export type ListLayoutKind = 'personal' | 'shared' | 'default';
+
+export interface ListFieldsResult {
+  fields: ViewField[];
+  resolvedLayout: ListLayoutKind;
+  listSysId?: string;
+}
+
 /**
  * Load list-layout columns for a CI table:
- *  1. Find sys_ui_list by name + view.title, then sys_ui_list_element by list_id
- *  2. Default list on the given table (view.name empty)
- *  3. Dot-walk fallback on list_id
- *  4. `defaultFields` fallback
+ *  1. User-specific sys_ui_list (sys_user = logged-in user)
+ *  2. Shared sys_ui_list for view.title (sys_user empty)
+ *  3. Default list on the given table (view.name empty)
+ *  4. Dot-walk fallback on list_id
+ *  5. Server view_layout broker
+ *  6. `defaultFields` fallback
  */
-export async function loadListFields(
+export async function loadListFieldsWithMeta(
   tableName: string,
   listTitle: string,
   defaultFields: ViewField[] = [],
-): Promise<ViewField[]> {
+): Promise<ListFieldsResult> {
+  const userId = await getCurrentUserSysId();
+
+  if (userId) {
+    let personalListId = await findListSysId(
+      `name=${tableName}^view.title=${listTitle}^sys_user=${userId}`,
+    );
+    if (!personalListId) {
+      personalListId = await findListSysId(
+        `name=${tableName}^view.title=${listTitle}^sys_user=${userId}^active=true`,
+      );
+    }
+    if (personalListId) {
+      const personalFields = await resolveListElementsByListId(tableName, personalListId, 50);
+      if (personalFields?.length) {
+        return {
+          fields: personalFields,
+          resolvedLayout: 'personal',
+          listSysId: personalListId,
+        };
+      }
+    }
+  }
+
+  let sharedListId = await findListSysId(
+    `name=${tableName}^view.title=${listTitle}^sys_userISEMPTY^active=true`,
+  );
+  if (!sharedListId) {
+    sharedListId = await findListSysId(
+      `name=${tableName}^view.title=${listTitle}^sys_userISEMPTY`,
+    );
+  }
+  if (sharedListId) {
+    const sharedFields = await resolveListElementsByListId(tableName, sharedListId, 50);
+    if (sharedFields?.length) {
+      return {
+        fields: sharedFields,
+        resolvedLayout: 'shared',
+        listSysId: sharedListId,
+      };
+    }
+  }
+
+  const defaultListId = await findListSysId(`name=${tableName}^view.name=^sys_userISEMPTY`);
+  if (defaultListId) {
+    const defaultFieldsFromList = await resolveListElementsByListId(tableName, defaultListId, 20);
+    if (defaultFieldsFromList?.length) {
+      return {
+        fields: defaultFieldsFromList,
+        resolvedLayout: 'default',
+        listSysId: defaultListId,
+      };
+    }
+  }
+
+  const dotWalkFields = await resolveListFieldsDotWalk(tableName, listTitle, 50);
+  if (dotWalkFields?.length) {
+    return { fields: dotWalkFields, resolvedLayout: 'shared' };
+  }
+
   try {
     const res = await fetchViewLayout({
       table: tableName,
       view_title: listTitle,
       type: 'list',
     });
-    if (res.fields?.length) return res.fields;
+    if (res.fields?.length) {
+      return {
+        fields: res.fields,
+        resolvedLayout: res.resolved_layout ?? 'shared',
+        listSysId: res.list_sys_id,
+      };
+    }
   } catch {
     // fall through to defaults
   }
-  return defaultFields;
+
+  return { fields: defaultFields, resolvedLayout: 'default' };
+}
+
+export async function loadListFields(
+  tableName: string,
+  listTitle: string,
+  defaultFields: ViewField[] = [],
+): Promise<ViewField[]> {
+  const result = await loadListFieldsWithMeta(tableName, listTitle, defaultFields);
+  return result.fields;
 }
 
 // ─── Form layout (sys_ui_form → sections → elements) ─────────────────────────

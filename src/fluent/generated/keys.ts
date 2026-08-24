@@ -120,6 +120,42 @@ declare global {
                         id: 'a88b90351acc43a5aa6d7c16aa8a4fce'
                         deleted: true
                     }
+                    'cross-create-sys-ui-list': {
+                        table: 'sys_scope_privilege'
+                        id: '461133b2642642ea94eeb4f7586a5ffc'
+                    }
+                    'cross-create-sys-ui-list-element': {
+                        table: 'sys_scope_privilege'
+                        id: '299f7ac03f9c446785166ea068efd974'
+                    }
+                    'cross-delete-sys-ui-list': {
+                        table: 'sys_scope_privilege'
+                        id: '38c44c98ff5d47ed88055802d18d4f59'
+                    }
+                    'cross-delete-sys-ui-list-element': {
+                        table: 'sys_scope_privilege'
+                        id: '2855d287239c41ca85dd9e30c3fe49a1'
+                    }
+                    'cross-read-sys-ui-list': {
+                        table: 'sys_scope_privilege'
+                        id: 'f7ecd408efba4e87ae484f36d28b78fa'
+                    }
+                    'cross-read-sys-ui-list-element': {
+                        table: 'sys_scope_privilege'
+                        id: '4460b24679d64342a1698cae7704baeb'
+                    }
+                    'cross-read-sys-ui-view': {
+                        table: 'sys_scope_privilege'
+                        id: '13d317c59eae46eaa326aabb5f9b35b6'
+                    }
+                    'cross-write-sys-ui-list': {
+                        table: 'sys_scope_privilege'
+                        id: 'f2ffa03522a44b63a4296207a49b677d'
+                    }
+                    'cross-write-sys-ui-list-element': {
+                        table: 'sys_scope_privilege'
+                        id: 'ca867fa6888e44a0924d490c1e35b570'
+                    }
                     'field-access-param-fields': {
                         table: 'sys_ws_query_parameter'
                         id: '4fcd676a067b4baab5f10115b5db1e5b'
@@ -163,6 +199,38 @@ declare global {
                     package_json: {
                         table: 'sys_module'
                         id: '555d9b4bb51e4be4b47e7529d4b0a91a'
+                    }
+                    'portal-list-layout-delete-param-table': {
+                        table: 'sys_ws_query_parameter'
+                        id: 'a0e584b7088a43c2beea8088e434d752'
+                    }
+                    'portal-list-layout-delete-param-view': {
+                        table: 'sys_ws_query_parameter'
+                        id: '09621a4d028c4fbcbd693e5cb66582f4'
+                    }
+                    'portal-list-layout-fields-route': {
+                        table: 'sys_ws_operation'
+                        id: '9b38b1006e4744c9ad4342a8fdec2b09'
+                    }
+                    'portal-list-layout-param-q': {
+                        table: 'sys_ws_query_parameter'
+                        id: '21bdcaf68e674881b9cfff8b86cd1206'
+                    }
+                    'portal-list-layout-param-table': {
+                        table: 'sys_ws_query_parameter'
+                        id: '552daa0c766c452fa1d2895fdf57500c'
+                    }
+                    'portal-list-layout-param-view': {
+                        table: 'sys_ws_query_parameter'
+                        id: '1a44bf56cf684c7cac189ae520c7f8a9'
+                    }
+                    'portal-list-layout-reset-route': {
+                        table: 'sys_ws_operation'
+                        id: '140bd668087e4eb6b5a029ca89225778'
+                    }
+                    'portal-list-layout-save-route': {
+                        table: 'sys_ws_operation'
+                        id: '809bf913532e42239f2629fbba257c30'
                     }
                     'portal-metadata-handler': {
                         table: 'sys_script_include'
@@ -359,6 +427,14 @@ declare global {
                             name: 'x_citi4_clsa_cmd_0_relationship_change'
                             element: 'approval_comments'
                             language: 'en'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '0697743cdbcc4f2cb55dbc91cd8ed67b'
+                        key: {
+                            web_service_operation: '140bd668087e4eb6b5a029ca89225778'
+                            web_service_query_parameter: '09621a4d028c4fbcbd693e5cb66582f4'
                         }
                     },
                     {
@@ -648,6 +724,14 @@ declare global {
                         }
                     },
                     {
+                        table: 'sys_ux_lib_asset'
+                        id: '76c09c0775b7475caaae8895bfa6a708'
+                        deleted: true
+                        key: {
+                            name: 'x_citi4_clsa_cmd_0/listLayoutTableApi'
+                        }
+                    },
+                    {
                         table: 'sys_documentation'
                         id: '770dda4461c04a54a78722e1a31edb8f'
                         key: {
@@ -670,6 +754,14 @@ declare global {
                         key: {
                             name: 'x_citi4_clsa_cmd_0_relationship_change'
                             element: 'requested_by'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '8132506d638f489e9ad01eba34ad3977'
+                        key: {
+                            web_service_operation: '9b38b1006e4744c9ad4342a8fdec2b09'
+                            web_service_query_parameter: '21bdcaf68e674881b9cfff8b86cd1206'
                         }
                     },
                     {
@@ -724,10 +816,26 @@ declare global {
                     },
                     {
                         table: 'sys_ws_query_parameter_map'
+                        id: '9a89060b649c4749a8b6e9926e0420fd'
+                        key: {
+                            web_service_operation: '9b38b1006e4744c9ad4342a8fdec2b09'
+                            web_service_query_parameter: '1a44bf56cf684c7cac189ae520c7f8a9'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
                         id: '9ba8273f3b524ffe95d896148424d3e0'
                         key: {
                             web_service_operation: '70fcd6bfbfcd4ab387cfa6d1b240e72e'
                             web_service_query_parameter: '7d8408ce694c4c619e5522a64b92e641'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: '9c29920dc9be4541a07d4d5868fe3170'
+                        key: {
+                            web_service_operation: '9b38b1006e4744c9ad4342a8fdec2b09'
+                            web_service_query_parameter: '552daa0c766c452fa1d2895fdf57500c'
                         }
                     },
                     {
@@ -870,6 +978,22 @@ declare global {
                         deleted: true
                         key: {
                             name: 'x_citi4_clsa_cmd_0_cmdb_portal_v2.do - BYOUI Files'
+                        }
+                    },
+                    {
+                        table: 'sys_ux_lib_asset'
+                        id: 'd2ece6409cf7422b907437dc3ceebb20'
+                        deleted: true
+                        key: {
+                            name: 'x_citi4_clsa_cmd_0/listLayoutTableApi.js.map'
+                        }
+                    },
+                    {
+                        table: 'sys_ws_query_parameter_map'
+                        id: 'd37175398ebd483b88f53a43201defef'
+                        key: {
+                            web_service_operation: '140bd668087e4eb6b5a029ca89225778'
+                            web_service_query_parameter: 'a0e584b7088a43c2beea8088e434d752'
                         }
                     },
                     {

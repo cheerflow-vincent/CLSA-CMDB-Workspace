@@ -7,7 +7,8 @@ axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest'
 declare global {
   interface Window {
     g_ck?: string;
-    NOW?: { user?: { userToken?: string; userName?: string } };
+    g_user?: { userID?: string; sys_id?: string; userName?: string; firstName?: string; lastName?: string };
+    NOW?: { user?: { userID?: string; userId?: string; sys_id?: string; userName?: string; userToken?: string } };
   }
 }
 
@@ -42,6 +43,7 @@ export interface AppHomeFilterConfigDto {
 }
 
 export interface PortalCurrentUserContext {
+  sys_id?: string
   department: string
   company: string
 }
@@ -62,6 +64,7 @@ export interface PortalMetadataResponse {
 
 let _portalMetadataCache: PortalMetadataResponse | null = null
 let _portalMetadataCacheTime = 0
+let _portalMetadataInflight: Promise<PortalMetadataResponse> | null = null
 const PORTAL_METADATA_TTL_MS = 5 * 60 * 1000
 
 const EMPTY_PORTAL_METADATA: PortalMetadataResponse = {
@@ -71,25 +74,54 @@ const EMPTY_PORTAL_METADATA: PortalMetadataResponse = {
   business_units: [],
   departments: [],
   app_home_filter_config: { two_level: [], three_level: [] },
-  current_user: { department: '', company: '' },
+  current_user: { sys_id: '', department: '', company: '' },
+}
+
+function isUsablePortalMetadata(payload: PortalMetadataResponse | null | undefined): payload is PortalMetadataResponse {
+  if (!payload) return false
+  if (payload.properties && Object.keys(payload.properties).length > 0) return true
+  if (payload.current_user?.sys_id?.trim()) return true
+  return Boolean(payload.business_units?.length || payload.departments?.length)
 }
 
 /** Server-brokered portal metadata (choices, properties, reference lists). */
 export async function fetchPortalMetadata(force = false): Promise<PortalMetadataResponse> {
   const now = Date.now()
-  if (_portalMetadataCache && !force && (now - _portalMetadataCacheTime) < PORTAL_METADATA_TTL_MS) {
+  if (!force && _portalMetadataCache && (now - _portalMetadataCacheTime) < PORTAL_METADATA_TTL_MS) {
     return _portalMetadataCache
   }
-  try {
-    const r = await axios.get(`/api/${APP_SCOPE}/portal/metadata`)
-    const payload = unwrapRestBody(unwrapRestBody(r.data)) as PortalMetadataResponse
-    _portalMetadataCache = payload?.properties ? payload : EMPTY_PORTAL_METADATA
-    _portalMetadataCacheTime = now
-  } catch {
-    _portalMetadataCache = EMPTY_PORTAL_METADATA
-    _portalMetadataCacheTime = now
+  if (!force && _portalMetadataInflight) {
+    return _portalMetadataInflight
   }
-  return _portalMetadataCache
+
+  const load = (async (): Promise<PortalMetadataResponse> => {
+    try {
+      const r = await axios.get(`/api/${APP_SCOPE}/portal/metadata`)
+      const payload = unwrapRestBody(unwrapRestBody(r.data)) as PortalMetadataResponse
+      if (isUsablePortalMetadata(payload)) {
+        _portalMetadataCache = payload
+        _portalMetadataCacheTime = Date.now()
+        return payload
+      }
+    } catch {
+      // keep last good cache when a refresh fails
+      if (_portalMetadataCache && isUsablePortalMetadata(_portalMetadataCache)) {
+        return _portalMetadataCache
+      }
+    }
+    _portalMetadataCache = EMPTY_PORTAL_METADATA
+    _portalMetadataCacheTime = Date.now()
+    return _portalMetadataCache
+  })()
+
+  _portalMetadataInflight = load
+  try {
+    return await load
+  } finally {
+    if (_portalMetadataInflight === load) {
+      _portalMetadataInflight = null
+    }
+  }
 }
 
 export type ViewLayoutType = 'form' | 'list' | 'form_layout'
@@ -113,6 +145,8 @@ export interface ViewLayoutResponse {
   sections?: ViewLayoutSectionDto[]
   resolved_table?: string
   resolved_view?: 'named' | 'default'
+  resolved_layout?: 'personal' | 'shared' | 'default'
+  list_sys_id?: string
 }
 
 /** Server-brokered form/list/form_layout field definitions. */
@@ -131,10 +165,161 @@ export async function fetchViewLayout(params: {
   }
 }
 
-// ServiceNow injects a global `g_user` object into every UI page containing
-// the currently logged-in user's details. Read it directly — no HTTP call
-// needed and no risk of triggering an auth challenge.
-declare const g_user: { userName?: string; firstName?: string; lastName?: string } | undefined
+export interface ListLayoutFieldOption {
+  element: string
+  label: string
+  internal_type?: string
+}
+
+export interface ListLayoutResult {
+  fields: ViewFieldDto[]
+  resolved_layout: 'personal' | 'shared' | 'default'
+  list_sys_id?: string
+}
+
+/** Dictionary fields available for list column personalization. */
+export async function fetchListLayoutFields(
+  table: string,
+  viewTitle: string,
+  q?: string,
+): Promise<ListLayoutFieldOption[]> {
+  try {
+    const params: Record<string, string> = { table, view_title: viewTitle }
+    if (q?.trim()) params.q = q.trim()
+    const r = await axios.get(`/api/${APP_SCOPE}/portal/list_layout/fields`, { params })
+    const body = unwrapRestBody(unwrapRestBody(r.data)) as { fields?: ListLayoutFieldOption[] }
+    return body.fields ?? []
+  } catch {
+    return []
+  }
+}
+
+// ServiceNow injects user details on window.g_user (not as an ES module global).
+let cachedCurrentUserSysId: string | null = null
+
+/** Resolve logged-in user sys_id from page globals or portal metadata. */
+export async function getCurrentUserSysId(): Promise<string> {
+  if (cachedCurrentUserSysId) return cachedCurrentUserSysId
+
+  const fromWindow =
+    window.NOW?.user?.userID
+    || window.NOW?.user?.userId
+    || window.NOW?.user?.sys_id
+    || window.g_user?.userID
+    || window.g_user?.sys_id
+    || ''
+  if (fromWindow) {
+    cachedCurrentUserSysId = fromWindow
+    return fromWindow
+  }
+
+  const meta = await fetchPortalMetadata()
+  const fromMeta = meta.current_user?.sys_id?.trim()
+  if (fromMeta) {
+    cachedCurrentUserSysId = fromMeta
+    return fromMeta
+  }
+
+  const userName = window.g_user?.userName || window.NOW?.user?.userName
+  if (userName) {
+    try {
+      const { result = [] } = await queryTable<{ sys_id: unknown }>({
+        table: 'sys_user',
+        query: `user_name=${userName}`,
+        fields: ['sys_id'],
+        limit: 1,
+      })
+      const id = result[0] ? coerceSysId(result[0].sys_id) : ''
+      if (id) {
+        cachedCurrentUserSysId = id
+        return id
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  return ''
+}
+
+/** Resolve user sys_id for list-layout writes (main bundle — uses configured axios). */
+async function resolveUserSysIdForSave(): Promise<string> {
+  const fromWindow =
+    window.NOW?.user?.userID
+    || window.NOW?.user?.userId
+    || window.NOW?.user?.sys_id
+    || window.g_user?.userID
+    || window.g_user?.sys_id
+    || ''
+  if (fromWindow) {
+    cachedCurrentUserSysId = fromWindow
+    return fromWindow
+  }
+
+  const meta = await fetchPortalMetadata(true)
+  const fromMeta = meta.current_user?.sys_id?.trim()
+  if (fromMeta) {
+    cachedCurrentUserSysId = fromMeta
+    return fromMeta
+  }
+
+  return getCurrentUserSysId()
+}
+
+/** Save user-specific list layout columns via Table API (logged-in user context). */
+export async function saveListLayout(
+  table: string,
+  viewTitle: string,
+  columns: string[],
+): Promise<{ ok: true; result: ListLayoutResult } | { ok: false; error: string }> {
+  const userId = await resolveUserSysIdForSave()
+  if (!userId) {
+    return { ok: false, error: 'Unable to resolve current user' }
+  }
+  try {
+    const result = await savePersonalListLayoutInternal(table, viewTitle, columns, userId)
+    return {
+      ok: true,
+      result: {
+        fields: result.fields ?? [],
+        resolved_layout: result.resolved_layout ?? 'personal',
+        list_sys_id: result.list_sys_id,
+      },
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error && err.message.trim()
+      ? err.message
+      : 'Failed to save column layout'
+    return { ok: false, error: message }
+  }
+}
+
+/** Delete user personal list layout via Table API and revert to shared default. */
+export async function resetListLayout(
+  table: string,
+  viewTitle: string,
+): Promise<{ ok: true; result: ListLayoutResult } | { ok: false; error: string }> {
+  const userId = await resolveUserSysIdForSave()
+  if (!userId) {
+    return { ok: false, error: 'Unable to resolve current user' }
+  }
+  try {
+    const result = await resetPersonalListLayoutInternal(table, viewTitle, userId)
+    return {
+      ok: true,
+      result: {
+        fields: result.fields ?? [],
+        resolved_layout: result.resolved_layout ?? 'shared',
+        list_sys_id: result.list_sys_id,
+      },
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error && err.message.trim()
+      ? err.message
+      : 'Failed to reset column layout'
+    return { ok: false, error: message }
+  }
+}
 
 /**
  * Fetch the ServiceNow user token via angular.do.
@@ -175,8 +360,8 @@ export async function initUserToken(): Promise<void> {
 export function bootstrapAuth(): { username: string } {
   try {
     const name =
-      (typeof g_user !== 'undefined' && g_user?.userName) ||
-      (typeof window.NOW !== 'undefined' && window.NOW?.user?.userName) ||
+      window.g_user?.userName ||
+      window.NOW?.user?.userName ||
       'user'
     return { username: String(name) }
   } catch {
@@ -752,6 +937,182 @@ export async function updateRecord(
     }
     return { success: false, error: extractAxiosErrorMessage(err) }
   }
+}
+
+function extractListLayoutApiError(err: unknown, fallback: string): string {
+  if (typeof err !== 'object' || err === null || !('response' in err)) return fallback
+  const data = (err as { response?: { data?: { error?: { message?: string; detail?: string } } } }).response?.data
+  const msg = data?.error?.message?.trim()
+  const detail = data?.error?.detail?.trim()
+  if (msg && detail && detail !== msg) return `${msg}: ${detail}`
+  if (msg) return msg
+  if (detail) return detail
+  return fallback
+}
+
+async function postTableRecord(table: string, payload: Record<string, unknown>): Promise<string> {
+  const r = await axios.post(`/api/now/table/${table}`, payload)
+  return coerceSysId((r.data as { result?: { sys_id?: unknown } })?.result?.sys_id)
+}
+
+async function deleteTableRecord(table: string, sysId: string): Promise<void> {
+  await axios.delete(`/api/now/table/${table}/${sysId}`)
+}
+
+const LIST_LAYOUT_MAX_COLUMNS = 30
+
+async function findListLayoutSysId(listQuery: string): Promise<string | null> {
+  const { result = [] } = await queryTable<{ sys_id: unknown }>({
+    table: 'sys_ui_list',
+    query: listQuery,
+    fields: ['sys_id'],
+    limit: 1,
+  })
+  const id = result[0] ? coerceSysId(result[0].sys_id) : ''
+  return id || null
+}
+
+async function findListLayoutViewSysId(viewTitle: string): Promise<string | null> {
+  const { result = [] } = await queryTable<{ sys_id: unknown }>({
+    table: 'sys_ui_view',
+    query: `title=${viewTitle}`,
+    fields: ['sys_id'],
+    limit: 1,
+  })
+  const id = result[0] ? coerceSysId(result[0].sys_id) : ''
+  return id || null
+}
+
+async function findSharedListLayoutViewId(tableName: string, viewTitle: string): Promise<string | null> {
+  let listId = await findListLayoutSysId(
+    `name=${tableName}^view.title=${viewTitle}^sys_userISEMPTY^active=true`,
+  )
+  if (!listId) {
+    listId = await findListLayoutSysId(`name=${tableName}^view.title=${viewTitle}^sys_userISEMPTY`)
+  }
+  if (!listId) return null
+
+  const { result = [] } = await queryTable<{ view: unknown }>({
+    table: 'sys_ui_list',
+    query: `sys_id=${listId}`,
+    fields: ['view'],
+    limit: 1,
+  })
+  const viewId = result[0] ? coerceSysId(result[0].view) : ''
+  return viewId || null
+}
+
+async function readListLayoutElementNames(listId: string): Promise<string[]> {
+  const { result = [] } = await queryTable<{ element: unknown }>({
+    table: 'sys_ui_list_element',
+    query: `list_id=${listId}^ORDERBYposition`,
+    fields: ['element', 'position'],
+    limit: LIST_LAYOUT_MAX_COLUMNS + 10,
+  })
+  return result.map(row => coerceSysId(row.element)).filter(Boolean)
+}
+
+async function deleteListLayoutElements(listId: string): Promise<void> {
+  const { result = [] } = await queryTable<{ sys_id: unknown }>({
+    table: 'sys_ui_list_element',
+    query: `list_id=${listId}`,
+    fields: ['sys_id'],
+    limit: LIST_LAYOUT_MAX_COLUMNS + 10,
+  })
+  await Promise.all(
+    result.map(row => deleteTableRecord('sys_ui_list_element', coerceSysId(row.sys_id))),
+  )
+}
+
+async function insertListLayoutElements(listId: string, columnNames: string[]): Promise<void> {
+  for (let i = 0; i < columnNames.length; i++) {
+    await postTableRecord('sys_ui_list_element', {
+      list_id: listId,
+      element: columnNames[i],
+      position: (i + 1) * 10,
+    })
+  }
+}
+
+async function createPersonalListLayoutRecord(
+  tableName: string,
+  viewTitle: string,
+  userId: string,
+): Promise<string> {
+  let viewId = await findSharedListLayoutViewId(tableName, viewTitle)
+  if (!viewId) viewId = await findListLayoutViewSysId(viewTitle)
+  if (!viewId) throw new Error(`View not found: ${viewTitle}`)
+
+  const listId = await postTableRecord('sys_ui_list', {
+    name: tableName,
+    view: viewId,
+    sys_user: userId,
+    sys_name: tableName,
+    active: true,
+  })
+  if (!listId) throw new Error('Failed to create personal list layout')
+  return listId
+}
+
+async function reloadListLayoutResult(tableName: string, viewTitle: string): Promise<ListLayoutResult> {
+  const { loadListFieldsWithMeta } = await import('../app/utils/viewFields')
+  const meta = await loadListFieldsWithMeta(tableName, viewTitle, [])
+  return {
+    fields: meta.fields,
+    resolved_layout: meta.resolvedLayout,
+    list_sys_id: meta.listSysId,
+  }
+}
+
+function validateListLayoutColumns(columnNames: string[]): string | null {
+  if (!columnNames.length) return 'columns must be a non-empty array'
+  if (columnNames.length > LIST_LAYOUT_MAX_COLUMNS) return 'Too many columns (max 30)'
+  if (!columnNames.includes('name')) return 'columns must include name'
+  return null
+}
+
+async function savePersonalListLayoutInternal(
+  tableName: string,
+  viewTitle: string,
+  columnNames: string[],
+  userId: string,
+): Promise<ListLayoutResult> {
+  const validationError = validateListLayoutColumns(columnNames)
+  if (validationError) throw new Error(validationError)
+
+  let listId = await findListLayoutSysId(`name=${tableName}^view.title=${viewTitle}^sys_user=${userId}`)
+  if (!listId) listId = await createPersonalListLayoutRecord(tableName, viewTitle, userId)
+
+  const backup = await readListLayoutElementNames(listId)
+  await deleteListLayoutElements(listId)
+
+  try {
+    await insertListLayoutElements(listId, columnNames)
+  } catch (err) {
+    await deleteListLayoutElements(listId)
+    if (backup.length) {
+      try {
+        await insertListLayoutElements(listId, backup)
+      } catch {
+        // best-effort rollback
+      }
+    }
+    throw new Error(extractListLayoutApiError(err, 'Failed to save list columns'))
+  }
+
+  return reloadListLayoutResult(tableName, viewTitle)
+}
+
+async function resetPersonalListLayoutInternal(
+  tableName: string,
+  viewTitle: string,
+  userId: string,
+): Promise<ListLayoutResult> {
+  const listId = await findListLayoutSysId(`name=${tableName}^view.title=${viewTitle}^sys_user=${userId}`)
+  if (listId) {
+    await deleteTableRecord('sys_ui_list', listId)
+  }
+  return reloadListLayoutResult(tableName, viewTitle)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
