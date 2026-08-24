@@ -27,12 +27,13 @@ import {
   Loader2, Network, ExternalLink, X,
 } from 'lucide-react';
 import {
-  queryTable, getSysProperties, fetchRelationshipChangesForApp,
+  getSysProperties, fetchRelationshipChangesForApp,
   fetchFieldAccess,
   requestRelationshipDelete,
   type RelationshipChangeRequest,
 } from '../../api/servicenow';
 import { loadAppRelationshipPeers, loadAppRelationships, type RelCIPeer } from '../utils/appRelationships';
+import { chunkedINParallel } from '../utils/appHomeLoader';
 import { getAppRelationshipTypes } from '../utils/appRelationshipTypes';
 import { Z_INDEX } from '../utils/layering';
 import { useDismissOnPointerDown } from '../utils/useDismissOnPointerDown';
@@ -150,24 +151,35 @@ async function fetchChildrenForNodes(
   if (!nodeIds.length || !typeQuery) return new Map();
 
   const nodeIdSet = new Set(nodeIds);
-  const ids = nodeIds.join(',');
 
-  const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
-    queryTable<Record<string, unknown>>({
-      table: 'cmdb_rel_ci',
-      query: `${typeQuery}^parent.sys_idIN${ids}`,
-      fields: ['parent.sys_id', 'child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'],
-      limit: 500,
-      displayValue: 'all',
-    }),
-    queryTable<Record<string, unknown>>({
-      table: 'cmdb_rel_ci',
-      query: `${typeQuery}^child.sys_idIN${ids}`,
-      fields: ['child.sys_id', 'parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'],
-      limit: 500,
-      displayValue: 'all',
-    }),
+  const [parentRes, childRes] = await Promise.all([
+    chunkedINParallel<Record<string, unknown>>(
+      'cmdb_rel_ci',
+      'parent.sys_id',
+      nodeIds,
+      typeQuery,
+      ['parent.sys_id', 'child.sys_id', 'child.name', 'child.sys_class_name', 'child.department.description'],
+      500,
+      { displayValue: 'all' },
+    ),
+    chunkedINParallel<Record<string, unknown>>(
+      'cmdb_rel_ci',
+      'child.sys_id',
+      nodeIds,
+      typeQuery,
+      ['child.sys_id', 'parent.sys_id', 'parent.name', 'parent.sys_class_name', 'parent.department.description'],
+      500,
+      { displayValue: 'all' },
+    ),
   ]);
+
+  if (parentRes.access === 'denied' || childRes.access === 'denied') return new Map();
+  if (parentRes.access === 'error' || childRes.access === 'error') {
+    throw new Error('Failed to fetch relationship children');
+  }
+
+  const asParent = parentRes.rows;
+  const asChild = childRes.rows;
 
   const result = new Map<string, RelCI[]>();
   const seenPairs = new Set<string>();
