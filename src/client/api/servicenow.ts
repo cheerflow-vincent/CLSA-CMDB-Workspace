@@ -340,28 +340,24 @@ export async function queryStatsGroupCount(
 export interface CiSearchDistinctCountRequest {
   incident_query: string
   change_query: string
-  health_query: string
 }
 
 export interface CiSearchDistinctCountResponse {
   incidents: number
   changes: number
-  health: number
   access: {
     incidents: TableAccess
     changes: TableAccess
-    health: TableAccess
   }
 }
 
 const EMPTY_CI_SEARCH_DISTINCT_COUNTS: CiSearchDistinctCountResponse = {
   incidents: 0,
   changes: 0,
-  health: 0,
-  access: { incidents: 'denied', changes: 'denied', health: 'denied' },
+  access: { incidents: 'denied', changes: 'denied' },
 }
 
-/** Distinct counts via Scripted REST (GlideAggregate COUNT(DISTINCT)). */
+/** Distinct task counts via Scripted REST (GlideAggregate COUNT(DISTINCT)). */
 export async function fetchCiSearchDistinctCounts(
   body: CiSearchDistinctCountRequest,
 ): Promise<CiSearchDistinctCountResponse> {
@@ -377,11 +373,9 @@ export async function fetchCiSearchDistinctCounts(
     return {
       incidents: Number(result.incidents) || 0,
       changes: Number(result.changes) || 0,
-      health: Number(result.health) || 0,
       access: {
         incidents: toAccess(accessRaw?.incidents),
         changes: toAccess(accessRaw?.changes),
-        health: toAccess(accessRaw?.health),
       },
     }
   } catch (err) {
@@ -389,8 +383,7 @@ export async function fetchCiSearchDistinctCounts(
     return {
       incidents: 0,
       changes: 0,
-      health: 0,
-      access: { incidents: 'error', changes: 'error', health: 'error' },
+      access: { incidents: 'error', changes: 'error' },
     }
   }
 }
@@ -453,6 +446,79 @@ export async function fetchCiTaskFlagCountsBatch(
       counts: {},
       access: { incidents: 'error', changes: 'error' },
     }
+  }
+}
+
+export interface CiSearchDistinctTasksRequest {
+  query: string
+  task_table: string
+  fields: string[]
+  page: number
+  page_size: number
+}
+
+export interface CiSearchSidebarRow {
+  sys_id: string
+  values: Record<string, string>
+}
+
+export interface CiSearchSidebarPageResponse {
+  rows: CiSearchSidebarRow[]
+  totalCount: number
+  access: TableAccess
+}
+
+const EMPTY_CI_SEARCH_SIDEBAR_PAGE: CiSearchSidebarPageResponse = {
+  rows: [],
+  totalCount: 0,
+  access: 'denied',
+}
+
+function parseSidebarPageResponse(result: Record<string, unknown>): CiSearchSidebarPageResponse {
+  const accessRaw = result.access
+  const toAccess = (v: unknown): TableAccess =>
+    v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
+
+  const access = typeof accessRaw === 'string' ? toAccess(accessRaw) : 'ok'
+  const rowsRaw = Array.isArray(result.rows) ? result.rows : []
+  const rows: CiSearchSidebarRow[] = rowsRaw.map(entry => {
+    const row = entry as Record<string, unknown>
+    const valuesRaw = row.values as Record<string, unknown> | undefined
+    const values: Record<string, string> = {}
+    if (valuesRaw && typeof valuesRaw === 'object') {
+      for (const [key, val] of Object.entries(valuesRaw)) {
+        values[key] = val != null ? String(val) : ''
+      }
+    }
+    return {
+      sys_id: String(row.sys_id ?? ''),
+      values,
+    }
+  }).filter(r => r.sys_id)
+
+  return {
+    rows,
+    totalCount: Number(result.totalCount) || 0,
+    access,
+  }
+}
+
+/** Distinct task page for CI Search summary sidebar. */
+export async function fetchCiSearchDistinctTasksPage(
+  body: CiSearchDistinctTasksRequest,
+): Promise<CiSearchSidebarPageResponse> {
+  if (!body.query) {
+    return { rows: [], totalCount: 0, access: 'ok' }
+  }
+
+  try {
+    const r = await axios.post(`/api/${APP_SCOPE}/portal/ci_search_distinct_tasks`, body)
+    const result = unwrapRestBody(unwrapRestBody(r.data)) as Record<string, unknown>
+    if (!result || typeof result !== 'object') return EMPTY_CI_SEARCH_SIDEBAR_PAGE
+    return parseSidebarPageResponse(result)
+  } catch (err) {
+    if (isAxiosForbidden(err)) return EMPTY_CI_SEARCH_SIDEBAR_PAGE
+    return { rows: [], totalCount: 0, access: 'error' }
   }
 }
 

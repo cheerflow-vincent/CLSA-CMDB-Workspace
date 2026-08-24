@@ -1,4 +1,4 @@
-import { queryTableWithAccess, queryStatsGroupCount, type TableAccess } from '../../api/servicenow';
+import { fetchCiSearchDistinctTasksPage, queryTableWithAccess, queryStatsGroupCount, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import { LIST_VIEW_TITLE, RELATED_CI_PAGE_SIZE } from './relatedCIs';
@@ -160,7 +160,19 @@ export async function fetchRelatedTaskPageByQuery(
   return { rows, columns, totalCount, access };
 }
 
-const TASK_CI_SCAN_BATCH = 200;
+function mapSidebarTaskRows(
+  rows: { sys_id: string; values: Record<string, string> }[],
+  layoutColumns: ViewField[],
+): { rows: RelatedTaskRow[]; columns: ViewField[] } {
+  const taskRows = rows.map(r => {
+    const record: Record<string, unknown> = { 'task.sys_id': r.sys_id };
+    for (const col of layoutColumns) {
+      record[`task.${col.element}`] = r.values[col.element] ?? '';
+    }
+    return record;
+  });
+  return mapTaskCiResultRows(taskRows, layoutColumns);
+}
 
 function mapTaskCiResultRows(
   taskRows: Record<string, unknown>[],
@@ -204,59 +216,19 @@ export async function fetchDistinctRelatedTaskPageByQuery(
     return { rows: [], columns: layoutColumns, totalCount: 0, access: 'ok' };
   }
 
-  const countRes = await countDistinctRelatedTasksFromBranches([encodedQuery]);
-  if (countRes.access === 'denied') {
-    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'denied' };
+  const { rows: sidebarRows, totalCount, access } = await fetchCiSearchDistinctTasksPage({
+    query: encodedQuery,
+    task_table: config.taskTable,
+    fields: layoutColumns.map(c => c.element),
+    page,
+    page_size: pageSize,
+  });
+
+  if (access === 'denied') {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access };
   }
 
-  const totalCount = countRes.totalCount;
-  if (!totalCount) {
-    return { rows: [], columns: layoutColumns, totalCount: 0, access: countRes.access };
-  }
-
-  const taskFields = [...new Set(['task.sys_id', ...layoutColumns.map(c => `task.${c.element}`)])];
-  const skip = page * pageSize;
-  let distinctSkipped = 0;
-  let tableOffset = 0;
-  const seenTasks = new Set<string>();
-  const pageTaskRows: Record<string, unknown>[] = [];
-  let access: TableAccess = countRes.access;
-
-  while (pageTaskRows.length < pageSize) {
-    const { result = [], access: batchAccess } = await queryTableWithAccess<Record<string, unknown>>({
-      table: 'task_ci',
-      query: `${encodedQuery}^ORDERBYtask.number`,
-      fields: taskFields,
-      limit: TASK_CI_SCAN_BATCH,
-      offset: tableOffset,
-      displayValue: true,
-    });
-
-    if (batchAccess === 'denied') {
-      return { rows: [], columns: layoutColumns, totalCount: 0, access: 'denied' };
-    }
-    if (batchAccess === 'error') access = 'error';
-    if (!result.length) break;
-
-    for (const row of result) {
-      const taskId = raw(row['task.sys_id']);
-      if (!taskId || seenTasks.has(taskId)) continue;
-      seenTasks.add(taskId);
-
-      if (distinctSkipped < skip) {
-        distinctSkipped++;
-        continue;
-      }
-
-      pageTaskRows.push(row);
-      if (pageTaskRows.length >= pageSize) break;
-    }
-
-    tableOffset += result.length;
-    if (result.length < TASK_CI_SCAN_BATCH) break;
-  }
-
-  const { rows, columns } = mapTaskCiResultRows(pageTaskRows, layoutColumns);
+  const { rows, columns } = mapSidebarTaskRows(sidebarRows, layoutColumns);
   return { rows, columns, totalCount, access };
 }
 

@@ -1,6 +1,7 @@
 import type { TableAccess } from '../../api/servicenow';
 import { fetchCiSearchDistinctCounts } from '../../api/servicenow';
 import { CHUNK_SIZE } from './appHomeLoader';
+import { fetchCmdbHealthCountByQuery } from './cmdbHealthResults';
 import {
   buildAppScopedCiQuery,
   EMPTY_CI_QUERY,
@@ -297,16 +298,24 @@ export async function fetchCiSearchSummaryCounts(
   const changeQuery = joinOrEncodedQueries(changeBranches);
   const healthQuery = joinOrEncodedQueries(healthBranches);
 
-  const result = await fetchCiSearchDistinctCounts({
-    incident_query: incidentQuery,
-    change_query: changeQuery,
-    health_query: healthQuery,
-  });
+  const [taskCounts, healthRes] = await Promise.all([
+    fetchCiSearchDistinctCounts({
+      incident_query: incidentQuery,
+      change_query: changeQuery,
+    }),
+    healthQuery
+      ? fetchCmdbHealthCountByQuery(healthQuery)
+      : Promise.resolve({ totalCount: 0, access: 'ok' as const }),
+  ]);
 
   return {
-    incidents: result.incidents,
-    changes: result.changes,
-    health: result.health,
-    access: result.access,
+    incidents: taskCounts.incidents,
+    changes: taskCounts.changes,
+    health: healthRes.totalCount,
+    access: {
+      incidents: taskCounts.access.incidents,
+      changes: taskCounts.access.changes,
+      health: healthRes.access,
+    },
   };
 }

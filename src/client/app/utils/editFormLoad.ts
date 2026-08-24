@@ -8,6 +8,12 @@ import { editDisplayValue, editRawValue } from './editValues';
 const REFERENCE_TYPES = new Set(['reference', 'document_id', 'domain_id']);
 const SYS_ID_RE = /^[a-f0-9]{32}$/i;
 
+function parseMandatoryValue(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  const normalized = str(value).trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+
 /** True when a reference value still needs a display label lookup. */
 export function needsReferenceDisplayResolve(value: EditFieldValue | undefined): boolean {
   const id = editRawValue(value);
@@ -102,7 +108,7 @@ export async function fetchDictionaryFieldMeta(
           internal_type: internalType,
           reference: raw(row.reference) || undefined,
           max_length: parseInt(str(row.max_length), 10) || undefined,
-          mandatory: str(row.mandatory) === 'true' || undefined,
+          mandatory: parseMandatoryValue(row.mandatory),
         };
         remaining.delete(el);
       }

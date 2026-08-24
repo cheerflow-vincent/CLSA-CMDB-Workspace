@@ -1,4 +1,4 @@
-import { queryTableWithAccess, queryStatsGroupCount, type TableAccess } from '../../api/servicenow';
+import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import { LIST_VIEW_TITLE } from './relatedCIs';
@@ -119,25 +119,7 @@ export async function fetchCmdbHealthFromBranches(
   }
 
   const combined = buildCombinedHealthQuery(branches);
-  const [countRes, pageRes] = await Promise.all([
-    countDistinctHealthFromBranches(branches),
-    fetchCmdbHealthPageByQuery(combined, page, pageSize),
-  ]);
-
-  if (countRes.access === 'denied') {
-    return { ...pageRes, rows: [], totalCount: 0, access: 'denied' };
-  }
-
-  return { ...pageRes, totalCount: countRes.totalCount };
-}
-
-/** Count distinct health metrics across query branches (matches sidebar dedupe). */
-export async function countDistinctHealthFromBranches(
-  branches: string[],
-): Promise<{ totalCount: number; access: TableAccess }> {
-  const query = buildCombinedHealthQuery(branches);
-  if (!query) return { totalCount: 0, access: 'ok' };
-  return queryStatsGroupCount({ table: CMDB_HEALTH_TABLE, query, groupBy: 'sys_id' });
+  return fetchCmdbHealthPageByQuery(combined, page, pageSize);
 }
 
 export async function fetchCmdbHealthResults(ciSysId: string): Promise<HealthResultsPage> {

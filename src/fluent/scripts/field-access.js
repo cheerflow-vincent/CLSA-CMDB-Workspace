@@ -106,17 +106,39 @@
     return entry;
   }
 
-  function isMandatoryField(dict) {
+  function parseMandatoryValue(value) {
+    if (value === true || value === 1) return true;
+    var normalized = String(value == null ? '' : value).replace(/^\s+|\s+$/g, '').toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+
+  function isMandatoryFromElement(ed) {
+    if (!ed) return false;
+    try {
+      if (typeof ed.isMandatory === 'function' && ed.isMandatory()) return true;
+    } catch (e) {
+      // Fall back to dictionary below.
+    }
+    return false;
+  }
+
+  function isMandatoryFromDictionary(dict) {
     if (!dict) return false;
     try {
-      return String(dict.getValue('mandatory')) === 'true';
+      if (parseMandatoryValue(dict.getValue('mandatory'))) return true;
+      if (parseMandatoryValue(dict.mandatory)) return true;
     } catch (e) {
       return false;
     }
+    return false;
   }
 
-  function attachFieldMeta(entry, tableName, name, internalType, dict) {
-    if (isMandatoryField(dict)) entry.mandatory = true;
+  function isMandatoryField(dict, ed) {
+    return isMandatoryFromElement(ed) || isMandatoryFromDictionary(dict);
+  }
+
+  function attachFieldMeta(entry, tableName, name, internalType, dict, ed) {
+    entry.mandatory = isMandatoryField(dict, ed);
     return attachChoicesSafely(entry, tableName, name, internalType, dict);
   }
 
@@ -132,7 +154,7 @@
       reference: String(ed.getReference() || ''),
       max_length: ed.getLength(),
     };
-    return attachFieldMeta(entry, tableName, name, internalType, dict);
+    return attachFieldMeta(entry, tableName, name, internalType, dict, ed);
   }
 
   function resolveFieldAccess(tableName, name) {
@@ -148,6 +170,7 @@
     if (entry) return entry;
 
     var dictType = String(dict.getValue('internal_type') || 'string');
+    var dictEd = ge.getED();
     var dictEntry = {
       read: ge.canRead(),
       write: ge.canWrite(),
@@ -155,7 +178,7 @@
       reference: String(dict.getValue('reference') || ''),
       max_length: parseInt(dict.getValue('max_length'), 10) || 0,
     };
-    return attachFieldMeta(dictEntry, tableName, name, dictType, dict);
+    return attachFieldMeta(dictEntry, tableName, name, dictType, dict, dictEd);
   }
 
   var canWriteRecord = gr.canWrite();

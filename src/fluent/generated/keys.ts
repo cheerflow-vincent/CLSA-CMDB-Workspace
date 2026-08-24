@@ -97,6 +97,15 @@ declare global {
                         table: 'sys_ws_operation'
                         id: '229addbec2cf4bfcb4641bfb6e244728'
                     }
+                    'ci-search-distinct-health-route': {
+                        table: 'sys_ws_operation'
+                        id: '0a897f13418241bf951087509169cc2e'
+                        deleted: true
+                    }
+                    'ci-search-distinct-tasks-route': {
+                        table: 'sys_ws_operation'
+                        id: 'a39620fca51149678ccbc7d52777cc13'
+                    }
                     'ci-task-flag-counts-route': {
                         table: 'sys_ws_operation'
                         id: '1bc4f6e35c1e48618385f9b25abbd87e'
