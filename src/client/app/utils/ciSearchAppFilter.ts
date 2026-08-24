@@ -9,7 +9,7 @@ import {
   type RelatedCIConfig,
 } from './relatedCIs';
 import { raw } from './viewFields';
-import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms, appendEncodedQuery, buildColumnFiltersQuery, escapeLikeTerm, joinOrEncodedQueries } from './searchQuery';
+import { buildMultiFieldAndLikeQuery, tokenizeSearchTerms, appendEncodedQuery, buildColumnFiltersQuery, escapeLikeTerm, joinOrEncodedQueries, appendOrderByToQuery, DEFAULT_COLUMN_SORT } from './searchQuery';
 import { CI_INVENTORY_TABS, type CISearchInventoryTab } from './ciSearchTabs';
 
 export const CI_INVENTORY_CLASSES = [
@@ -297,6 +297,7 @@ export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
   searchFields: string[],
   fields: string[],
   columnFilterPart = '',
+  sort = DEFAULT_COLUMN_SORT,
 ): Promise<{ rows: T[]; access: TableAccess }> {
   if (!relatedIds.length) return { rows: [], access: 'ok' };
 
@@ -304,7 +305,7 @@ export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
     const query = buildAppScopedCiQuery(relatedIds, keyword, ciFilter, searchFields, columnFilterPart);
     const { result, access } = await queryTableWithAccess<T>({
       table,
-      query: `${query}^ORDERBYname`,
+      query: appendOrderByToQuery(query, sort),
       fields,
       limit: relatedIds.length + 5,
       displayValue: true,
@@ -319,7 +320,7 @@ export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
     const query = buildAppScopedCiQuery(chunk, keyword, ciFilter, searchFields, columnFilterPart);
     const { result, access: chunkAccess } = await queryTableWithAccess<T>({
       table,
-      query: `${query}^ORDERBYname`,
+      query: appendOrderByToQuery(query, sort),
       fields,
       limit: chunk.length + 5,
       displayValue: true,
@@ -329,8 +330,15 @@ export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
     all.push(...(result ?? []));
   }
 
-  all.sort((a, b) =>
-    String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' }),
-  );
+  const sortField = sort.field || 'name';
+  const dir = sort.direction === 'desc' ? -1 : 1;
+  all.sort((a, b) => {
+    const cmp = String(a[sortField] ?? '').localeCompare(
+      String(b[sortField] ?? ''),
+      undefined,
+      { sensitivity: 'base', numeric: true },
+    );
+    return cmp * dir;
+  });
   return { rows: all, access };
 }

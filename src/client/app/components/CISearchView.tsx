@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Server, Database, Link, Network, Search,
-  ChevronDown, ArrowUpDown, ChevronLeft, ChevronRight,
+  ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
   X, Check, FilterX,
   Download, FileText, ExternalLink, Loader2
 } from 'lucide-react';
@@ -34,7 +34,7 @@ import {
   type AppFilterSelection,
   type AppRelatedIdsByTab,
 } from '../utils/ciSearchAppFilter';
-import { buildColumnFiltersQuery } from '../utils/searchQuery';
+import { buildColumnFiltersQuery, appendOrderByToQuery, DEFAULT_COLUMN_SORT, type ColumnSort } from '../utils/searchQuery';
 import {
   buildSummaryContext,
   buildSidebarQueryBranches,
@@ -139,6 +139,18 @@ interface TabData {
 
 const EMPTY_TAB_DATA: TabData = { columns: [], rows: [], totalCount: 0, loading: false, access: 'ok' };
 
+type SortByTab = Record<Tab, ColumnSort>;
+
+function emptySortByTab(): SortByTab {
+  return {
+    all: { ...DEFAULT_COLUMN_SORT },
+    servers: { ...DEFAULT_COLUMN_SORT },
+    switches: { ...DEFAULT_COLUMN_SORT },
+    databases: { ...DEFAULT_COLUMN_SORT },
+    network_links: { ...DEFAULT_COLUMN_SORT },
+  };
+}
+
 function resolveCiTable(rec: Record<string, unknown>, fallbackTable: string): string {
   const v = raw(rec.sys_class_name);
   if (v && /^cmdb_ci/.test(v)) return v;
@@ -198,16 +210,30 @@ function buildCIItem(row: SearchRow): CIItem {
   };
 }
 
+function sortSearchRows(rows: SearchRow[], sort: ColumnSort): SearchRow[] {
+  const field = sort.field || 'name';
+  const dir = sort.direction === 'desc' ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const cmp = (a.values[field] ?? '').localeCompare(
+      b.values[field] ?? '',
+      undefined,
+      { sensitivity: 'base', numeric: true },
+    );
+    return cmp * dir;
+  });
+}
+
 async function fetchTabPage(
   cfg: V2TabCfg,
   snQuery: string,
   columns: ViewField[],
   page: number,
   pageSize: number,
+  sort: ColumnSort,
 ): Promise<{ rows: SearchRow[]; totalCount: number; access: TableAccess; columns: ViewField[] }> {
   const { result, totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
     table: cfg.table,
-    query: `${snQuery}^ORDERBYname`,
+    query: appendOrderByToQuery(snQuery, sort),
     fields: apiFieldsForColumns(columns),
     limit: pageSize,
     offset: page * pageSize,
@@ -231,10 +257,11 @@ async function fetchAllTabPage(
   columns: ViewField[],
   page: number,
   pageSize: number,
+  sort: ColumnSort,
 ): Promise<{ rows: SearchRow[]; totalCount: number; access: TableAccess; columns: ViewField[] }> {
   const { result, totalCount, access } = await queryTableWithAccess<Record<string, unknown>>({
     table: ALL_CI_TABLE,
-    query: `${snQuery}^ORDERBYname`,
+    query: appendOrderByToQuery(snQuery, sort),
     fields: apiFieldsForColumns(columns),
     limit: pageSize,
     offset: page * pageSize,
@@ -259,12 +286,13 @@ async function fetchTabAll(
   columns: ViewField[],
   totalCount: number,
   csvExportLimit: number,
+  sort: ColumnSort,
 ): Promise<{ rows: SearchRow[]; access: TableAccess }> {
   if (!totalCount) return { rows: [], access: 'ok' };
   const limit = Math.min(totalCount, csvExportLimit);
   const { result, access } = await queryTableWithAccess<Record<string, unknown>>({
     table,
-    query: `${snQuery}^ORDERBYname`,
+    query: appendOrderByToQuery(snQuery, sort),
     fields: apiFieldsForColumns(columns),
     limit,
     displayValue: true,
@@ -512,6 +540,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const [csvExportLimit, setCsvExportLimit] = useState(DEFAULT_CSV_EXPORT_LIMIT);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const [sortByTab, setSortByTab] = useState<SortByTab>(emptySortByTab);
   const { ref: narrowRef, narrow } = useNarrowContainer(720);
   const [ciFilter, setCiFilter]     = useState<string | null>(null);
   const [searchFields, setSearchFields] = useState<string[]>(DEFAULT_SEARCH_FIELDS);
@@ -658,6 +687,22 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   );
 
   const queriesReady = ciFilter !== null && (!appFilterActive || (!appFilterLoading && appRelatedIdsByTab !== null));
+
+  const activeSort = sortByTab[activeTab];
+
+  const handleColumnSort = useCallback((field: string) => {
+    setSortByTab(prev => {
+      const current = prev[activeTab];
+      if (current.field === field) {
+        return {
+          ...prev,
+          [activeTab]: { field, direction: current.direction === 'asc' ? 'desc' : 'asc' },
+        };
+      }
+      return { ...prev, [activeTab]: { field, direction: 'asc' } };
+    });
+    setPage(0);
+  }, [activeTab]);
 
   // Load CI filter, searchable fields, hierarchy mode, and CSV export limit
   useEffect(() => {
@@ -808,7 +853,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       .then(cols => {
         if (cancelled) return null;
         setAllColumns(cols);
-        return fetchAllTabPage(allTabSnQuery, cols, page, pageSize);
+        return fetchAllTabPage(allTabSnQuery, cols, page, pageSize, sortByTab.all);
       })
       .then(async result => {
         if (cancelled || !result) return;
@@ -839,6 +884,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     pageSize,
     getColumns,
     allTabSnQuery,
+    sortByTab.all.field,
+    sortByTab.all.direction,
   ]);
 
   // Load specific tab rows when app filter is active (client-side pagination)
@@ -869,6 +916,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           searchFields,
           apiFieldsForColumns(cols),
           columnFilterPart,
+          sortByTab[activeTab],
         );
         if (cancelled) return null;
         if (access === 'denied') {
@@ -925,6 +973,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     ciFilter,
     searchFields,
     activeTabFilterKey,
+    sortByTab[activeTab].field,
+    sortByTab[activeTab].direction,
   ]);
 
   // Load specific tab page with server-side pagination when no app filter
@@ -942,7 +992,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     getColumns(cfg.table, cfg.defaultColumns)
       .then(cols => {
         if (cancelled) return null;
-        return fetchTabPage(cfg, tabBadgeQueriesByTab[activeTab], cols, page, pageSize);
+        return fetchTabPage(cfg, tabBadgeQueriesByTab[activeTab], cols, page, pageSize, sortByTab[activeTab]);
       })
       .then(async result => {
         if (cancelled || !result) return;
@@ -979,6 +1029,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     pageSize,
     getColumns,
     appFilterActive,
+    sortByTab[activeTab].field,
+    sortByTab[activeTab].direction,
   ]);
 
   const handleSearch = () => {
@@ -998,6 +1050,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     setApplied(cleared);
     setColFiltersByTab(EMPTY_COL_FILTERS_BY_TAB());
     setAppliedColFiltersByTab(EMPTY_COL_FILTERS_BY_TAB());
+    setSortByTab(emptySortByTab());
     setActiveTab('all');
     setPage(0);
   };
@@ -1019,9 +1072,13 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     ? allTabData.totalCount
     : tabData[activeTab].totalCount;
 
-  const pageRows = (activeTab !== 'all' && appFilterActive)
-    ? tabData[activeTab].rows.slice(page * pageSize, (page + 1) * pageSize)
-    : (activeTab === 'all' ? allTabData.rows : tabData[activeTab].rows);
+  const pageRows = useMemo(() => {
+    if (activeTab !== 'all' && appFilterActive) {
+      const sorted = sortSearchRows(tabData[activeTab].rows, sortByTab[activeTab]);
+      return sorted.slice(page * pageSize, (page + 1) * pageSize);
+    }
+    return activeTab === 'all' ? allTabData.rows : tabData[activeTab].rows;
+  }, [activeTab, appFilterActive, tabData, allTabData.rows, page, pageSize, sortByTab]);
 
   const displayRows = pageRows;
 
@@ -1199,13 +1256,14 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         columns,
         allTabData.totalCount,
         csvExportLimit,
+        sortByTab.all,
       );
       return rows;
     }
     const cfg = V2_TABS.find(t => t.tab === activeTab);
     if (!cfg || isAccessDenied(tabData[activeTab].access)) return [];
     if (appFilterActive) {
-      return tabData[activeTab].rows;
+      return sortSearchRows(tabData[activeTab].rows, sortByTab[activeTab]);
     }
     const { rows } = await fetchTabAll(
       cfg.table,
@@ -1213,6 +1271,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       columns,
       tabData[activeTab].totalCount,
       csvExportLimit,
+      sortByTab[activeTab],
     );
     return rows;
   }, [
@@ -1225,6 +1284,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     tabData,
     appFilterActive,
     csvExportLimit,
+    sortByTab,
   ]);
 
   const exportTruncated = useMemo(() => {
@@ -1500,13 +1560,25 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           <table className="w-full">
             <thead className="bg-gray-50 border-y border-gray-200">
               <tr>
-                {columns.map(col => (
+                {columns.map(col => {
+                  const isActive = activeSort.field === col.element;
+                  const SortIcon = isActive
+                    ? (activeSort.direction === 'asc' ? ArrowUp : ArrowDown)
+                    : ArrowUpDown;
+                  return (
                   <th key={col.element} className="px-6 py-3 text-left">
-                    <button type="button" className="flex items-center gap-2 typo-label text-gray-700 hover:text-gray-900">
-                      {col.label}<ArrowUpDown className="w-4 h-4" />
+                    <button
+                      type="button"
+                      onClick={() => handleColumnSort(col.element)}
+                      className={`flex items-center gap-2 typo-label hover:text-gray-900 ${
+                        isActive ? 'text-blue-700' : 'text-gray-700'
+                      }`}
+                    >
+                      {col.label}<SortIcon className="w-4 h-4 shrink-0" />
                     </button>
                   </th>
-                ))}
+                  );
+                })}
               </tr>
               {columns.length > 0 && (
                 <tr className="border-t border-gray-200">

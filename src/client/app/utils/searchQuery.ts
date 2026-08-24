@@ -101,6 +101,31 @@ function columnFilterField(element: string): string {
   return REFERENCE_FILTER_FIELDS.has(element) ? `${element}.name` : element;
 }
 
+export type SortDirection = 'asc' | 'desc';
+
+export interface ColumnSort {
+  field: string;
+  direction: SortDirection;
+}
+
+export const DEFAULT_COLUMN_SORT: ColumnSort = { field: 'name', direction: 'asc' };
+
+function columnSortField(element: string): string {
+  return columnFilterField(element);
+}
+
+/** ServiceNow encoded-query ORDERBY segment for Table API queries. */
+export function buildOrderByClause(sort: ColumnSort): string {
+  const field = columnSortField(sort.field || 'name');
+  return sort.direction === 'desc' ? `ORDERBYDESC${field}` : `ORDERBY${field}`;
+}
+
+/** Append sort to an encoded query (query must not already contain ORDERBY). */
+export function appendOrderByToQuery(query: string, sort: ColumnSort): string {
+  if (!query.trim()) return '';
+  return `${query}^${buildOrderByClause(sort)}`;
+}
+
 /** Append an encoded-query segment when both parts are non-empty. */
 export function appendEncodedQuery(base: string, extra: string): string {
   if (!extra.trim()) return base;
