@@ -17,7 +17,7 @@ import {
   type FormSectionLayout, type FormLayoutRow,
 } from '../utils/viewFields';
 import { CI_OVERVIEW_VIEW, CI_CONTACT_VIEW, resolveCiSearchParentTable } from '../utils/ciTables';
-import { readRecordUrlParams, isCmdbTableName } from '../utils/routing';
+import { readRecordUrlParams, replaceRecordUrl, isRecordTableName, resolveRecordTable, pickCiTableHint } from '../utils/routing';
 import RelatedListSection from './RelatedListSection';
 import HealthResultsPanel from './HealthResultsPanel';
 import CiRelatedComponentsSection, {
@@ -99,19 +99,17 @@ function formatClassLabel(cls: string): string {
 }
 
 function initialClassLabel(ci: CIItem): string {
-  if (ci.class && !isCmdbTableName(ci.class)) return ci.class;
-  if (isCmdbTableName(ci.table)) return formatClassLabel(ci.table);
-  if (isCmdbTableName(ci.class)) return formatClassLabel(ci.class);
+  if (ci.class && !isRecordTableName(ci.class)) return ci.class;
+  if (isRecordTableName(ci.table)) return formatClassLabel(ci.table);
+  if (isRecordTableName(ci.class)) return formatClassLabel(ci.class);
   return ci.type || '';
 }
 
 /** Pick the best CMDB table hint from URL params or CI props. */
 function resolveTableHint(ci: CIItem): string {
   const url = readRecordUrlParams();
-  if (isCmdbTableName(url?.table)) return url!.table;
-  if (isCmdbTableName(ci.table)) return ci.table!;
-  if (isCmdbTableName(ci.class)) return ci.class;
-  return 'cmdb_ci';
+  if (isRecordTableName(url?.table)) return url!.table;
+  return pickCiTableHint(ci);
 }
 
 /** Resolve sys_id + table for a CI record (refresh / deep-link safe). */
@@ -135,7 +133,7 @@ async function resolveRecordContext(
     if (!rec) continue;
 
     const className = raw(rec.sys_class_name);
-    const recordTable = isCmdbTableName(className) ? className : table;
+    const recordTable = resolveRecordTable(className, table);
 
     return {
       sysId,
@@ -313,6 +311,11 @@ export default function CIDetailView({
         setRecordSysId(ctx.sysId);
         setRecordTable(ctx.recordTable);
         setDisplayName(ctx.name);
+
+        const urlParams = readRecordUrlParams();
+        if (urlParams && ctx.recordTable !== urlParams.table) {
+          replaceRecordUrl(ctx.recordTable, ctx.sysId);
+        }
 
         getTableLabel(ctx.recordTable)
           .then(label => {

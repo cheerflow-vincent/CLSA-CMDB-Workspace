@@ -60,9 +60,25 @@ PortalMetadataHandler.prototype = {
     return '';
   },
 
+  /** Walk sys_db_object.super_class chain; true when table extends cmdb_ci. */
+  tableExtendsCmdbCi: function (tableName) {
+    if (!tableName) return false;
+    if (tableName === this.CMDB_CI_TABLE) return true;
+    var current = tableName;
+    var seen = {};
+    for (var i = 0; i < 12; i++) {
+      if (!current || seen[current]) break;
+      seen[current] = true;
+      if (current === this.CMDB_CI_TABLE) return true;
+      current = this.getParentTable(current);
+    }
+    return false;
+  },
+
   isAllowedTable: function (tableName) {
     if (!tableName || !/^[a-z0-9_]+$/.test(tableName)) return false;
-    return tableName.indexOf('cmdb_') === 0 || tableName === 'task_ci';
+    if (tableName.indexOf('cmdb_') === 0 || tableName === 'task_ci') return true;
+    return this.tableExtendsCmdbCi(tableName);
   },
 
   isAllowedViewTitle: function (title) {

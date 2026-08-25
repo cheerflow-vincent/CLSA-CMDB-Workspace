@@ -13,7 +13,14 @@ import GlobalSearchBar from './app/components/GlobalSearchBar';
 import { type AppItem } from './app/data/appData';
 import { queryTable, getSysProperties, APP_SCOPE } from './api/servicenow';
 import { str, raw } from './app/utils/viewFields';
-import { readRecordUrlParams, stampRecordHistory, isCmdbTableName } from './app/utils/routing';
+import {
+  readRecordUrlParams,
+  stampRecordHistory,
+  replaceRecordUrl,
+  isRecordTableName,
+  resolveRecordTable,
+  pickCiTableHint,
+} from './app/utils/routing';
 import {
   CI_INVENTORY_TABS,
   readCISearchTabFromUrl,
@@ -120,7 +127,7 @@ export function App() {
 
   function navigateToRecord(table: string, sysId: string, ciSrc: 'ci-search' | 'app-details') {
     setCurrentView('loading');
-    const tableHint = isCmdbTableName(table) ? table : 'cmdb_ci';
+    const tableHint = isRecordTableName(table) ? table : 'cmdb_ci';
     const tablesToTry = [...new Set([tableHint, 'cmdb_ci'])];
 
     const fetchRecord = async (): Promise<Record<string, unknown> | null> => {
@@ -146,7 +153,11 @@ export function App() {
         }
 
         const className = raw(r.sys_class_name);
-        const recordTable = isCmdbTableName(className) ? className : tableHint;
+        const recordTable = resolveRecordTable(className, tableHint);
+
+        if (recordTable !== tableHint) {
+          replaceRecordUrl(recordTable, sysId, { ciSource: ciSrc });
+        }
 
         if (isServiceClass(tableHint) || isServiceClass(recordTable)) {
           setSelectedApp({
@@ -162,7 +173,7 @@ export function App() {
           setSelectedCI({
             id: sysId,
             name:         str(r.name) || '',
-            type:         formatClassName(isCmdbTableName(className) ? className : recordTable),
+            type:         formatClassName(isRecordTableName(className) ? className : recordTable),
             class:        recordTable,
             table:        recordTable,
             environment:  str(r.environment) ?? '',
@@ -251,8 +262,7 @@ export function App() {
     setSelectedCI(ci);
     setCISource(source);
     setCurrentView('ci-detail');
-    const table = isCmdbTableName(ci.table) ? ci.table : (isCmdbTableName(ci.class) ? ci.class : 'cmdb_ci');
-    pushUrl(table, ci.id, source);
+    pushUrl(pickCiTableHint(ci), ci.id, source);
   };
 
   // In-app Back buttons use the browser history stack — equivalent to the

@@ -21,6 +21,7 @@ import {
   type TableAccess,
 } from '../../api/servicenow';
 import { loadListFieldsWithMeta, raw, str, type ViewField, type ListLayoutKind } from '../utils/viewFields';
+import { isRecordTableName } from '../utils/routing';
 import { filterColumnsByRecords, isAccessDenied } from '../utils/acl';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
 import { enrichRowsWithTaskFlags } from '../utils/relatedCIFlags';
@@ -154,7 +155,7 @@ function emptySortByTab(): SortByTab {
 
 function resolveCiTable(rec: Record<string, unknown>, fallbackTable: string): string {
   const v = raw(rec.sys_class_name);
-  if (v && /^cmdb_ci/.test(v)) return v;
+  if (isRecordTableName(v)) return v;
   return fallbackTable;
 }
 
@@ -238,7 +239,7 @@ async function fetchTabPage(
     fields: apiFieldsForColumns(columns),
     limit: pageSize,
     offset: page * pageSize,
-    displayValue: true,
+    displayValue: 'all',
   });
   if (access === 'denied') {
     return { rows: [], totalCount: 0, access, columns: [] };
@@ -266,7 +267,7 @@ async function fetchAllTabPage(
     fields: apiFieldsForColumns(columns),
     limit: pageSize,
     offset: page * pageSize,
-    displayValue: true,
+    displayValue: 'all',
   });
   if (access === 'denied') {
     return { rows: [], totalCount: 0, access, columns: [] };
@@ -296,7 +297,7 @@ async function fetchTabAll(
     query: appendOrderByToQuery(snQuery, sort),
     fields: apiFieldsForColumns(columns),
     limit,
-    displayValue: true,
+    displayValue: 'all',
   });
   if (access === 'denied') return { rows: [], access };
   const records = result ?? [];
