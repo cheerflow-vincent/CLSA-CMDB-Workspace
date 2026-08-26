@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search, Server, Database, Network, Link,
   AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
 import RelationshipDiagram, { DIR_COLOR, SVC_STYLE, PENDING_EDGE_DASH } from './RelationshipDiagram';
+import AppHierarchyDiagram from './AppHierarchyDiagram';
 import type { DiagramFilters } from './RelationshipDiagram';
 import RelationshipTable from './RelationshipTable';
 import InfrastructureDiagram, { type InfraDiagramFilters } from './InfrastructureDiagram';
@@ -31,6 +32,8 @@ import RelatedListSection from './RelatedListSection';
 import { queryTableWithAccess, fetchFieldAccess, type TableAccess } from '../../api/servicenow';
 import { filterFieldsByReadableKeys, isAccessDenied, canEditRecord } from '../utils/acl';
 import { pollChangeUntilState } from '../utils/pollRelationshipChange';
+import { fetchServiceType } from '../utils/appHomeLoader';
+import { raw } from '../utils/viewFields';
 
 const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
 const OVERVIEW_DEFAULT_LIMIT = 10;
@@ -73,13 +76,40 @@ interface ApplicationDetailsProps {
 }
 
 type ViewMode = 'map' | 'table';
-type RelationshipTab = 'app' | 'infra';
+type RelationshipTab = 'app' | 'family' | 'infra';
+type AppRecordKind = 'business_app' | 'service' | 'instance' | 'pending';
+
+function resolveAppRecordKind(
+  table: string,
+  hierarchyMode: boolean,
+  serviceType: 'service' | 'instance' | null,
+): AppRecordKind {
+  if (table === 'cmdb_ci_business_app') return 'business_app';
+  if (hierarchyMode) {
+    if (table === 'cmdb_ci_service') return 'service';
+    if (table.startsWith('cmdb_ci_service')) return 'instance';
+    return 'service';
+  }
+  if (table === 'cmdb_ci_service') {
+    if (!serviceType) return 'pending';
+    return serviceType === 'instance' ? 'instance' : 'service';
+  }
+  return 'service';
+}
+
+function visibleRelationshipTabs(kind: AppRecordKind): RelationshipTab[] {
+  if (kind === 'instance') return ['app', 'family', 'infra'];
+  if (kind === 'business_app' || kind === 'service') return ['family', 'infra'];
+  return ['family', 'infra'];
+}
+
 type ExpandKey = 'servers' | 'databases' | 'netgear' | 'network_links' | 'incidents' | 'changes' | 'relChanges';
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp, hierarchyMode = true }: ApplicationDetailsProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [relationshipTab, setRelationshipTab] = useState<RelationshipTab>('app');
+  const [serviceType, setServiceType] = useState<'service' | 'instance' | null>(null);
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showInfraEditModal, setShowInfraEditModal] = useState(false);
@@ -109,6 +139,38 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [overviewValues, setOverviewValues] = useState<Record<string, string>>({});
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewAccess, setOverviewAccess] = useState<TableAccess>('ok');
+
+  const recordKind = useMemo(
+    () => resolveAppRecordKind(
+      selectedApp?.table ?? 'cmdb_ci_service',
+      hierarchyMode,
+      serviceType,
+    ),
+    [selectedApp?.table, hierarchyMode, serviceType],
+  );
+
+  const relationshipTabs = useMemo(
+    () => visibleRelationshipTabs(recordKind),
+    [recordKind],
+  );
+
+  useEffect(() => {
+    const sysId = selectedApp?.sysId;
+    const table = selectedApp?.table ?? 'cmdb_ci_service';
+    if (!sysId || hierarchyMode || table !== 'cmdb_ci_service') {
+      setServiceType(null);
+      return;
+    }
+    fetchServiceType(sysId)
+      .then(st => setServiceType(st))
+      .catch(() => setServiceType(null));
+  }, [selectedApp?.sysId, selectedApp?.table, hierarchyMode, pageRefreshKey]);
+
+  useEffect(() => {
+    if (!relationshipTabs.includes(relationshipTab)) {
+      setRelationshipTab(relationshipTabs[0]);
+    }
+  }, [relationshipTabs, relationshipTab]);
 
   useEffect(() => {
     const sysId = selectedApp?.sysId;
@@ -224,29 +286,48 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
             <div className="flex items-center justify-between mb-3 gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setRelationshipTab('app')}
-                    className={`typo-tab ${
-                      relationshipTab === 'app' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    App Relationships
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRelationshipTab('infra')}
-                    className={`typo-tab border-l border-gray-200 ${
-                      relationshipTab === 'infra' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    Infrastructure
-                  </button>
+                  {relationshipTabs.includes('app') && (
+                    <button
+                      type="button"
+                      onClick={() => setRelationshipTab('app')}
+                      className={`typo-tab ${
+                        relationshipTab === 'app' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      App Relationships
+                    </button>
+                  )}
+                  {relationshipTabs.includes('family') && (
+                    <button
+                      type="button"
+                      onClick={() => setRelationshipTab('family')}
+                      className={`typo-tab ${
+                        relationshipTabs.includes('app') ? 'border-l border-gray-200' : ''
+                      } ${
+                        relationshipTab === 'family' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      App Family
+                    </button>
+                  )}
+                  {relationshipTabs.includes('infra') && (
+                    <button
+                      type="button"
+                      onClick={() => setRelationshipTab('infra')}
+                      className={`typo-tab border-l border-gray-200 ${
+                        relationshipTab === 'infra' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      Infrastructure
+                    </button>
+                  )}
                 </div>
                 <h3 className="typo-section-title text-gray-900 truncate">
                   {relationshipTab === 'app'
                     ? 'Upstream / Downstream Relationships'
-                    : 'Infrastructure Relationships'}
+                    : relationshipTab === 'family'
+                      ? 'App Family'
+                      : 'Infrastructure Relationships'}
                 </h3>
               </div>
               <div className="relative flex-shrink-0">
@@ -343,6 +424,47 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
               ))}
 
                 </>
+              ) : relationshipTab === 'family' ? (
+                <>
+                  <span className="typo-label">Legend</span>
+                  {hierarchyMode ? (
+                    ([
+                      { level: 'business' as const, label: 'Business App' },
+                      { level: 'service' as const, label: 'Service' },
+                      { level: 'instance' as const, label: 'Instance' },
+                    ]).map(({ level, label }) => (
+                      <span key={level} className="typo-chip border-gray-200 bg-white text-gray-600">
+                        <span
+                          className="inline-block w-2.5 h-2.5 rounded-sm"
+                          style={{
+                            backgroundColor: level === 'business' ? '#4F46E5'
+                              : level === 'service' ? '#3B82F6' : '#16A34A',
+                          }}
+                        />
+                        {label}
+                      </span>
+                    ))
+                  ) : (
+                    ([
+                      { level: 'business' as const, label: 'App Family' },
+                      { level: 'instance' as const, label: 'Instance' },
+                    ]).map(({ level, label }) => (
+                      <span key={level} className="typo-chip border-gray-200 bg-white text-gray-600">
+                        <span
+                          className="inline-block w-2.5 h-2.5 rounded-sm"
+                          style={{
+                            backgroundColor: level === 'business' ? '#4F46E5' : '#16A34A',
+                          }}
+                        />
+                        {label}
+                      </span>
+                    ))
+                  )}
+                  <span className="typo-chip border-amber-200 bg-amber-50 text-amber-800">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm border border-amber-400 bg-amber-100" />
+                    Current record
+                  </span>
+                </>
               ) : (
                 <>
                   <span className="typo-label">CI Type</span>
@@ -416,6 +538,16 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   onEditCiDetails={app => setRecordEditTarget(app)}
                   onRelationshipMutations={handleRelationshipMutations}
                 />
+              ) : relationshipTab === 'family' ? (
+                <AppHierarchyDiagram
+                  key={`family-${diagramRefreshKey}`}
+                  selectedApp={selectedApp!}
+                  hierarchyMode={hierarchyMode}
+                  serviceType={serviceType}
+                  nodeSearch={nodeSearch}
+                  refreshKey={pageRefreshKey}
+                  onSelectApp={onSelectApp}
+                />
               ) : (
                 <InfrastructureDiagram
                   key={`infra-${diagramRefreshKey}`}
@@ -443,6 +575,10 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   onSelectApp={onSelectApp}
                   refreshKey={pageRefreshKey}
                 />
+              ) : relationshipTab === 'family' ? (
+                <p className="typo-body text-gray-500 italic">
+                  Table view is not available for App Family. Switch to Map view to explore the hierarchy.
+                </p>
               ) : (
                 <InfrastructureRelationshipTable
                   recordSysId={selectedApp?.sysId}

@@ -982,8 +982,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     famMap.get(item.app)!.push(item);
   }
 
-  const noFilterResults = filtersActive && !liveLoading
-    && (filteredInstIds?.size === 0 || totalFamilies === 0);
+  const visibleFamilies = hierarchyMode ? liveData.length : liveTwoLevel.length;
+  const noFilterResults = filtersActive && !liveLoading && visibleFamilies === 0;
 
   return (
     <div className="flex flex-col h-full bg-gray-50">

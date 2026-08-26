@@ -50,6 +50,13 @@ function isServiceClass(table: string) {
   return table.startsWith('cmdb_ci_service');
 }
 
+function shouldOpenAppDetail(table: string, hierarchyMode: boolean): boolean {
+  if (hierarchyMode) {
+    return isServiceClass(table) || table === 'cmdb_ci_business_app';
+  }
+  return table === 'cmdb_ci_service';
+}
+
 function formatClassName(cls: string) {
   return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
@@ -159,7 +166,7 @@ export function App() {
           replaceRecordUrl(recordTable, sysId, { ciSource: ciSrc });
         }
 
-        if (isServiceClass(tableHint) || isServiceClass(recordTable)) {
+        if (shouldOpenAppDetail(tableHint, hierarchyMode) || shouldOpenAppDetail(recordTable, hierarchyMode)) {
           setSelectedApp({
             id: sysId, sysId, table: recordTable,
             name: str(r.name) || '', app: str(r.name) || '',
@@ -342,11 +349,10 @@ export function App() {
         </a>
         <div className="flex-1 flex justify-center px-4">
           <GlobalSearchBar onSelectCI={(ci) => {
-            // In 2-level hierarchy mode, cmdb_ci_service records are app families
-            // or instances — redirect them to the app detail page.
-            if (!hierarchyMode && (ci.table === 'cmdb_ci_service' || ci.class === 'cmdb_ci_service')) {
+            const table = pickCiTableHint(ci);
+            if (shouldOpenAppDetail(table, hierarchyMode)) {
               handleSelectApp({
-                id: ci.id, sysId: ci.id, table: 'cmdb_ci_service',
+                id: ci.id, sysId: ci.id, table,
                 name: ci.name, app: ci.name,
                 family: '', dept: '',
                 env: ci.environment ?? 'Production',

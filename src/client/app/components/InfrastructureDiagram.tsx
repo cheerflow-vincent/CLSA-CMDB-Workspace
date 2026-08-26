@@ -1,5 +1,6 @@
 /**
- * InfrastructureDiagram — app at top, four CI-type stacks below.
+ * InfrastructureDiagram — 2-tier hub layout:
+ * Application/CI at top → CI-type group nodes → individual infra CIs (chained per column).
  */
 
 import { memo, useState, useEffect, useCallback, useRef } from 'react';
@@ -52,20 +53,26 @@ interface Props {
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-const CENTER_X = 500;
 const TOP_Y = 70;
-const STACK_START_Y = 200;
+const GROUP_Y = 200;
+const CI_START_Y = 288;
 const ROW_GAP = 72;
-const COLUMN_X: Record<InfraCIType, number> = {
-  server: 180,
-  netgear: 380,
-  network_link: 620,
-  database: 820,
-};
+const COL_WIDTH = 168;
+const COL_GAP = 48;
 const NW = 148;
 const NH = 42;
+const GW = 152;
+const GH = 44;
 const CW = 180;
 const CH = 52;
+
+function groupNodeId(ciType: InfraCIType): string {
+  return `group-${ciType}`;
+}
+
+function isGroupNodeId(nodeId: string): boolean {
+  return nodeId.startsWith('group-');
+}
 
 const HANDLE_STYLE: React.CSSProperties = {
   width: 6, height: 6, background: 'transparent', border: 'none', opacity: 0,
@@ -77,6 +84,7 @@ interface NodeData {
   label: string;
   ciType: InfraCIType | 'center';
   isCenter: boolean;
+  isGroup?: boolean;
   sysClass: string;
   searchHighlight: SearchHighlight;
   onOpenMenu: (nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent) => void;
@@ -98,11 +106,112 @@ function buildInfraEdge(
     source,
     target,
     hidden,
-    type: 'default',
+    type: 'smoothstep',
     style: { stroke: color, strokeWidth: 2, opacity: 0.88 },
     markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
     data: { ciType },
   };
+}
+
+function computeColumnLayout(
+  byType: Map<InfraCIType, InfraCIPeer[]>,
+): { columnX: Map<InfraCIType, number>; centerX: number } {
+  const activeTypes = INFRA_COLUMN_ORDER.filter(t => (byType.get(t)?.length ?? 0) > 0);
+  const typeCount = Math.max(activeTypes.length, 1);
+  const contentWidth = typeCount * COL_WIDTH + Math.max(0, typeCount - 1) * COL_GAP;
+  const xStart = 40;
+  const centerX = xStart + contentWidth / 2 - CW / 2;
+  const columnX = new Map<InfraCIType, number>();
+
+  activeTypes.forEach((ciType, index) => {
+    columnX.set(ciType, xStart + index * (COL_WIDTH + COL_GAP));
+  });
+
+  for (const ciType of INFRA_COLUMN_ORDER) {
+    if (!columnX.has(ciType)) {
+      columnX.set(ciType, xStart);
+    }
+  }
+
+  return { columnX, centerX };
+}
+
+type InfoMap = Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }>;
+
+function buildHubColumns(
+  nodes: Node[],
+  edges: Edge[],
+  infoMap: InfoMap,
+  byType: Map<InfraCIType, InfraCIPeer[]>,
+  columnX: Map<InfraCIType, number>,
+  openMenu: NodeData['onOpenMenu'],
+  filters: InfraDiagramFilters,
+  relTypesFor?: (peer: InfraCIPeer) => string[],
+): void {
+  for (const ciType of INFRA_COLUMN_ORDER) {
+    const list = [...(byType.get(ciType) ?? [])];
+    if (!list.length) continue;
+    list.sort((a, b) => a.name.localeCompare(b.name));
+
+    const hidden = !filters[ciType];
+    const x = columnX.get(ciType) ?? 40;
+    const gid = groupNodeId(ciType);
+    const style = INFRA_CI_STYLE[ciType];
+
+    nodes.push({
+      id: gid,
+      type: 'infraNode',
+      position: { x, y: GROUP_Y },
+      hidden,
+      data: {
+        label: `${style.label} (${list.length})`,
+        ciType,
+        isCenter: false,
+        isGroup: true,
+        sysClass: '',
+        searchHighlight: 'none',
+        onOpenMenu: openMenu,
+      } satisfies NodeData,
+    });
+
+    edges.push(buildInfraEdge(`e-center-${gid}`, 'center', gid, ciType, hidden));
+
+    list.forEach((peer, i) => {
+      const y = CI_START_Y + i * ROW_GAP;
+      const relTypes = relTypesFor?.(peer);
+      infoMap.set(peer.sysId, {
+        name: peer.name,
+        sysClass: peer.sysClass,
+        ciType,
+        ...(relTypes?.length ? { relTypes } : {}),
+      });
+
+      nodes.push({
+        id: peer.sysId,
+        type: 'infraNode',
+        position: { x, y },
+        hidden,
+        data: {
+          label: peer.name || peer.sysId,
+          ciType,
+          isCenter: false,
+          isGroup: false,
+          sysClass: peer.sysClass,
+          searchHighlight: 'none',
+          onOpenMenu: openMenu,
+        } satisfies NodeData,
+      });
+
+      const source = i === 0 ? gid : list[i - 1].sysId;
+      edges.push(buildInfraEdge(
+        i === 0 ? `e-${gid}-${peer.sysId}` : `e-${list[i - 1].sysId}-${peer.sysId}`,
+        source,
+        peer.sysId,
+        ciType,
+        hidden,
+      ));
+    });
+  }
 }
 
 function buildDiagram(
@@ -115,63 +224,31 @@ function buildDiagram(
   const edges: Edge[] = [];
   const infoMap = new Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }>();
 
-  nodes.push({
-    id: 'center',
-    type: 'infraNode',
-    position: { x: CENTER_X, y: TOP_Y },
-    hidden: false,
-    data: {
-      label: selectedApp?.name ?? 'Selected Application',
-      ciType: 'center',
-      isCenter: true,
-      sysClass: selectedApp?.table ?? 'cmdb_ci_service',
-      searchHighlight: 'none',
-      onOpenMenu: openMenu,
-    } satisfies NodeData,
-  });
-
   const byType = new Map<InfraCIType, InfraCIPeer[]>();
   for (const t of INFRA_COLUMN_ORDER) byType.set(t, []);
   for (const p of peers) {
     byType.get(p.ciType)?.push(p);
   }
 
-  for (const ciType of INFRA_COLUMN_ORDER) {
-    const list = byType.get(ciType) ?? [];
-    list.sort((a, b) => a.name.localeCompare(b.name));
-    const hidden = !filters[ciType];
-    const x = COLUMN_X[ciType];
+  const { columnX, centerX } = computeColumnLayout(byType);
 
-    list.forEach((peer, i) => {
-      const y = STACK_START_Y + i * ROW_GAP;
-      infoMap.set(peer.sysId, { name: peer.name, sysClass: peer.sysClass, ciType });
+  nodes.push({
+    id: 'center',
+    type: 'infraNode',
+    position: { x: centerX, y: TOP_Y },
+    hidden: false,
+    data: {
+      label: selectedApp?.name ?? 'Selected Application',
+      ciType: 'center',
+      isCenter: true,
+      isGroup: false,
+      sysClass: selectedApp?.table ?? 'cmdb_ci_service',
+      searchHighlight: 'none',
+      onOpenMenu: openMenu,
+    } satisfies NodeData,
+  });
 
-      nodes.push({
-        id: peer.sysId,
-        type: 'infraNode',
-        position: { x, y },
-        hidden,
-        data: {
-          label: peer.name || peer.sysId,
-          ciType,
-          isCenter: false,
-          sysClass: peer.sysClass,
-          searchHighlight: 'none',
-          onOpenMenu: openMenu,
-        } satisfies NodeData,
-      });
-
-      const edgeSource = peer.appRole === 'child' ? peer.sysId : 'center';
-      const edgeTarget = peer.appRole === 'child' ? 'center' : peer.sysId;
-      edges.push(buildInfraEdge(
-        `e-${ciType}-${peer.sysId}`,
-        edgeSource,
-        edgeTarget,
-        ciType,
-        hidden,
-      ));
-    });
-  }
+  buildHubColumns(nodes, edges, infoMap, byType, columnX, openMenu, filters);
 
   return { nodes, edges, infoMap };
 }
@@ -189,21 +266,6 @@ function buildCiDiagram(
   const centerTable = centerCi.table || centerCi.class || 'cmdb_ci';
   const centerType = resolveInfraCIType(centerTable);
 
-  nodes.push({
-    id: 'center',
-    type: 'infraNode',
-    position: { x: CENTER_X, y: TOP_Y },
-    hidden: false,
-    data: {
-      label: centerCi.name || 'Selected CI',
-      ciType: centerType ?? 'center',
-      isCenter: true,
-      sysClass: centerTable,
-      searchHighlight: 'none',
-      onOpenMenu: openMenu,
-    } satisfies NodeData,
-  });
-
   const uniqueByType = new Map<InfraCIType, Map<string, InfraCIPeer>>();
   for (const t of INFRA_COLUMN_ORDER) uniqueByType.set(t, new Map());
 
@@ -213,51 +275,41 @@ function buildCiDiagram(
     if (bucket && !bucket.has(p.sysId)) bucket.set(p.sysId, p);
   }
 
-  for (const ciType of INFRA_COLUMN_ORDER) {
-    const uniquePeers = [...(uniqueByType.get(ciType)?.values() ?? [])];
-    uniquePeers.sort((a, b) => a.name.localeCompare(b.name));
-    const hidden = !filters[ciType];
-    const x = COLUMN_X[ciType];
-
-    uniquePeers.forEach((peer, i) => {
-      const y = STACK_START_Y + i * ROW_GAP;
-      const relTypes = peers
-        .filter(p => p.sysId === peer.sysId && p.sysId !== centerCi.id)
-        .map(p => p.relType)
-        .filter(Boolean);
-      infoMap.set(peer.sysId, { name: peer.name, sysClass: peer.sysClass, ciType, relTypes });
-
-      nodes.push({
-        id: peer.sysId,
-        type: 'infraNode',
-        position: { x, y },
-        hidden,
-        data: {
-          label: peer.name || peer.sysId,
-          ciType,
-          isCenter: false,
-          sysClass: peer.sysClass,
-          searchHighlight: 'none',
-          onOpenMenu: openMenu,
-        } satisfies NodeData,
-      });
-    });
+  const byType = new Map<InfraCIType, InfraCIPeer[]>();
+  for (const t of INFRA_COLUMN_ORDER) {
+    byType.set(t, [...(uniqueByType.get(t)?.values() ?? [])]);
   }
+  const { columnX, centerX } = computeColumnLayout(byType);
 
-  for (const p of peers) {
-    if (p.sysId === centerCi.id) continue;
-    const hidden = !filters[p.ciType];
-    const centerRole = p.centerRole ?? 'parent';
-    const edgeSource = centerRole === 'parent' ? 'center' : p.sysId;
-    const edgeTarget = centerRole === 'parent' ? p.sysId : 'center';
-    edges.push(buildInfraEdge(
-      p.relSysId,
-      edgeSource,
-      edgeTarget,
-      p.ciType,
-      hidden,
-    ));
-  }
+  nodes.push({
+    id: 'center',
+    type: 'infraNode',
+    position: { x: centerX, y: TOP_Y },
+    hidden: false,
+    data: {
+      label: centerCi.name || 'Selected CI',
+      ciType: centerType ?? 'center',
+      isCenter: true,
+      isGroup: false,
+      sysClass: centerTable,
+      searchHighlight: 'none',
+      onOpenMenu: openMenu,
+    } satisfies NodeData,
+  });
+
+  buildHubColumns(
+    nodes,
+    edges,
+    infoMap,
+    byType,
+    columnX,
+    openMenu,
+    filters,
+    peer => peers
+      .filter(p => p.sysId === peer.sysId && p.sysId !== centerCi.id)
+      .map(p => p.relType)
+      .filter(Boolean),
+  );
 
   return { nodes, edges, infoMap };
 }
@@ -273,9 +325,10 @@ const SEARCH_EXTRA: Record<SearchHighlight, React.CSSProperties> = {
 const InfraNode = memo(({ id, data }: NodeProps) => {
   const d = data as NodeData;
   const isCenter = d.isCenter;
+  const isGroup = d.isGroup === true;
   const style = d.ciType === 'center' ? null : INFRA_CI_STYLE[d.ciType as InfraCIType];
-  const w = isCenter ? CW : NW;
-  const h = isCenter ? CH : NH;
+  const w = isCenter ? CW : (isGroup ? GW : NW);
+  const h = isCenter ? CH : (isGroup ? GH : NH);
   const borderClr = isCenter && !style ? '#374151' : (style?.border ?? '#374151');
   const searchSty = SEARCH_EXTRA[d.searchHighlight ?? 'none'];
 
@@ -289,8 +342,8 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
       display: 'flex',
       alignItems: 'center',
       gap: 2,
-      padding: isCenter ? '8px 10px' : '5px 4px 5px 8px',
-      cursor: 'grab',
+      padding: isCenter ? '8px 10px' : (isGroup ? '6px 8px' : '5px 4px 5px 8px'),
+      cursor: isGroup ? 'default' : 'grab',
       userSelect: 'none',
       overflow: 'hidden',
       transition: 'opacity 0.2s, box-shadow 0.2s, filter 0.2s',
@@ -301,8 +354,8 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
 
       <span style={{
         flex: 1,
-        fontSize: isCenter ? 12 : 11,
-        fontWeight: isCenter ? 600 : 400,
+        fontSize: isCenter ? 12 : (isGroup ? 11 : 11),
+        fontWeight: isCenter || isGroup ? 600 : 400,
         color: isCenter && !style ? '#111827' : (style?.text ?? '#111827'),
         fontFamily: 'var(--font-sans)',
         whiteSpace: 'normal',
@@ -312,15 +365,17 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
         pointerEvents: 'none',
       }}>{d.label}</span>
 
-      <button
-        className="nodrag flex-shrink-0"
-        style={{ background: 'none', border: 'none', padding: '2px', cursor: 'pointer', lineHeight: 0 }}
-        onPointerDown={e => e.stopPropagation()}
-        onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, isCenter, e); }}
-        aria-label="Open menu"
-      >
-        <MoreVertical size={14} className="text-gray-400" />
-      </button>
+      {!isGroup && (
+        <button
+          className="nodrag flex-shrink-0"
+          style={{ background: 'none', border: 'none', padding: '2px', cursor: 'pointer', lineHeight: 0 }}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); d.onOpenMenu(id, d.label, isCenter, e); }}
+          aria-label="Open menu"
+        >
+          <MoreVertical size={14} className="text-gray-400" />
+        </button>
+      )}
     </div>
   );
 });
@@ -391,6 +446,7 @@ function InfrastructureDiagramInner({
   useDismissOnPointerDown(!!nodeMenu, nodeMenuRef, closeMenu);
 
   const openMenu = useCallback((nodeId: string, label: string, isCenter: boolean, e: React.MouseEvent) => {
+    if (isGroupNodeId(nodeId)) return;
     e.stopPropagation();
     setNodeMenu({
       x: Math.min(e.clientX, window.innerWidth - 260),
@@ -484,8 +540,9 @@ function InfrastructureDiagramInner({
   useEffect(() => {
     setNodes(prev => prev.map(node => {
       if (node.id === 'center') return node;
-      const ciType = (node.data as NodeData).ciType as InfraCIType;
-      const hidden = !filters[ciType];
+      const ciType = (node.data as NodeData).ciType as InfraCIType | 'center';
+      if (ciType === 'center') return node;
+      const hidden = !filters[ciType as InfraCIType];
       if (node.hidden === hidden) return node;
       return { ...node, hidden };
     }));
@@ -511,6 +568,14 @@ function InfrastructureDiagramInner({
         if ((node.data as NodeData).searchHighlight === sh) return node;
         return { ...node, data: { ...node.data, searchHighlight: sh } };
       }
+
+      if (isGroupNodeId(node.id)) {
+        const label = ((node.data as NodeData).label as string).toLowerCase();
+        const sh: SearchHighlight = q && label.includes(q) ? 'match' : q ? 'dim' : 'none';
+        if ((node.data as NodeData).searchHighlight === sh) return node;
+        return { ...node, data: { ...node.data, searchHighlight: sh } };
+      }
+
       const label = ((node.data as NodeData).label as string).toLowerCase();
       const info = infoMapRef.current.get(node.id);
       const relMatch = info?.relTypes?.some(rt => rt.toLowerCase().includes(q)) ?? false;
@@ -538,7 +603,7 @@ function InfrastructureDiagramInner({
         nodeTypes={NODE_TYPES}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        nodeOrigin={[0.5, 0.5]}
+        nodeOrigin={[0, 0]}
         fitView
         fitViewOptions={{ padding: 0.15 }}
         minZoom={0.2}

@@ -1057,6 +1057,197 @@ export async function fetchThreeLevelFamilyPage(
   return { mapping: mappingWithOthers, totalFamilies, page, access };
 }
 
+/** Load business app → service → instance tree (same rel_ci walks as app home). */
+export async function loadThreeLevelHierarchyForBusinessApp(
+  bApp: FamilyMeta,
+): Promise<{ mapping: ThreeLevelMapping; instances: Map<string, LiveInstance> } | null> {
+  const mapping = await buildThreeLevelMappingForApps([bApp], null);
+  if (!mapping) return null;
+
+  const instances = mapping.instanceIds.length
+    ? await loadInstanceCatalog(mapping.instanceIds, 'cmdb_ci_service_auto')
+    : new Map<string, LiveInstance>();
+
+  return { mapping, instances };
+}
+
+export type AppFamilyCenterLevel = 'business' | 'family' | 'service' | 'instance';
+
+export interface AppFamilyHierarchyData {
+  hierarchyMode: boolean;
+  centerSysId: string;
+  centerLevel: AppFamilyCenterLevel;
+  rootId: string;
+  rootName: string;
+  threeLevel?: ThreeLevelMapping;
+  twoLevel?: TwoLevelMapping;
+  instances: Map<string, LiveInstance>;
+}
+
+async function resolveBusinessAppForService(serviceId: string): Promise<FamilyMeta | null> {
+  const res = await chunkedINParallel<{
+    parent: unknown;
+    'parent.name': unknown;
+    'parent.short_description': unknown;
+  }>(
+    'cmdb_rel_ci', 'child.sys_id', [serviceId],
+    'type.name=Consumes::Consumed by',
+    ['parent', 'parent.name', 'parent.short_description'], 5000,
+  );
+  if (res.access === 'denied' || !res.rows.length) return null;
+  const row = res.rows[0];
+  const sys_id = refId(row.parent);
+  if (!sys_id) return null;
+  return {
+    sys_id,
+    name: str(row['parent.name']) || sys_id,
+    short_description: str(row['parent.short_description']),
+  };
+}
+
+async function resolveServiceForInstance(instanceId: string): Promise<FamilyMeta | null> {
+  const res = await chunkedINParallel<{
+    parent: unknown;
+    'parent.name': unknown;
+    'parent.short_description': unknown;
+  }>(
+    'cmdb_rel_ci', 'child.sys_id', [instanceId],
+    'type.name=Contains::Contained by',
+    ['parent', 'parent.name', 'parent.short_description'], 5000,
+  );
+  if (res.access === 'denied' || !res.rows.length) return null;
+  const row = res.rows[0];
+  const sys_id = refId(row.parent);
+  if (!sys_id) return null;
+  return {
+    sys_id,
+    name: str(row['parent.name']) || sys_id,
+    short_description: str(row['parent.short_description']),
+  };
+}
+
+export async function fetchServiceType(
+  sysId: string,
+): Promise<'service' | 'instance' | null> {
+  const { result, access } = await queryTableWithAccess<{ u_service_type: unknown }>({
+    table: 'cmdb_ci_service',
+    query: `sys_id=${sysId}`,
+    fields: ['u_service_type'],
+    limit: 1,
+  });
+  if (access === 'denied' || !result?.[0]) return null;
+  const st = raw(result[0].u_service_type).toLowerCase();
+  if (st === 'instance') return 'instance';
+  if (st === 'service') return 'service';
+  return null;
+}
+
+/** Resolve app-family tree for any business app, service, or instance record. */
+export async function loadAppFamilyHierarchyForRecord(
+  sysId: string,
+  table: string,
+  name: string,
+  hierarchyMode: boolean,
+  serviceType?: 'service' | 'instance' | null,
+): Promise<AppFamilyHierarchyData | null> {
+  if (!sysId) return null;
+
+  if (hierarchyMode) {
+    if (table === 'cmdb_ci_business_app') {
+      const loaded = await loadThreeLevelHierarchyForBusinessApp({
+        sys_id: sysId, name, short_description: '',
+      });
+      if (!loaded) return null;
+      return {
+        hierarchyMode: true,
+        centerSysId: sysId,
+        centerLevel: 'business',
+        rootId: sysId,
+        rootName: name,
+        threeLevel: loaded.mapping,
+        instances: loaded.instances,
+      };
+    }
+
+    if (table === 'cmdb_ci_service') {
+      const bApp = await resolveBusinessAppForService(sysId);
+      if (!bApp) return null;
+      const loaded = await loadThreeLevelHierarchyForBusinessApp(bApp);
+      if (!loaded) return null;
+      return {
+        hierarchyMode: true,
+        centerSysId: sysId,
+        centerLevel: 'service',
+        rootId: bApp.sys_id,
+        rootName: bApp.name,
+        threeLevel: loaded.mapping,
+        instances: loaded.instances,
+      };
+    }
+
+    if (table.startsWith('cmdb_ci_service')) {
+      const svc = await resolveServiceForInstance(sysId);
+      if (!svc) return null;
+      const bApp = await resolveBusinessAppForService(svc.sys_id);
+      if (!bApp) return null;
+      const loaded = await loadThreeLevelHierarchyForBusinessApp(bApp);
+      if (!loaded) return null;
+      return {
+        hierarchyMode: true,
+        centerSysId: sysId,
+        centerLevel: 'instance',
+        rootId: bApp.sys_id,
+        rootName: bApp.name,
+        threeLevel: loaded.mapping,
+        instances: loaded.instances,
+      };
+    }
+
+    return null;
+  }
+
+  const st = serviceType ?? await fetchServiceType(sysId);
+  if (!st) return null;
+
+  if (st === 'service') {
+    const family: FamilyMeta = { sys_id: sysId, name, short_description: '' };
+    const mapping = await buildTwoLevelMappingForFamilies([family], null);
+    if (!mapping) return null;
+    const instIds = [...(mapping.appToInstances.get(sysId) ?? [])];
+    const instances = instIds.length
+      ? await loadInstanceCatalog(instIds, 'cmdb_ci_service')
+      : new Map<string, LiveInstance>();
+    return {
+      hierarchyMode: false,
+      centerSysId: sysId,
+      centerLevel: 'family',
+      rootId: sysId,
+      rootName: name,
+      twoLevel: mapping,
+      instances,
+    };
+  }
+
+  const { families, access } = await resolveTwoLevelMatchingFamilies(new Set([sysId]));
+  if (access === 'denied' || !families.length) return null;
+  const family = families[0];
+  const mapping = await buildTwoLevelMappingForFamilies([family], null);
+  if (!mapping) return null;
+  const instIds = [...(mapping.appToInstances.get(family.sys_id) ?? [])];
+  const instances = instIds.length
+    ? await loadInstanceCatalog(instIds, 'cmdb_ci_service')
+    : new Map<string, LiveInstance>();
+  return {
+    hierarchyMode: false,
+    centerSysId: sysId,
+    centerLevel: 'instance',
+    rootId: family.sys_id,
+    rootName: family.name,
+    twoLevel: mapping,
+    instances,
+  };
+}
+
 /** Resolve all instance sys_ids under a single app family / business app (2- or 3-level). */
 export async function resolveInstanceIdsForFamily(
   familySysId: string,
