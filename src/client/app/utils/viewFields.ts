@@ -263,6 +263,29 @@ export async function loadListFields(
   return result.fields;
 }
 
+/**
+ * App Home instance cards — form view fallback:
+ * CLSA CMDB Workspace on cmdb_ci_service_auto → cmdb_ci_service → cmdb_ci,
+ * then default form on the same three tables (server-brokered).
+ */
+export async function loadInstanceCardViewFields(
+  viewTitle: string,
+  defaultFields: ViewField[] = [],
+): Promise<ViewField[]> {
+  try {
+    const res = await fetchViewLayout({
+      table: 'cmdb_ci_service_auto',
+      view_title: viewTitle,
+      type: 'instance_card_form',
+      default_limit: 50,
+    });
+    if (res.fields?.length) return res.fields;
+  } catch {
+    // fall through to defaults
+  }
+  return defaultFields;
+}
+
 // ─── Form layout (sys_ui_form → sections → elements) ─────────────────────────
 
 export type FormLayoutRow =

@@ -124,7 +124,7 @@ export async function fetchPortalMetadata(force = false): Promise<PortalMetadata
   }
 }
 
-export type ViewLayoutType = 'form' | 'list' | 'form_layout'
+export type ViewLayoutType = 'form' | 'list' | 'form_layout' | 'instance_card_form'
 
 export interface ViewFieldDto {
   element: string

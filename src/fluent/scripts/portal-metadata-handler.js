@@ -584,6 +584,16 @@ PortalMetadataHandler.prototype = {
     return out;
   },
 
+  collectFormFieldNames: function (encodedQuery, limit) {
+    var elems = this.queryUiElements(encodedQuery + '^ORDERBYposition', limit || 50);
+    var names = [];
+    for (var i = 0; i < elems.length; i++) {
+      var el = elems[i].element;
+      if (el && el.indexOf('.') !== 0) names.push(el);
+    }
+    return names;
+  },
+
   resolveFormFieldList: function (tableName, viewTitle, defaultLimit) {
     var limit = defaultLimit || 20;
     var steps = [
@@ -598,15 +608,42 @@ PortalMetadataHandler.prototype = {
     steps.push('sys_ui_section.view.name=^sys_ui_section.name=' + tableName);
 
     for (var s = 0; s < steps.length; s++) {
-      var elems = this.queryUiElements(steps[s] + '^ORDERBYposition', s === steps.length - 1 ? limit : 50);
-      var names = [];
-      for (var i = 0; i < elems.length; i++) {
-        var el = elems[i].element;
-        if (el && el.indexOf('.') !== 0) names.push(el);
-      }
+      var names = this.collectFormFieldNames(steps[s], s === steps.length - 1 ? limit : 50);
       if (names.length) return this.labelFields(tableName, names);
     }
     return [];
+  },
+
+  /** App Home instance cards: fixed form-view fallback across CMDB tables. */
+  resolveInstanceCardFormFields: function (viewTitle, defaultLimit) {
+    var limit = defaultLimit || 50;
+    var steps = [
+      { table: this.INST_TABLE, named: true },
+      { table: this.SVC_TABLE, named: true },
+      { table: this.CMDB_CI_TABLE, named: true },
+      { table: this.INST_TABLE, named: false },
+      { table: this.SVC_TABLE, named: false },
+      { table: this.CMDB_CI_TABLE, named: false },
+    ];
+    for (var s = 0; s < steps.length; s++) {
+      var step = steps[s];
+      var query = step.named
+        ? 'sys_ui_section.view.title=' + viewTitle + '^sys_ui_section.name=' + step.table
+        : 'sys_ui_section.view.name=^sys_ui_section.name=' + step.table;
+      var names = this.collectFormFieldNames(query, limit);
+      if (names.length) {
+        return {
+          fields: this.labelFields(step.table, names),
+          resolved_table: step.table,
+          resolved_view: step.named ? 'named' : 'default',
+        };
+      }
+    }
+    return {
+      fields: [],
+      resolved_table: this.INST_TABLE,
+      resolved_view: 'default',
+    };
   },
 
   findListSysId: function (encodedQuery) {
@@ -1383,6 +1420,15 @@ PortalMetadataHandler.prototype = {
       return;
     }
 
+    if (layoutType === 'instance_card_form') {
+      if (!viewTitle || !this.isAllowedViewTitle(viewTitle)) {
+        this.jsonError(response, 400, 'Invalid or missing view_title for instance_card_form');
+        return;
+      }
+      this.jsonOk(response, this.resolveInstanceCardFormFields(viewTitle, defaultLimit));
+      return;
+    }
+
     if (layoutType === 'form_layout') {
       if (!viewTitle || !this.isAllowedViewTitle(viewTitle)) {
         this.jsonError(response, 400, 'Invalid or missing view_title for form_layout');
@@ -1409,7 +1455,7 @@ PortalMetadataHandler.prototype = {
       return;
     }
 
-    this.jsonError(response, 400, 'type must be form, list, or form_layout');
+    this.jsonError(response, 400, 'type must be form, list, form_layout, or instance_card_form');
   },
 
   type: 'PortalMetadataHandler',

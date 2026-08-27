@@ -156,7 +156,7 @@ export const portal_rest_api = RestApi({
       parameters: [
         { $id: Now.ID['portal-view-layout-param-table'], name: 'table', required: true, shortDescription: 'CMDB table name' },
         { $id: Now.ID['portal-view-layout-param-view'], name: 'view_title', required: false, shortDescription: 'UI view title' },
-        { $id: Now.ID['portal-view-layout-param-type'], name: 'type', required: false, shortDescription: 'form | list | form_layout' },
+        { $id: Now.ID['portal-view-layout-param-type'], name: 'type', required: false, shortDescription: 'form | list | form_layout | instance_card_form' },
         { $id: Now.ID['portal-view-layout-param-limit'], name: 'default_limit', required: false, shortDescription: 'Max fields for form fallback' },
         { $id: Now.ID['portal-view-layout-param-parent'], name: 'parent_table', required: false, shortDescription: 'Optional parent table for form_layout' },
       ],

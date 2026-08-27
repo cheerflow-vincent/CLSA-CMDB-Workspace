@@ -15,7 +15,7 @@ import {
   taskCiQuery,
   type RelatedTaskConfig,
 } from './relatedTasks';
-import { loadListFields, raw, str, type ViewField } from './viewFields';
+import { loadInstanceCardViewFields, raw, str, type ViewField } from './viewFields';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
 
 export const CHUNK_SIZE = 150;
@@ -39,10 +39,17 @@ export const DEFAULT_VIEW_FIELDS: ViewField[] = [
   { element: 'support_group',      label: 'Support Group' },
 ];
 
-export const CATALOG_FIELDS = [
+/** Always fetched for card chrome (title, badge, accent) in addition to layout fields. */
+const INSTANCE_CARD_CORE_FIELDS = [
   'sys_id', 'name', 'sys_class_name', 'operational_status', 'environment',
-  'department', 'u_tier', 'owned_by', 'support_group',
 ];
+
+function buildInstanceFetchFields(viewFields: ViewField[]): string[] {
+  return [...new Set([
+    ...INSTANCE_CARD_CORE_FIELDS,
+    ...viewFields.map(f => f.element),
+  ])];
+}
 
 export interface LiveInstance {
   sys_id: string;
@@ -113,11 +120,12 @@ const refId = (f: unknown): string => {
   return raw(f);
 };
 
-export async function getCachedViewFields(tableName: string): Promise<ViewField[]> {
-  const cached = viewFieldsCache.get(tableName);
+export async function getInstanceCardViewFields(): Promise<ViewField[]> {
+  const cacheKey = `instance_card:${VIEW_TITLE}`;
+  const cached = viewFieldsCache.get(cacheKey);
   if (cached) return cached;
-  const vf = await loadListFields(tableName, VIEW_TITLE, DEFAULT_VIEW_FIELDS);
-  viewFieldsCache.set(tableName, vf);
+  const vf = await loadInstanceCardViewFields(VIEW_TITLE, DEFAULT_VIEW_FIELDS);
+  viewFieldsCache.set(cacheKey, vf);
   return vf;
 }
 
@@ -181,18 +189,22 @@ export async function fetchFlagCountsForIds(
 
 function recordToLiveInstance(
   rec: Record<string, unknown>,
-  viewFieldMap: Map<string, ViewField[]>,
+  layoutViewFields: ViewField[],
   flagCounts: Map<string, CITaskFlagCounts>,
 ): LiveInstance | null {
   const sysId = raw(rec.sys_id);
   if (!sysId) return null;
 
   const tableName = raw(rec.sys_class_name);
-  const layoutFields = viewFieldMap.get(tableName) ?? DEFAULT_VIEW_FIELDS;
-  const readableFields = filterColumnsByProbe(layoutFields, rec);
+  const readableFields = filterColumnsByProbe(layoutViewFields, rec);
   const fieldValues: Record<string, string> = {};
-  for (const field of CATALOG_FIELDS) {
-    if (field in rec) fieldValues[field] = str(rec[field]);
+  for (const field of readableFields) {
+    if (field.element in rec) fieldValues[field.element] = str(rec[field.element]);
+  }
+  for (const field of INSTANCE_CARD_CORE_FIELDS) {
+    if (field in rec && !(field in fieldValues)) {
+      fieldValues[field] = str(rec[field]);
+    }
   }
 
   const flags = flagCounts.get(sysId);
@@ -219,9 +231,12 @@ export async function loadInstanceCatalog(
   if (!instanceIds.length) return result;
 
   const uniqueIds = [...new Set(instanceIds)];
+  const layoutViewFields = await getInstanceCardViewFields();
+  const fetchFields = buildInstanceFetchFields(layoutViewFields);
+
   const [catalogRes, flagCounts] = await Promise.all([
     chunkedINParallel<Record<string, unknown>>(
-      table, 'sys_id', uniqueIds, '', CATALOG_FIELDS, uniqueIds.length + 5,
+      table, 'sys_id', uniqueIds, '', fetchFields, uniqueIds.length + 5,
       { displayValue: 'all' },
     ),
     fetchFlagCountsForIds(uniqueIds),
@@ -229,16 +244,8 @@ export async function loadInstanceCatalog(
 
   if (catalogRes.access === 'denied') return result;
 
-  const tableNames = [...new Set(
-    catalogRes.rows.map(r => raw(r.sys_class_name)).filter(Boolean),
-  )];
-  const viewEntries = await Promise.all(
-    tableNames.map(async t => ({ table: t, vf: await getCachedViewFields(t) })),
-  );
-  const viewFieldMap = new Map(viewEntries.map(({ table, vf }) => [table, vf]));
-
   for (const rec of catalogRes.rows) {
-    const inst = recordToLiveInstance(rec, viewFieldMap, flagCounts);
+    const inst = recordToLiveInstance(rec, layoutViewFields, flagCounts);
     if (inst) result.set(inst.sys_id, inst);
   }
 
