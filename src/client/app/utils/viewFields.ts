@@ -27,9 +27,6 @@ export const raw = (v: unknown): string => {
   return String(v);
 };
 
-const INST_TABLE = 'cmdb_ci_service_auto';
-const SVC_TABLE  = 'cmdb_ci_service';
-
 /** Fetch field elements from sys_ui_element and resolve their labels from sys_documentation. */
 export async function resolveViewFields(
   tableName: string,

@@ -201,13 +201,7 @@ let cachedCurrentUserSysId: string | null = null
 export async function getCurrentUserSysId(): Promise<string> {
   if (cachedCurrentUserSysId) return cachedCurrentUserSysId
 
-  const fromWindow =
-    window.NOW?.user?.userID
-    || window.NOW?.user?.userId
-    || window.NOW?.user?.sys_id
-    || window.g_user?.userID
-    || window.g_user?.sys_id
-    || ''
+  const fromWindow = readWindowUserSysId()
   if (fromWindow) {
     cachedCurrentUserSysId = fromWindow
     return fromWindow
@@ -244,13 +238,7 @@ export async function getCurrentUserSysId(): Promise<string> {
 
 /** Resolve user sys_id for list-layout writes (main bundle — uses configured axios). */
 async function resolveUserSysIdForSave(): Promise<string> {
-  const fromWindow =
-    window.NOW?.user?.userID
-    || window.NOW?.user?.userId
-    || window.NOW?.user?.sys_id
-    || window.g_user?.userID
-    || window.g_user?.sys_id
-    || ''
+  const fromWindow = readWindowUserSysId()
   if (fromWindow) {
     cachedCurrentUserSysId = fromWindow
     return fromWindow
@@ -391,6 +379,23 @@ export interface TableQueryResult<T> {
   access: TableAccess
 }
 
+/** Coerce an unknown access-state string from API responses to a typed TableAccess. */
+function toTableAccess(v: unknown): TableAccess {
+  return v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
+}
+
+/** Read logged-in user sys_id from page globals injected by ServiceNow (sync, no API call). */
+function readWindowUserSysId(): string {
+  return (
+    window.NOW?.user?.userID
+    || window.NOW?.user?.userId
+    || window.NOW?.user?.sys_id
+    || window.g_user?.userID
+    || window.g_user?.sys_id
+    || ''
+  )
+}
+
 function isAxiosForbidden(err: unknown): boolean {
   if (typeof err !== 'object' || err === null || !('response' in err)) return false
   const status = (err as { response?: { status?: number } }).response?.status
@@ -496,8 +501,9 @@ export async function queryStatsGroupCount(
   try {
     let offset = 0
     let totalGroups = 0
+    let pageCount = STATS_GROUP_PAGE_SIZE
 
-    while (true) {
+    while (pageCount >= STATS_GROUP_PAGE_SIZE) {
       const reqParams: Record<string, string | number> = {
         sysparm_count: 'true',
         sysparm_group_by: params.groupBy,
@@ -507,10 +513,9 @@ export async function queryStatsGroupCount(
       if (params.query) reqParams.sysparm_query = params.query
 
       const r = await axios.get(`/api/now/stats/${params.table}`, { params: reqParams })
-      const pageCount = parseStatsGroupPage(r.data)
+      pageCount = parseStatsGroupPage(r.data)
       totalGroups += pageCount
-      if (pageCount < STATS_GROUP_PAGE_SIZE) break
-      offset += STATS_GROUP_PAGE_SIZE
+      if (pageCount >= STATS_GROUP_PAGE_SIZE) offset += STATS_GROUP_PAGE_SIZE
     }
 
     return { totalCount: totalGroups, access: 'ok' }
@@ -552,15 +557,12 @@ export async function fetchCiSearchDistinctCounts(
     if (!result || typeof result !== 'object') return EMPTY_CI_SEARCH_DISTINCT_COUNTS
 
     const accessRaw = result.access as Record<string, unknown> | undefined
-    const toAccess = (v: unknown): TableAccess =>
-      v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
-
     return {
       incidents: Number(result.incidents) || 0,
       changes: Number(result.changes) || 0,
       access: {
-        incidents: toAccess(accessRaw?.incidents),
-        changes: toAccess(accessRaw?.changes),
+        incidents: toTableAccess(accessRaw?.incidents),
+        changes: toTableAccess(accessRaw?.changes),
       },
     }
   } catch (err) {
@@ -603,9 +605,6 @@ export async function fetchCiTaskFlagCountsBatch(
     if (!result || typeof result !== 'object') return EMPTY_CI_TASK_FLAG_COUNTS_BATCH
 
     const accessRaw = result.access as Record<string, unknown> | undefined
-    const toAccess = (v: unknown): TableAccess =>
-      v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
-
     const countsRaw = result.counts as Record<string, unknown> | undefined
     const counts: Record<string, { incidents: number; changes: number }> = {}
     if (countsRaw && typeof countsRaw === 'object') {
@@ -621,8 +620,8 @@ export async function fetchCiTaskFlagCountsBatch(
     return {
       counts,
       access: {
-        incidents: toAccess(accessRaw?.incidents),
-        changes: toAccess(accessRaw?.changes),
+        incidents: toTableAccess(accessRaw?.incidents),
+        changes: toTableAccess(accessRaw?.changes),
       },
     }
   } catch (err) {
@@ -661,10 +660,7 @@ const EMPTY_CI_SEARCH_SIDEBAR_PAGE: CiSearchSidebarPageResponse = {
 
 function parseSidebarPageResponse(result: Record<string, unknown>): CiSearchSidebarPageResponse {
   const accessRaw = result.access
-  const toAccess = (v: unknown): TableAccess =>
-    v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
-
-  const access = typeof accessRaw === 'string' ? toAccess(accessRaw) : 'ok'
+  const access = typeof accessRaw === 'string' ? toTableAccess(accessRaw) : 'ok'
   const rowsRaw = Array.isArray(result.rows) ? result.rows : []
   const rows: CiSearchSidebarRow[] = rowsRaw.map(entry => {
     const row = entry as Record<string, unknown>
@@ -1055,6 +1051,7 @@ async function createPersonalListLayoutRecord(
 }
 
 async function reloadListLayoutResult(tableName: string, viewTitle: string): Promise<ListLayoutResult> {
+  // Dynamic import avoids a circular-dependency: viewFields.ts imports servicenow.ts at the top level. // NOSONAR: intentional dynamic import to break circular dependency
   const { loadListFieldsWithMeta } = await import('../app/utils/viewFields')
   const meta = await loadListFieldsWithMeta(tableName, viewTitle, [])
   return {
@@ -1152,10 +1149,6 @@ export function formatCmdbTableLabel(tableName: string): string {
     .replace(/^cmdb_ci_/, '')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase())
-}
-
-function formatTableNameFallback(tableName: string): string {
-  return formatCmdbTableLabel(tableName)
 }
 
 /** Human-readable label for a table (sys_db_object.label). */

@@ -1,5 +1,6 @@
 import {
   queryTableWithAccess,
+  queryStatsCount,
   fetchApplicationHomePage,
   type ApplicationHomeRequest,
   type ThreeLevelMappingDto,
@@ -17,6 +18,16 @@ import {
 } from './relatedTasks';
 import { loadInstanceCardViewFields, raw, str, type ViewField } from './viewFields';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
+import {
+  type LiveFilterCriteria,
+  type SidebarFilterState,
+  type ResolvedAppHomeFilter,
+  mergeFilterCriteria,
+  hasActiveLiveFilters,
+  sidebarFiltersEqual,
+  buildRelCiInstanceEdgeQuery,
+  buildInstanceFilterQuery,
+} from './appHomeFilterConfig';
 
 export const CHUNK_SIZE = 150;
 /** cmdb_rel_ci IN lists hit URL/query length limits on some instances (use smaller slices). */
@@ -64,17 +75,6 @@ export interface LiveInstance {
   incidents: number;
   changes: number;
 }
-
-import {
-  type LiveFilterCriteria,
-  type SidebarFilterState,
-  type ResolvedAppHomeFilter,
-  mergeFilterCriteria,
-  hasActiveLiveFilters,
-  sidebarFiltersEqual,
-  buildRelCiInstanceEdgeQuery,
-  buildInstanceFilterQuery,
-} from './appHomeFilterConfig';
 
 export type { LiveFilterCriteria, SidebarFilterState as SidebarFilterCriteria, ResolvedAppHomeFilter };
 export {
@@ -252,30 +252,6 @@ export async function loadInstanceCatalog(
   return result;
 }
 
-export function buildInstanceFilterQueryLegacy(
-  criteria: LiveFilterCriteria,
-  filterDefs: ResolvedAppHomeFilter[],
-  twoLevel: boolean,
-): string {
-  return buildInstanceFilterQuery(criteria, filterDefs, twoLevel);
-}
-
-export function buildRelCiInstanceEdgeQueryLegacy(
-  criteria: LiveFilterCriteria,
-  filterDefs: ResolvedAppHomeFilter[],
-  twoLevel: boolean,
-): string {
-  return buildRelCiInstanceEdgeQuery(criteria, filterDefs, twoLevel);
-}
-
-/** @deprecated unused — filters are hierarchy-specific via config property */
-export function criteriaForHierarchy(
-  criteria: LiveFilterCriteria,
-  _hierarchyMode: boolean,
-): LiveFilterCriteria {
-  return criteria;
-}
-
 /** 2-level: filter instance edges on cmdb_rel_ci, then walk to app-family services. */
 export async function resolveFilteredTwoLevelFromRelCi(
   criteria: LiveFilterCriteria,
@@ -449,13 +425,7 @@ async function countTableRows(
   table: string,
   query?: string,
 ): Promise<{ totalCount: number; access: TableAccess }> {
-  const { totalCount, access } = await queryTableWithAccess({
-    table,
-    query,
-    fields: ['sys_id'],
-    limit: 1,
-  });
-  return { totalCount, access };
+  return queryStatsCount({ table, query })
 }
 
 async function countInstancesBySysIds(
@@ -670,8 +640,9 @@ async function fetchAllInstanceSysIds(
   let access: TableAccess = 'ok';
   let offset = 0;
   const pageSize = 5000;
+  let batchLen = pageSize;
 
-  while (true) {
+  while (batchLen >= pageSize) {
     const res = await queryTableWithAccess<Record<string, unknown>>({
       table,
       query: baseQuery,
@@ -685,9 +656,8 @@ async function fetchAllInstanceSysIds(
       const id = raw(row.sys_id);
       if (id) ids.add(id);
     }
-    const batchLen = res.result?.length ?? 0;
-    if (batchLen < pageSize) break;
-    offset += batchLen;
+    batchLen = res.result?.length ?? 0;
+    if (batchLen >= pageSize) offset += batchLen;
   }
 
   return { ids, access };
@@ -785,7 +755,7 @@ async function buildTwoLevelMappingForFamilies(
     const p = refId(r.parent), c = refId(r.child);
     if (!p || !c) continue;
     if (!hop1Map.has(p)) hop1Map.set(p, []);
-    hop1Map.get(p)!.push(c);
+    hop1Map.get(p)?.push(c);
   }
 
   const intermediateIds = [...new Set(hop1Res.rows.map(r => refId(r.child)).filter(Boolean))];
@@ -957,7 +927,7 @@ async function buildThreeLevelMappingForApps(
     const b = refId(r.parent), s = refId(r.child);
     if (!b || !s) continue;
     if (!bAppToSvcs.has(b)) bAppToSvcs.set(b, []);
-    bAppToSvcs.get(b)!.push(s);
+    bAppToSvcs.get(b)?.push(s);
   }
 
   const svcToInstIds = new Map<string, string[]>();
@@ -966,7 +936,7 @@ async function buildThreeLevelMappingForApps(
     if (!s || !i) continue;
     if (restrictToInstanceIds && !restrictToInstanceIds.has(i)) continue;
     if (!svcToInstIds.has(s)) svcToInstIds.set(s, []);
-    svcToInstIds.get(s)!.push(i);
+    svcToInstIds.get(s)?.push(i);
   }
 
   const instanceIds = [...new Set(
@@ -1410,19 +1380,6 @@ export async function fetchApplicationHomePageUnified(
 
   if (shouldFallback) {
     return fetchApplicationHomePageLegacy(criteria, filterDefs, hierarchyMode, page, pageSize);
-  }
-
-  if (res.access === 'denied') {
-    return {
-      twoLevelMapping: null,
-      threeLevelMapping: null,
-      totalFamilies: 0,
-      page,
-      access: 'denied',
-      instanceIds: filtersActive ? new Set() : null,
-      filterToken: null,
-      truncated: false,
-    };
   }
 
   const instanceIds = filtersActive ? new Set(res.instance_ids) : null;

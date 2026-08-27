@@ -54,9 +54,9 @@ PortalMetadataHandler.prototype = {
   readParam: function (request, name) {
     try {
       if (request.queryParams && request.queryParams[name]) {
-        return String(request.queryParams[name].toString() || '').trim();
+        return String(request.queryParams[name] || '').trim();
       }
-    } catch (e) {}
+    } catch (e) { /* query param absent or malformed — return empty string */ }
     return '';
   },
 
@@ -905,18 +905,20 @@ PortalMetadataHandler.prototype = {
       var msg = '';
       try {
         msg = String(listGr.getLastErrorMessage() || '');
-      } catch (e0) {}
+      } catch (e0) { /* getLastErrorMessage unavailable on this platform version */ }
       return { id: '', error: msg || 'Failed to insert sys_ui_list' };
     }
     return { id: id, error: '' };
   },
 
+  LIST_LAYOUT_MAX_COLUMNS: 30,
+
   savePersonalListLayout: function (tableName, viewTitle, columnNames) {
     if (!columnNames || !columnNames.length) {
       return { ok: false, status: 400, message: 'columns must be a non-empty array' };
     }
-    if (columnNames.length > 30) {
-      return { ok: false, status: 400, message: 'Too many columns (max 30)' };
+    if (columnNames.length > this.LIST_LAYOUT_MAX_COLUMNS) {
+      return { ok: false, status: 400, message: 'Too many columns (max ' + this.LIST_LAYOUT_MAX_COLUMNS + ')' };
     }
 
     var hasName = false;
@@ -981,7 +983,7 @@ PortalMetadataHandler.prototype = {
         v = obj.get(name);
         if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
       }
-    } catch (e1) {}
+    } catch (e1) { /* obj.get not available or threw — fall through to empty string */ }
     return '';
   },
 
@@ -1009,7 +1011,7 @@ PortalMetadataHandler.prototype = {
     if (!raw && typeof obj.get === 'function') {
       try {
         raw = obj.get(name);
-      } catch (e0) {}
+      } catch (e0) { /* obj.get not available on this SN platform version — use property access */ }
     }
     if (!raw) return [];
 
