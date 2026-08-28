@@ -21,7 +21,7 @@ import {
   type RelatedTaskRecordContext,
   type RelatedTaskRow,
 } from '../utils/relatedTasks';
-import type { TableAccess } from '../../api/servicenow';
+import { type TableAccess, formatCmdbTableLabel } from '../../api/servicenow';
 import { isAccessDenied } from '../utils/acl';
 import {
   PriorityBadge,
@@ -29,6 +29,7 @@ import {
   ChangeTypeBadge,
   TaskCard,
   taskHref,
+  val,
 } from './taskListCards';
 
 export type RelatedListVariant = 'table' | 'compact' | 'cards';
@@ -57,11 +58,6 @@ function changeRailClass(type: string): string {
   if (type === 'Emergency') return 'bg-red-500';
   if (type === 'Normal') return 'bg-blue-500';
   return 'bg-gray-400';
-}
-
-function val(row: RelatedTaskRow, key: string): string {
-  const v = row.values[key];
-  return v && v !== '—' ? v : '';
 }
 
 function renderTaskCell(element: string, valStr: string) {
@@ -137,15 +133,11 @@ function TaskCompactRow({
   );
 }
 
-function formatClassLabel(cls: string): string {
-  return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
 function buildCIItem(row: RelatedCIRow): CIItem {
   return {
     id: row.sysId,
     name: row.values.name || row.sysId,
-    type: formatClassLabel(row.sysClass),
+    type: formatCmdbTableLabel(row.sysClass),
     class: row.sysClass,
     table: row.sysClass,
     environment: row.values.environment ?? '',

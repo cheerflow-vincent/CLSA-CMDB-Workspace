@@ -5,7 +5,7 @@ import {
   hasSearchableTokens,
   tokenizeSearchTerms,
 } from '../utils/searchQuery';
-import { queryTable, getSysProperties, APP_SCOPE } from '../../api/servicenow';
+import { queryTable, getSysProperties, APP_SCOPE, formatCmdbTableLabel } from '../../api/servicenow';
 import type { CIItem } from './CIDetailView';
 
 // ── System property names ─────────────────────────────────────────────────────
@@ -87,13 +87,6 @@ interface GlobalSearchBarProps {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function formatClassName(cls: string): string {
-  return cls
-    .replace(/^cmdb_ci_/, '')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, l => l.toUpperCase());
-}
-
 /**
  * Build encoded query with AND token matching on the configured search field.
  * Each INSTANCEOF table group requires every token to match (e.g. nameLIKEcobra^nameLIKEhk).
@@ -115,7 +108,7 @@ function apiToCIItem(r: ApiCI): CIItem {
   return {
     id:           rv(r.sys_id as SnField) || String(r.sys_id),
     name:         dv(r.name as SnField) || rv(r.name as SnField),
-    type:         formatClassName(classLabel),
+    type:         formatCmdbTableLabel(classLabel),
     class:        classLabel,
     table:        tableName || 'cmdb_ci',
     environment:  dv(r.environment) ?? '',
@@ -235,7 +228,7 @@ function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
     if (f === 'sys_class_name') {
       items.push(
         <span key="class" className="typo-badge px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-          {formatClassName(dv(r.sys_class_name))}
+          {formatCmdbTableLabel(dv(r.sys_class_name))}
         </span>
       );
       continue;

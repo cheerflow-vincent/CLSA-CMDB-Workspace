@@ -11,7 +11,7 @@ import RelationshipApprovalsView from './app/components/RelationshipApprovalsVie
 import CIDetailView, { type CIItem } from './app/components/CIDetailView';
 import GlobalSearchBar from './app/components/GlobalSearchBar';
 import { type AppItem } from './app/data/appData';
-import { queryTable, getSysProperties, APP_SCOPE } from './api/servicenow';
+import { queryTable, getSysProperties, APP_SCOPE, formatCmdbTableLabel } from './api/servicenow';
 import { str, raw } from './app/utils/viewFields';
 import {
   readRecordUrlParams,
@@ -55,10 +55,6 @@ function shouldOpenAppDetail(table: string, hierarchyMode: boolean): boolean {
     return isServiceClass(table) || table === 'cmdb_ci_business_app';
   }
   return table === 'cmdb_ci_service';
-}
-
-function formatClassName(cls: string) {
-  return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
 /** Read ?page= and return the matching View, or null if absent/unknown. */
@@ -180,7 +176,7 @@ export function App() {
           setSelectedCI({
             id: sysId,
             name:         str(r.name) || '',
-            type:         formatClassName(isRecordTableName(className) ? className : recordTable),
+            type:         formatCmdbTableLabel(isRecordTableName(className) ? className : recordTable),
             class:        recordTable,
             table:        recordTable,
             environment:  str(r.environment) ?? '',

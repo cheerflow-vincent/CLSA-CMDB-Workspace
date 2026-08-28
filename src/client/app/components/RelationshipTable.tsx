@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowUp, ArrowDown, ArrowLeftRight, ExternalLink, Loader2, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowLeftRight, ExternalLink, Loader2 } from 'lucide-react';
 import { queryTable } from '../../api/servicenow';
 import { loadAppRelationshipPeers } from '../utils/appRelationships';
 import { type ViewField, str, loadViewFields as loadViewFieldsUtil, raw } from '../utils/viewFields';
@@ -7,6 +7,7 @@ import type { AppItem } from '../data/appData';
 import type { DiagramFilters } from './RelationshipDiagram';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
 import { serviceTypeFromDepartment, type ServiceType } from '../utils/serviceTypeFromDepartment';
+import { opStatusBadge } from './applicationInstanceViews';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Direction   = 'upstream' | 'downstream' | 'bidirectional';
@@ -104,15 +105,6 @@ const sn = (v: unknown): string => {
     return String((v as Record<string, unknown>).value ?? '');
   return String(v);
 };
-
-function opStatusBadge(status: string) {
-  const s = status.toLowerCase();
-  if ((s.includes('operational') && !s.includes('non')) || s === 'in use')
-    return { cls: 'bg-green-100 text-green-700', icon: <CheckCircle2 className="w-3 h-3" /> };
-  if (s.includes('repair') || s.includes('degraded') || s.includes('maintenance'))
-    return { cls: 'bg-yellow-100 text-yellow-700', icon: <Clock className="w-3 h-3" /> };
-  return { cls: 'bg-red-100 text-red-700', icon: <AlertCircle className="w-3 h-3" /> };
-}
 
 // ─── CMDB fetch — CI details (view fields) per table ─────────────────────────
 async function fetchCIDetails(rows: RelRow[]): Promise<Map<string, CIDetail>> {

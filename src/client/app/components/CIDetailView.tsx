@@ -9,7 +9,7 @@ import {
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
 import { type AppItem } from '../data/appData';
-import { queryTable, fetchFieldAccess, getSysProperties, getTableLabel, APP_SCOPE, type TableAccess } from '../../api/servicenow';
+import { queryTable, fetchFieldAccess, getSysProperties, getTableLabel, APP_SCOPE, type TableAccess, formatCmdbTableLabel } from '../../api/servicenow';
 import { filterFormSections, isAccessDenied, canEditRecord } from '../utils/acl';
 import RecordEditDialog from './recordEdit/RecordEditDialog';
 import {
@@ -94,14 +94,10 @@ function buildGrafanaUrl(template: string, ciName: string): string {
   return template.replace(/\{0\}/g, encodeURIComponent(ciName.toUpperCase()));
 }
 
-function formatClassLabel(cls: string): string {
-  return cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
 function initialClassLabel(ci: CIItem): string {
   if (ci.class && !isRecordTableName(ci.class)) return ci.class;
-  if (isRecordTableName(ci.table)) return formatClassLabel(ci.table);
-  if (isRecordTableName(ci.class)) return formatClassLabel(ci.class);
+  if (isRecordTableName(ci.table)) return formatCmdbTableLabel(ci.table);
+  if (isRecordTableName(ci.class)) return formatCmdbTableLabel(ci.class);
   return ci.type || '';
 }
 
@@ -322,7 +318,7 @@ export default function CIDetailView({
             if (!cancelled && label) setDisplayClassLabel(label);
           })
           .catch(() => {
-            if (!cancelled) setDisplayClassLabel(formatClassLabel(ctx.recordTable));
+            if (!cancelled) setDisplayClassLabel(formatCmdbTableLabel(ctx.recordTable));
           });
 
         fetchFieldAccess(ctx.recordTable, ctx.sysId, ['name'])

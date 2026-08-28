@@ -47,7 +47,7 @@ export function taskHref(config: RelatedTaskConfig, sysId: string): string {
   return `/${config.taskTable}.do?sys_id=${sysId}`;
 }
 
-function val(row: RelatedTaskRow, key: string): string {
+export function val(row: RelatedTaskRow, key: string): string {
   const v = row.values[key];
   return v && v !== '—' ? v : '';
 }
