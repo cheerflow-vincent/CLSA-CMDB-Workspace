@@ -4,17 +4,17 @@ import { queryTable, fetchPortalMetadata } from '../../api/servicenow';
 import { mockApplications, type AppItem } from '../data/appData';
 
 interface AppSearchHeaderProps {
-  onSelectApp: (app: AppItem) => void;
-  mode: 'home' | 'detail';
-  currentApp?: AppItem;
-  onBackToHome?: () => void;
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly mode: 'home' | 'detail';
+  readonly currentApp?: AppItem;
+  readonly onBackToHome?: () => void;
   /** When set, shows Edit dropdown next to Open in ServiceNow (detail mode). */
-  canEditRecord?: boolean;
-  onEditCi?: () => void;
-  onEditRelationships?: () => void;
+  readonly canEditRecord?: boolean;
+  readonly onEditCi?: () => void;
+  readonly onEditRelationships?: () => void;
   /** Manual reload of the current detail page. */
-  onRefresh?: () => void;
-  refreshing?: boolean;
+  readonly onRefresh?: () => void;
+  readonly refreshing?: boolean;
 }
 
 interface Option {
@@ -24,13 +24,13 @@ interface Option {
 
 // ─── Searchable combobox ──────────────────────────────────────────────────────
 function Combobox({ label, options, value, onChange, placeholder, disabled, loading }: {
-  label: string;
-  options: Option[];
-  value: string;          // currently selected id
-  onChange: (id: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-  loading?: boolean;
+  readonly label: string;
+  readonly options: Option[];
+  readonly value: string;          // currently selected id
+  readonly onChange: (id: string) => void;
+  readonly placeholder?: string;
+  readonly disabled?: boolean;
+  readonly loading?: boolean;
 }) {
   const [open, setOpen]   = useState(false);
   const [query, setQuery] = useState('');
@@ -79,21 +79,20 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
 
       {open && !disabled && (
         <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto py-1">
-          {loading
-            ? <p className="px-4 py-3 typo-body text-gray-400">Loading…</p>
-            : filtered.length === 0
-              ? <p className="px-4 py-3 typo-body text-gray-400">No matches</p>
-              : filtered.map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => { onChange(opt.id); setOpen(false); setQuery(''); }}
-                    className={`w-full text-left px-4 py-2.5 typo-body hover:bg-blue-50 transition-colors
-                      ${value === opt.id ? 'text-blue-700 bg-blue-50' : 'text-gray-800'}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))
-          }
+          {(() => {
+            if (loading) return <p className="px-4 py-3 typo-body text-gray-400">Loading…</p>;
+            if (filtered.length === 0) return <p className="px-4 py-3 typo-body text-gray-400">No matches</p>;
+            return filtered.map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => { onChange(opt.id); setOpen(false); setQuery(''); }}
+                className={`w-full text-left px-4 py-2.5 typo-body hover:bg-blue-50 transition-colors
+                  ${value === opt.id ? 'text-blue-700 bg-blue-50' : 'text-gray-800'}`}
+              >
+                {opt.label}
+              </button>
+            ));
+          })()}
         </div>
       )}
     </div>

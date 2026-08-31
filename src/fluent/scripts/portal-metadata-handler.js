@@ -1,4 +1,4 @@
-var PortalMetadataHandler = Class.create();
+var PortalMetadataHandler = Class.create(); // NOSONAR: ServiceNow Script Include class must use var (Class.create convention)
 PortalMetadataHandler.prototype = {
   initialize: function () {},
 
@@ -53,10 +53,12 @@ PortalMetadataHandler.prototype = {
 
   readParam: function (request, name) {
     try {
-      if (request.queryParams && request.queryParams[name]) {
+      if (request.queryParams?.[name]) {
         return String(request.queryParams[name] || '').trim();
       }
-    } catch (e) { /* query param absent or malformed — return empty string */ }
+    } catch (error) {
+      gs.debug('portal-metadata readParam failed for ' + name + ': ' + error);
+    }
     return '';
   },
 
@@ -64,9 +66,9 @@ PortalMetadataHandler.prototype = {
   tableExtendsCmdbCi: function (tableName) {
     if (!tableName) return false;
     if (tableName === this.CMDB_CI_TABLE) return true;
-    var current = tableName;
-    var seen = {};
-    for (var i = 0; i < 12; i++) {
+    let current = tableName;
+    const seen = {};
+    for (let i = 0; i < 12; i++) {
       if (!current || seen[current]) break;
       seen[current] = true;
       if (current === this.CMDB_CI_TABLE) return true;
@@ -77,7 +79,7 @@ PortalMetadataHandler.prototype = {
 
   isAllowedTable: function (tableName) {
     if (!tableName || !/^[a-z0-9_]+$/.test(tableName)) return false;
-    if (tableName.indexOf('cmdb_') === 0 || tableName === 'task_ci') return true;
+    if (tableName.startsWith('cmdb_') || tableName === 'task_ci') return true;
     return this.tableExtendsCmdbCi(tableName);
   },
 
@@ -86,23 +88,24 @@ PortalMetadataHandler.prototype = {
   },
 
   getParentTable: function (tableName) {
-    var db = new GlideRecord('sys_db_object');
+    const db = new GlideRecord('sys_db_object');
     db.addQuery('name', tableName);
     db.setLimit(1);
     db.query();
     if (!db.next()) return '';
     try {
-      if (db.super_class.nil && db.super_class.nil()) return '';
+      if (db.super_class.nil?.()) return '';
       if (!db.super_class) return '';
       return String(db.super_class.name || '');
-    } catch (e) {
+    } catch (error) {
+      gs.debug('portal-metadata getParentTable failed for ' + tableName + ': ' + error);
       return '';
     }
   },
 
   getChoices: function (tableName, element) {
-    var choices = [];
-    var gr = new GlideRecord('sys_choice');
+    const choices = [];
+    const gr = new GlideRecord('sys_choice');
     gr.addQuery('name', tableName);
     gr.addQuery('element', element);
     gr.addQuery('inactive', false);
@@ -110,8 +113,8 @@ PortalMetadataHandler.prototype = {
     gr.orderBy('sequence');
     gr.query();
     while (gr.next()) {
-      var value = String(gr.getValue('value') || '');
-      var label = String(gr.getValue('label') || value);
+      const value = String(gr.getValue('value') || '');
+      const label = String(gr.getValue('label') || value);
       if (!value) continue;
       choices.push({ value: value, label: label });
     }
@@ -119,12 +122,12 @@ PortalMetadataHandler.prototype = {
   },
 
   getChoicesForField: function (tableName, element) {
-    var current = tableName;
-    var seen = {};
-    for (var i = 0; i < 12; i++) {
+    let current = tableName;
+    const seen = {};
+    for (let i = 0; i < 12; i++) {
       if (!current || seen[current]) break;
       seen[current] = true;
-      var choices = this.getChoices(current, element);
+      const choices = this.getChoices(current, element);
       if (choices.length) return choices;
       current = this.getParentTable(current);
     }
@@ -132,12 +135,11 @@ PortalMetadataHandler.prototype = {
   },
 
   getMergedChoices: function (element, tableNames) {
-    var seen = {};
-    var out = [];
-    for (var t = 0; t < tableNames.length; t++) {
-      var choices = this.getChoicesForField(tableNames[t], element);
-      for (var i = 0; i < choices.length; i++) {
-        var c = choices[i];
+    const seen = {};
+    const out = [];
+    for (const tableName of tableNames) {
+      const choices = this.getChoicesForField(tableName, element);
+      for (const c of choices) {
         if (seen[c.value]) continue;
         seen[c.value] = true;
         out.push(c);
@@ -147,15 +149,15 @@ PortalMetadataHandler.prototype = {
   },
 
   getPropertyMap: function () {
-    var map = {};
-    var gr = new GlideRecord('sys_properties');
+    const map = {};
+    const gr = new GlideRecord('sys_properties');
     gr.addQuery('name', 'IN', this.PROPERTY_NAMES.join(','));
     gr.query();
     while (gr.next()) {
       map[String(gr.getValue('name'))] = String(gr.getValue('value') || '');
     }
-    var grafanaPrefix = this.APP_SCOPE + '.grafana.url.';
-    var grafanaGr = new GlideRecord('sys_properties');
+    const grafanaPrefix = this.APP_SCOPE + '.grafana.url.';
+    const grafanaGr = new GlideRecord('sys_properties');
     grafanaGr.addQuery('name', 'STARTSWITH', grafanaPrefix);
     grafanaGr.query();
     while (grafanaGr.next()) {
@@ -165,8 +167,8 @@ PortalMetadataHandler.prototype = {
   },
 
   getReferenceOptions: function (table, fields, query, labelField) {
-    var out = [];
-    var gr = new GlideRecord(table);
+    const out = [];
+    const gr = new GlideRecord(table);
     if (query) gr.addEncodedQuery(query);
     gr.orderBy(labelField);
     gr.setLimit(100);
@@ -181,15 +183,15 @@ PortalMetadataHandler.prototype = {
   },
 
   getDepartmentOptions: function () {
-    var out = [];
-    var gr = new GlideRecord('cmn_department');
+    const out = [];
+    const gr = new GlideRecord('cmn_department');
     gr.addQuery('u_it_department', true);
     gr.orderBy('name');
     gr.setLimit(100);
     gr.query();
     while (gr.next()) {
-      var desc = String(gr.getValue('description') || '').trim();
-      var name = String(gr.getValue('name') || '').trim();
+      const desc = String(gr.getValue('description') || '').trim();
+      const name = String(gr.getValue('name') || '').trim();
       out.push({
         label: desc || name || gr.getUniqueValue(),
         value: gr.getUniqueValue(),
@@ -202,11 +204,13 @@ PortalMetadataHandler.prototype = {
     if (!raw || !String(raw).trim()) return null;
     try {
       return JSON.parse(String(raw));
-    } catch (e1) {
+    } catch (parseError) {
+      gs.debug('portal-metadata parseJsonProperty JSON.parse failed, using GlideJSON: ' + parseError);
       try {
-        var parser = new global.JSON();
+        const parser = new global.JSON();
         return parser.decode(String(raw));
-      } catch (e2) {
+      } catch (decodeError) {
+        gs.debug('portal-metadata parseJsonProperty GlideJSON decode failed: ' + decodeError);
         return null;
       }
     }
@@ -364,26 +368,40 @@ PortalMetadataHandler.prototype = {
   },
 
   loadFilterConfigRaw: function (props, threeLevel) {
-    var propName = threeLevel ? this.FILTER_CONFIG_PROP_3 : this.FILTER_CONFIG_PROP_2;
-    var parsed = this.parseJsonProperty(props[propName]);
-    if (!parsed || !parsed.filters || !parsed.filters.length) {
+    const propName = threeLevel ? this.FILTER_CONFIG_PROP_3 : this.FILTER_CONFIG_PROP_2;
+    const parsed = this.parseJsonProperty(props[propName]);
+    if (!parsed?.filters?.length) {
       return this.defaultFilterConfig(threeLevel);
     }
     return parsed;
   },
 
   applyOptionsOrderBy: function (gr, source, defaultField) {
-    var field = String((source && source.orderByField) || defaultField || 'name');
-    var dir = String((source && source.orderByDirection) || 'asc').toLowerCase();
+    const field = String((source?.orderByField) || defaultField || 'name');
+    const dir = String((source?.orderByDirection) || 'asc').toLowerCase();
     if (dir === 'desc') gr.orderByDesc(field);
     else gr.orderBy(field);
   },
 
+  _reorderByAllowed: function (out, allowed) {
+    const allowMap = {};
+    for (const allowedVal of allowed) allowMap[String(allowedVal)] = true;
+    const filtered = out.filter(function (c) { return allowMap[c.value]; });
+    const byValue = {};
+    for (const opt of filtered) byValue[opt.value] = opt;
+    const ordered = [];
+    for (const element of allowed) {
+      const key = String(element);
+      if (byValue[key]) ordered.push(byValue[key]);
+    }
+    return ordered;
+  },
+
   getChoiceOptionsFromSource: function (source) {
     if (!source) return [];
-    var out = [];
-    var seen = {};
-    var gr = new GlideRecord('sys_choice');
+    let out = [];
+    const seen = {};
+    const gr = new GlideRecord('sys_choice');
     if (source.query) {
       gr.addEncodedQuery(String(source.query));
     } else if (source.element) {
@@ -394,48 +412,33 @@ PortalMetadataHandler.prototype = {
     this.applyOptionsOrderBy(gr, source, 'sequence');
     gr.query();
     while (gr.next()) {
-      var value = String(gr.getValue('value') || '');
-      var label = String(gr.getValue('label') || value);
+      const value = String(gr.getValue('value') || '');
+      const label = String(gr.getValue('label') || value);
       if (!value || seen[value]) continue;
       seen[value] = true;
       out.push({ value: value, label: label });
     }
 
-    var allowed = source.allowedValues;
-    if (allowed && allowed.length) {
-      var allowMap = {};
-      for (var a = 0; a < allowed.length; a++) allowMap[String(allowed[a])] = true;
-      out = out.filter(function (c) { return allowMap[c.value]; });
-      var byValue = {};
-      for (var i = 0; i < out.length; i++) byValue[out[i].value] = out[i];
-      var ordered = [];
-      for (var j = 0; j < allowed.length; j++) {
-        var key = String(allowed[j]);
-        if (byValue[key]) ordered.push(byValue[key]);
-      }
-      out = ordered;
-    }
-
-    if (!out.length && source.fallback && source.fallback.length) {
-      out = source.fallback;
-    }
+    const allowed = source.allowedValues;
+    if (allowed?.length) out = this._reorderByAllowed(out, allowed);
+    if (!out.length && source.fallback?.length) out = source.fallback;
     return out;
   },
 
   getReferenceOptionsFromSource: function (source) {
-    if (!source || !source.table) return [];
-    var table = String(source.table);
-    var labelField = String(source.labelField || 'name');
-    var fallbackField = String(source.labelFallbackField || '');
-    var limit = parseInt(source.limit, 10) || 100;
-    var out = [];
-    var gr = new GlideRecord(table);
+    if (!source?.table) return [];
+    const table = String(source.table);
+    const labelField = String(source.labelField || 'name');
+    const fallbackField = String(source.labelFallbackField || '');
+    const limit = Number.parseInt(source.limit, 10) || 100;
+    const out = [];
+    const gr = new GlideRecord(table);
     if (source.query) gr.addEncodedQuery(String(source.query));
     this.applyOptionsOrderBy(gr, source, labelField);
     gr.setLimit(limit);
     gr.query();
     while (gr.next()) {
-      var label = String(gr.getValue(labelField) || gr.getDisplayValue(labelField) || '').trim();
+      let label = String(gr.getValue(labelField) || gr.getDisplayValue(labelField) || '').trim();
       if (!label && fallbackField) {
         label = String(gr.getValue(fallbackField) || gr.getDisplayValue(fallbackField) || '').trim();
       }
@@ -446,42 +449,42 @@ PortalMetadataHandler.prototype = {
   },
 
   resolveFilterOptions: function (source) {
-    if (!source || !source.type) return [];
+    if (!source?.type) return [];
     if (source.type === 'choice') return this.getChoiceOptionsFromSource(source);
     if (source.type === 'reference') return this.getReferenceOptionsFromSource(source);
-    if (source.type === 'static' && source.options && source.options.length) {
+    if (source.type === 'static' && source.options?.length) {
       return source.options;
     }
     return [];
   },
 
   resolveFilterDefaults: function (defaultsSpec, options) {
-    var values = [];
+    let values = [];
     if (!defaultsSpec) return values;
 
     if (Object.prototype.toString.call(defaultsSpec) === '[object Array]') {
       values = defaultsSpec;
     } else if (defaultsSpec.type === 'userField' && defaultsSpec.field) {
-      var user = new GlideRecord('sys_user');
+      const user = new GlideRecord('sys_user');
       if (user.get(gs.getUserID())) {
-        var userVal = String(user.getValue(String(defaultsSpec.field)) || '');
+        const userVal = String(user.getValue(String(defaultsSpec.field)) || '');
         if (userVal) values = [userVal];
       }
     }
 
-    if (!options || !options.length) return values;
-    var optionValues = {};
-    for (var i = 0; i < options.length; i++) optionValues[String(options[i].value)] = true;
-    var filtered = [];
-    for (var j = 0; j < values.length; j++) {
-      var v = String(values[j]);
+    if (!options?.length) return values;
+    const optionValues = {};
+    for (const opt of options) optionValues[String(opt.value)] = true;
+    const filtered = [];
+    for (const value of values) {
+      const v = String(value);
       if (optionValues[v]) filtered.push(v);
     }
     return filtered;
   },
 
   getCurrentUserContext: function () {
-    var user = new GlideRecord('sys_user');
+    const user = new GlideRecord('sys_user');
     if (!user.get(gs.getUserID())) {
       return { sys_id: '', department: '', company: '' };
     }
@@ -493,21 +496,20 @@ PortalMetadataHandler.prototype = {
   },
 
   resolveAppHomeFilters: function (props, threeLevel) {
-    var raw = this.loadFilterConfigRaw(props, threeLevel);
-    var filters = raw.filters || [];
+    const raw = this.loadFilterConfigRaw(props, threeLevel);
+    const filters = raw.filters || [];
     filters.sort(function (a, b) {
-      return (parseInt(a.order, 10) || 0) - (parseInt(b.order, 10) || 0);
+      return (Number.parseInt(a.order, 10) || 0) - (Number.parseInt(b.order, 10) || 0);
     });
 
-    var resolved = [];
-    for (var i = 0; i < filters.length; i++) {
-      var def = filters[i];
-      if (!def || !def.field) continue;
-      var options = this.resolveFilterOptions(def.optionsSource);
+    const resolved = [];
+    for (const def of filters) {
+      if (!def?.field) continue;
+      const options = this.resolveFilterOptions(def.optionsSource);
       resolved.push({
         field: String(def.field),
         label: String(def.label || def.field),
-        order: parseInt(def.order, 10) || 0,
+        order: Number.parseInt(def.order, 10) || 0,
         defaultOpen: def.defaultOpen !== false,
         dotWalk: Boolean(def.dotWalk),
         options: options,
@@ -518,9 +520,9 @@ PortalMetadataHandler.prototype = {
   },
 
   handleMetadata: function (request, response) {
-    var props = this.getPropertyMap();
-    var hierarchyVal = (props['x_citi4_clsa_cmd_0.enable.new.app.hierarchy'] || '').toLowerCase();
-    var tier = this.getMergedChoices('u_tier', this.CHOICE_TABLES);
+    const props = this.getPropertyMap();
+    const hierarchyVal = (props['x_citi4_clsa_cmd_0.enable.new.app.hierarchy'] || '').toLowerCase();
+    let tier = this.getMergedChoices('u_tier', this.CHOICE_TABLES);
     if (!tier.length) tier = this.TIER_FALLBACK;
 
     this.jsonOk(response, {
@@ -542,8 +544,8 @@ PortalMetadataHandler.prototype = {
   },
 
   queryUiElements: function (encodedQuery, limit) {
-    var rows = [];
-    var gr = new GlideRecord('sys_ui_element');
+    const rows = [];
+    const gr = new GlideRecord('sys_ui_element');
     gr.addEncodedQuery(encodedQuery);
     gr.orderBy('position');
     gr.setLimit(limit || 200);
@@ -551,7 +553,7 @@ PortalMetadataHandler.prototype = {
     while (gr.next()) {
       rows.push({
         element: String(gr.getValue('element') || ''),
-        position: parseInt(gr.getValue('position'), 10) || 0,
+        position: Number.parseInt(gr.getValue('position'), 10) || 0,
         type: String(gr.getValue('type') || ''),
       });
     }
@@ -560,8 +562,8 @@ PortalMetadataHandler.prototype = {
 
   labelFields: function (tableName, fieldNames) {
     if (!fieldNames.length) return [];
-    var labelMap = {};
-    var doc = new GlideRecord('sys_documentation');
+    const labelMap = {};
+    const doc = new GlideRecord('sys_documentation');
     doc.addQuery('name', tableName);
     doc.addQuery('language', 'en');
     doc.addQuery('element', 'IN', fieldNames.join(','));
@@ -570,13 +572,12 @@ PortalMetadataHandler.prototype = {
       labelMap[String(doc.getValue('element'))] = String(doc.getValue('label') || '');
     }
 
-    var out = [];
-    for (var i = 0; i < fieldNames.length; i++) {
-      var el = fieldNames[i];
+    const out = [];
+    for (const el of fieldNames) {
       out.push({
         element: el,
         label: labelMap[el]
-          || el.replace(/_/g, ' ').replace(/\./g, ' \u203a ').replace(/\b\w/g, function (c) {
+          || el.replaceAll('_', ' ').replaceAll('.', ' \u203a ').replaceAll(/\b\w/g, function (c) {
             return c.toUpperCase();
           }),
       });
@@ -585,18 +586,18 @@ PortalMetadataHandler.prototype = {
   },
 
   collectFormFieldNames: function (encodedQuery, limit) {
-    var elems = this.queryUiElements(encodedQuery + '^ORDERBYposition', limit || 50);
-    var names = [];
-    for (var i = 0; i < elems.length; i++) {
-      var el = elems[i].element;
-      if (el && el.indexOf('.') !== 0) names.push(el);
+    const elems = this.queryUiElements(encodedQuery + '^ORDERBYposition', limit || 50);
+    const names = [];
+    for (const elem of elems) {
+      const el = elem.element;
+      if (el && !el.startsWith('.')) names.push(el);
     }
     return names;
   },
 
   resolveFormFieldList: function (tableName, viewTitle, defaultLimit) {
-    var limit = defaultLimit || 20;
-    var steps = [
+    const limit = defaultLimit > 0 ? defaultLimit : 20;
+    const steps = [
       'sys_ui_section.view.title=' + viewTitle + '^sys_ui_section.name=' + tableName,
     ];
     if (tableName !== this.INST_TABLE) {
@@ -607,8 +608,8 @@ PortalMetadataHandler.prototype = {
     }
     steps.push('sys_ui_section.view.name=^sys_ui_section.name=' + tableName);
 
-    for (var s = 0; s < steps.length; s++) {
-      var names = this.collectFormFieldNames(steps[s], s === steps.length - 1 ? limit : 50);
+    for (let s = 0; s < steps.length; s++) {
+      const names = this.collectFormFieldNames(steps[s], s === steps.length - 1 ? limit : 50);
       if (names.length) return this.labelFields(tableName, names);
     }
     return [];
@@ -616,8 +617,8 @@ PortalMetadataHandler.prototype = {
 
   /** App Home instance cards: fixed form-view fallback across CMDB tables. */
   resolveInstanceCardFormFields: function (viewTitle, defaultLimit) {
-    var limit = defaultLimit || 50;
-    var steps = [
+    const limit = defaultLimit > 0 ? defaultLimit : 50;
+    const steps = [
       { table: this.INST_TABLE, named: true },
       { table: this.SVC_TABLE, named: true },
       { table: this.CMDB_CI_TABLE, named: true },
@@ -625,12 +626,11 @@ PortalMetadataHandler.prototype = {
       { table: this.SVC_TABLE, named: false },
       { table: this.CMDB_CI_TABLE, named: false },
     ];
-    for (var s = 0; s < steps.length; s++) {
-      var step = steps[s];
-      var query = step.named
+    for (const step of steps) {
+      const query = step.named
         ? 'sys_ui_section.view.title=' + viewTitle + '^sys_ui_section.name=' + step.table
         : 'sys_ui_section.view.name=^sys_ui_section.name=' + step.table;
-      var names = this.collectFormFieldNames(query, limit);
+      const names = this.collectFormFieldNames(query, limit);
       if (names.length) {
         return {
           fields: this.labelFields(step.table, names),
@@ -647,7 +647,7 @@ PortalMetadataHandler.prototype = {
   },
 
   findListSysId: function (encodedQuery) {
-    var gr = new GlideRecord('sys_ui_list');
+    const gr = new GlideRecord('sys_ui_list');
     gr.addEncodedQuery(encodedQuery);
     gr.setLimit(1);
     gr.query();
@@ -655,7 +655,7 @@ PortalMetadataHandler.prototype = {
   },
 
   findViewSysId: function (viewTitle) {
-    var gr = new GlideRecord('sys_ui_view');
+    const gr = new GlideRecord('sys_ui_view');
     gr.addQuery('title', viewTitle);
     gr.setLimit(1);
     gr.query();
@@ -664,24 +664,24 @@ PortalMetadataHandler.prototype = {
 
   resolveListElementsByListId: function (listId, limit) {
     if (!listId) return [];
-    var gr = new GlideRecord('sys_ui_list_element');
+    const gr = new GlideRecord('sys_ui_list_element');
     gr.addQuery('list_id', listId);
     gr.orderBy('position');
     gr.setLimit(limit || 50);
     gr.query();
-    var names = [];
+    const names = [];
     while (gr.next()) {
-      var el = String(gr.getValue('element') || '');
+      const el = String(gr.getValue('element') || '');
       if (el) names.push(el);
     }
     return names;
   },
 
   resolveListLayout: function (tableName, viewTitle) {
-    var userId = gs.getUserID();
-    var empty = { fields: [], resolved_layout: 'default', list_sys_id: '' };
+    const userId = gs.getUserID();
+    const empty = { fields: [], resolved_layout: 'default', list_sys_id: '' };
 
-    var listId = this.findListSysId(
+    let listId = this.findListSysId(
       'name=' + tableName + '^view.title=' + viewTitle + '^sys_user=' + userId
     );
     if (!listId) {
@@ -690,7 +690,7 @@ PortalMetadataHandler.prototype = {
       );
     }
     if (listId) {
-      var personalNames = this.resolveListElementsByListId(listId, 50);
+      const personalNames = this.resolveListElementsByListId(listId, 50);
       if (personalNames.length) {
         return {
           fields: this.labelFields(tableName, personalNames),
@@ -709,7 +709,7 @@ PortalMetadataHandler.prototype = {
       );
     }
     if (listId) {
-      var sharedNames = this.resolveListElementsByListId(listId, 50);
+      const sharedNames = this.resolveListElementsByListId(listId, 50);
       if (sharedNames.length) {
         return {
           fields: this.labelFields(tableName, sharedNames),
@@ -721,7 +721,7 @@ PortalMetadataHandler.prototype = {
 
     listId = this.findListSysId('name=' + tableName + '^view.name=^sys_userISEMPTY');
     if (listId) {
-      var defaultNames = this.resolveListElementsByListId(listId, 20);
+      const defaultNames = this.resolveListElementsByListId(listId, 20);
       if (defaultNames.length) {
         return {
           fields: this.labelFields(tableName, defaultNames),
@@ -731,15 +731,15 @@ PortalMetadataHandler.prototype = {
       }
     }
 
-    var gr3 = new GlideRecord('sys_ui_list_element');
+    const gr3 = new GlideRecord('sys_ui_list_element');
     gr3.addEncodedQuery(
       'list_id.name=' + tableName + '^list_id.view.title=' + viewTitle + '^ORDERBYposition'
     );
     gr3.setLimit(50);
     gr3.query();
-    var dotNames = [];
+    const dotNames = [];
     while (gr3.next()) {
-      var el3 = String(gr3.getValue('element') || '');
+      const el3 = String(gr3.getValue('element') || '');
       if (el3) dotNames.push(el3);
     }
     if (dotNames.length) {
@@ -776,18 +776,32 @@ PortalMetadataHandler.prototype = {
     return !this.LIST_LAYOUT_EXCLUDED_TYPES[String(internalType)];
   },
 
-  queryDictionaryFields: function (tableName, searchQuery, maxRows) {
-    var out = [];
-    var seen = {};
-    var tablesSeen = {};
-    var current = tableName;
-    var limit = maxRows || 200;
+  _matchesDictField: function (dict, searchQuery, seen, out) {
+    const element = String(dict.getValue('element') || '');
+    if (!element || element.startsWith('.') || seen[element]) return;
+    const internalType = String(dict.getValue('internal_type') || '');
+    if (!this.isListLayoutFieldType(internalType)) return;
+    const label = String(dict.getValue('column_label') || element);
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (!label.toLowerCase().includes(q) && !element.toLowerCase().includes(q)) return;
+    }
+    seen[element] = true;
+    out.push({ element: element, label: label, internal_type: internalType });
+  },
 
-    for (var depth = 0; depth < 12 && out.length < limit; depth++) {
+  queryDictionaryFields: function (tableName, searchQuery, maxRows) {
+    const out = [];
+    const seen = {};
+    const tablesSeen = {};
+    let current = tableName;
+    const limit = maxRows > 0 ? maxRows : 200;
+
+    for (let depth = 0; depth < 12 && out.length < limit; depth++) {
       if (!current || tablesSeen[current]) break;
       tablesSeen[current] = true;
 
-      var dict = new GlideRecord('sys_dictionary');
+      const dict = new GlideRecord('sys_dictionary');
       dict.addQuery('name', current);
       dict.addQuery('active', true);
       dict.addQuery('element', '!=', '');
@@ -795,21 +809,7 @@ PortalMetadataHandler.prototype = {
       dict.setLimit(limit);
       dict.query();
       while (dict.next() && out.length < limit) {
-        var element = String(dict.getValue('element') || '');
-        if (!element || element.indexOf('.') === 0 || seen[element]) continue;
-        var internalType = String(dict.getValue('internal_type') || '');
-        if (!this.isListLayoutFieldType(internalType)) continue;
-        var label = String(dict.getValue('column_label') || element);
-        if (searchQuery) {
-          var q = searchQuery.toLowerCase();
-          if (label.toLowerCase().indexOf(q) === -1 && element.toLowerCase().indexOf(q) === -1) continue;
-        }
-        seen[element] = true;
-        out.push({
-          element: element,
-          label: label,
-          internal_type: internalType,
-        });
+        this._matchesDictField(dict, searchQuery, seen, out);
       }
       current = this.getParentTable(current);
     }
@@ -821,19 +821,19 @@ PortalMetadataHandler.prototype = {
   },
 
   isValidListColumn: function (tableName, element) {
-    var current = tableName;
-    var tablesSeen = {};
-    for (var depth = 0; depth < 12; depth++) {
+    let current = tableName;
+    const tablesSeen = {};
+    for (let depth = 0; depth < 12; depth++) {
       if (!current || tablesSeen[current]) break;
       tablesSeen[current] = true;
-      var dict = new GlideRecord('sys_dictionary');
+      const dict = new GlideRecord('sys_dictionary');
       dict.addQuery('name', current);
       dict.addQuery('element', element);
       dict.addQuery('active', true);
       dict.setLimit(1);
       dict.query();
       if (dict.next()) {
-        var internalType = String(dict.getValue('internal_type') || '');
+        const internalType = String(dict.getValue('internal_type') || '');
         return this.isListLayoutFieldType(internalType);
       }
       current = this.getParentTable(current);
@@ -842,17 +842,17 @@ PortalMetadataHandler.prototype = {
   },
 
   findUserListRecord: function (tableName, viewTitle, userId) {
-    var listId = this.findListSysId(
+    const listId = this.findListSysId(
       'name=' + tableName + '^view.title=' + viewTitle + '^sys_user=' + userId
     );
     if (!listId) return null;
-    var gr = new GlideRecord('sys_ui_list');
+    const gr = new GlideRecord('sys_ui_list');
     if (!gr.get(listId)) return null;
     return gr;
   },
 
   findSharedListRecord: function (tableName, viewTitle) {
-    var listId = this.findListSysId(
+    let listId = this.findListSysId(
       'name=' + tableName + '^view.title=' + viewTitle + '^sys_userISEMPTY^active=true'
     );
     if (!listId) {
@@ -861,17 +861,17 @@ PortalMetadataHandler.prototype = {
       );
     }
     if (!listId) return null;
-    var gr = new GlideRecord('sys_ui_list');
+    const gr = new GlideRecord('sys_ui_list');
     if (!gr.get(listId)) return null;
     return gr;
   },
 
   insertListElements: function (listId, columnNames) {
-    for (var i = 0; i < columnNames.length; i++) {
-      var elGr = new GlideRecord('sys_ui_list_element');
+    for (const [i, columnName] of columnNames.entries()) {
+      const elGr = new GlideRecord('sys_ui_list_element');
       elGr.initialize();
       elGr.setValue('list_id', listId);
-      elGr.setValue('element', columnNames[i]);
+      elGr.setValue('element', columnName);
       elGr.setValue('position', (i + 1) * 10);
       if (!elGr.insert()) return false;
     }
@@ -879,33 +879,33 @@ PortalMetadataHandler.prototype = {
   },
 
   deleteListElements: function (listId) {
-    var gr = new GlideRecord('sys_ui_list_element');
+    const gr = new GlideRecord('sys_ui_list_element');
     gr.addQuery('list_id', listId);
     gr.query();
     while (gr.next()) gr.deleteRecord();
   },
 
   createUserListFromShared: function (tableName, viewTitle, userId) {
-    var sharedGr = this.findSharedListRecord(tableName, viewTitle);
-    var viewId = sharedGr ? String(sharedGr.getValue('view') || '') : '';
+    const sharedGr = this.findSharedListRecord(tableName, viewTitle);
+    let viewId = sharedGr ? String(sharedGr.getValue('view') || '') : '';
     if (!viewId) viewId = this.findViewSysId(viewTitle);
     if (!viewId) {
       return { id: '', error: 'View not found: ' + viewTitle };
     }
 
-    var listGr = new GlideRecord('sys_ui_list');
+    const listGr = new GlideRecord('sys_ui_list');
     listGr.initialize();
     listGr.setValue('name', tableName);
     listGr.setValue('view', viewId);
     listGr.setValue('sys_user', userId);
     listGr.setValue('sys_name', tableName);
 
-    var id = listGr.insert();
+    const id = listGr.insert();
     if (!id) {
-      var msg = '';
+      let msg = '';
       try {
         msg = String(listGr.getLastErrorMessage() || '');
-      } catch (e0) { /* getLastErrorMessage unavailable on this platform version */ }
+      } catch (error) { gs.debug('portal-metadata getLastErrorMessage unavailable: ' + error); }
       return { id: '', error: msg || 'Failed to insert sys_ui_list' };
     }
     return { id: id, error: '' };
@@ -914,30 +914,30 @@ PortalMetadataHandler.prototype = {
   LIST_LAYOUT_MAX_COLUMNS: 30,
 
   savePersonalListLayout: function (tableName, viewTitle, columnNames) {
-    if (!columnNames || !columnNames.length) {
+    if (!columnNames?.length) {
       return { ok: false, status: 400, message: 'columns must be a non-empty array' };
     }
     if (columnNames.length > this.LIST_LAYOUT_MAX_COLUMNS) {
       return { ok: false, status: 400, message: 'Too many columns (max ' + this.LIST_LAYOUT_MAX_COLUMNS + ')' };
     }
 
-    var hasName = false;
-    for (var n = 0; n < columnNames.length; n++) {
-      if (columnNames[n] === 'name') hasName = true;
-      if (!this.isValidListColumn(tableName, columnNames[n])) {
-        return { ok: false, status: 400, message: 'Invalid or unsupported column: ' + columnNames[n] };
+    let hasName = false;
+    for (const columnName of columnNames) {
+      if (columnName === 'name') hasName = true;
+      if (!this.isValidListColumn(tableName, columnName)) {
+        return { ok: false, status: 400, message: 'Invalid or unsupported column: ' + columnName };
       }
     }
     if (!hasName) {
       return { ok: false, status: 400, message: 'columns must include name' };
     }
 
-    var userId = gs.getUserID();
-    var listGr = this.findUserListRecord(tableName, viewTitle, userId);
-    var listId = listGr ? listGr.getUniqueValue() : '';
+    const userId = gs.getUserID();
+    const listGr = this.findUserListRecord(tableName, viewTitle, userId);
+    let listId = listGr ? listGr.getUniqueValue() : '';
 
     if (!listId) {
-      var created = this.createUserListFromShared(tableName, viewTitle, userId);
+      const created = this.createUserListFromShared(tableName, viewTitle, userId);
       listId = created.id;
       if (!listId) {
         return {
@@ -948,7 +948,7 @@ PortalMetadataHandler.prototype = {
       }
     }
 
-    var backup = this.resolveListElementsByListId(listId, 50);
+    const backup = this.resolveListElementsByListId(listId, 50);
     this.deleteListElements(listId);
     if (!this.insertListElements(listId, columnNames)) {
       this.deleteListElements(listId);
@@ -956,13 +956,13 @@ PortalMetadataHandler.prototype = {
       return { ok: false, status: 500, message: 'Failed to save list columns' };
     }
 
-    var layout = this.resolveListLayout(tableName, viewTitle);
+    const layout = this.resolveListLayout(tableName, viewTitle);
     return { ok: true, layout: layout };
   },
 
   resetPersonalListLayout: function (tableName, viewTitle) {
-    var userId = gs.getUserID();
-    var listGr = this.findUserListRecord(tableName, viewTitle, userId);
+    const userId = gs.getUserID();
+    const listGr = this.findUserListRecord(tableName, viewTitle, userId);
     if (listGr) listGr.deleteRecord();
     return this.resolveListLayout(tableName, viewTitle);
   },
@@ -976,14 +976,14 @@ PortalMetadataHandler.prototype = {
 
   readField: function (obj, name) {
     if (!obj) return '';
-    var v = obj[name];
+    let v = obj[name];
     if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
     try {
       if (typeof obj.get === 'function') {
         v = obj.get(name);
         if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
       }
-    } catch (e1) { /* obj.get not available or threw — fall through to empty string */ }
+    } catch (error) { gs.debug('portal-metadata readField obj.get probe failed: ' + error); }
     return '';
   },
 
@@ -992,11 +992,13 @@ PortalMetadataHandler.prototype = {
     if (typeof raw === 'string') {
       try {
         return JSON.parse(raw);
-      } catch (e1) {
+      } catch (parseError) {
+        gs.debug('portal-metadata bodyToObject JSON.parse failed, using GlideJSON: ' + parseError);
         try {
-          var parser = new global.JSON();
+          const parser = new global.JSON();
           return parser.decode(raw);
-        } catch (e2) {
+        } catch (decodeError) {
+          gs.debug('portal-metadata bodyToObject GlideJSON decode failed: ' + decodeError);
           return null;
         }
       }
@@ -1005,77 +1007,88 @@ PortalMetadataHandler.prototype = {
     return null;
   },
 
+  _readFromGlideList: function (raw, out) {
+    for (let j = 0; j < raw.size(); j++) this._pushStringValue(out, raw.get(j));
+    return out;
+  },
+
+  _pushStringValue: function (out, item) {
+    const s = String(item || '').trim();
+    if (s) out.push(s);
+  },
+
   readStringArray: function (obj, name) {
     if (!obj || typeof obj !== 'object') return [];
-    var raw = obj[name];
+    let raw = obj[name];
     if (!raw && typeof obj.get === 'function') {
       try {
         raw = obj.get(name);
-      } catch (e0) { /* obj.get not available on this SN platform version — use property access */ }
+      } catch (error) { gs.debug('portal-metadata readStringArray obj.get probe failed: ' + error); }
     }
     if (!raw) return [];
 
-    var out = [];
-    var pushValue = function (item) {
-      var s = String(item || '').trim();
-      if (s) out.push(s);
-    };
+    const out = [];
 
     if (Array.isArray(raw)) {
-      for (var i = 0; i < raw.length; i++) pushValue(raw[i]);
+      for (const item of raw) this._pushStringValue(out, item);
       return out;
     }
 
     if (typeof raw.size === 'function' && typeof raw.get === 'function') {
-      for (var j = 0; j < raw.size(); j++) pushValue(raw.get(j));
-      return out;
+      return this._readFromGlideList(raw, out);
     }
 
     if (typeof raw.length === 'number') {
-      for (var k = 0; k < raw.length; k++) pushValue(raw[k]);
+      for (const item of raw) this._pushStringValue(out, item);
       return out;
     }
 
-    var single = this.sn(raw);
+    const single = this.sn(raw);
     return single ? [single] : [];
+  },
+
+  _readFromData: function (wrapper) {
+    const fromData = this.bodyToObject(wrapper.data);
+    return (fromData && typeof fromData === 'object') ? fromData : null;
+  },
+
+  _readFromDataString: function (wrapper) {
+    if (!wrapper.dataString) return null;
+    return this.bodyToObject(String(wrapper.dataString)) || null;
+  },
+
+  _readFromEntry: function (wrapper) {
+    if (typeof wrapper.hasNext !== 'function' || !wrapper.hasNext()) return null;
+    const entry = wrapper.nextEntry();
+    return this.bodyToObject(entry) || null;
   },
 
   readJsonBody: function (request) {
     try {
-      var wrapper = request.body;
+      const wrapper = request.body;
       if (!wrapper) return {};
 
-      var fromData = this.bodyToObject(wrapper.data);
-      if (fromData && typeof fromData === 'object') return fromData;
-
-      if (wrapper.dataString) {
-        var parsed = this.bodyToObject(String(wrapper.dataString));
-        if (parsed) return parsed;
-      }
-
-      if (typeof wrapper.hasNext === 'function' && wrapper.hasNext()) {
-        var entry = wrapper.nextEntry();
-        var fromEntry = this.bodyToObject(entry);
-        if (fromEntry) return fromEntry;
-      }
+      const result = this._readFromData(wrapper)
+        ?? this._readFromDataString(wrapper)
+        ?? this._readFromEntry(wrapper);
+      if (result) return result;
 
       if (this.readField(wrapper, 'table') || this.readField(wrapper, 'view_title')) return wrapper;
-
       if (typeof wrapper === 'string') {
-        var fromString = this.bodyToObject(wrapper);
+        const fromString = this.bodyToObject(wrapper);
         if (fromString) return fromString;
       }
-
       return typeof wrapper === 'object' ? wrapper : {};
-    } catch (e) {
+    } catch (error) {
+      gs.debug('portal-metadata readJsonBody failed: ' + error);
       return {};
     }
   },
 
   handleListLayoutFields: function (request, response) {
-    var table = this.readParam(request, 'table');
-    var viewTitle = this.readParam(request, 'view_title');
-    var q = this.readParam(request, 'q');
+    const table = this.readParam(request, 'table');
+    const viewTitle = this.readParam(request, 'view_title');
+    const q = this.readParam(request, 'q');
 
     if (!table || !this.isAllowedTable(table)) {
       this.jsonError(response, 400, 'Invalid or missing table parameter');
@@ -1092,10 +1105,10 @@ PortalMetadataHandler.prototype = {
   },
 
   handleListLayoutSave: function (request, response) {
-    var body = this.readJsonBody(request);
-    var table = this.readField(body, 'table').trim();
-    var viewTitle = this.readField(body, 'view_title').trim();
-    var normalized = this.readStringArray(body, 'columns');
+    const body = this.readJsonBody(request);
+    const table = this.readField(body, 'table').trim();
+    const viewTitle = this.readField(body, 'view_title').trim();
+    const normalized = this.readStringArray(body, 'columns');
 
     if (!table || !this.isAllowedTable(table)) {
       this.jsonError(response, 400, 'Invalid or missing table parameter');
@@ -1110,7 +1123,7 @@ PortalMetadataHandler.prototype = {
       return;
     }
 
-    var result = this.savePersonalListLayout(table, viewTitle, normalized);
+    const result = this.savePersonalListLayout(table, viewTitle, normalized);
     if (!result.ok) {
       this.jsonError(response, result.status || 400, result.message || 'Save failed');
       return;
@@ -1120,8 +1133,8 @@ PortalMetadataHandler.prototype = {
   },
 
   handleListLayoutReset: function (request, response) {
-    var table = this.readParam(request, 'table');
-    var viewTitle = this.readParam(request, 'view_title');
+    const table = this.readParam(request, 'table');
+    const viewTitle = this.readParam(request, 'view_title');
 
     if (!table || !this.isAllowedTable(table)) {
       this.jsonError(response, 400, 'Invalid or missing table parameter');
@@ -1135,181 +1148,181 @@ PortalMetadataHandler.prototype = {
     this.jsonOk(response, this.resetPersonalListLayout(table, viewTitle));
   },
 
+  toField: function (e) {
+    return { element: e.element, label: e.element };
+  },
+
   markerKind: function (el) {
-    var tokens = [el.type, el.element];
-    for (var i = 0; i < tokens.length; i++) {
-      var t = tokens[i];
+    const tokens = [el.type, el.element];
+    for (const t of tokens) {
       if (t === '.split') return 'split';
       if (t === '.end_split' || t === '.end') return 'end_split';
       if (t === '.begin_split') return 'begin_split';
     }
-    if (!el.element || el.element.indexOf('.') === 0) return 'skip';
+    if (!el.element || el.element.startsWith('.')) return 'skip';
     return 'field';
   },
 
-  parseElementRows: function (elems, fallbackColumns) {
-    var rows = [];
-    var mode = 'neutral';
-    var pendingFields = [];
-    var leftCol = [];
-    var rightCol = [];
-    var pastSplit = false;
-    var sawSplitMarker = false;
-    var self = this;
+  _flushTwoCol: function (state) {
+    if (!state.leftCol.length && !state.rightCol.length) return;
+    state.rows.push({ kind: 'columns', left: state.leftCol.map(this.toField), right: state.rightCol.map(this.toField) });
+    state.leftCol = [];
+    state.rightCol = [];
+    state.pastSplit = false;
+  },
 
-    var toField = function (e) {
-      return { element: e.element, label: e.element };
-    };
-
-    var flushTwoCol = function () {
-      if (!leftCol.length && !rightCol.length) return;
-      rows.push({ kind: 'columns', left: leftCol.map(toField), right: rightCol.map(toField) });
-      leftCol = [];
-      rightCol = [];
-      pastSplit = false;
-    };
-
-    var emitPendingAsFull = function () {
-      for (var i = 0; i < pendingFields.length; i++) {
-        rows.push({ kind: 'full', field: toField(pendingFields[i]) });
-      }
-      pendingFields = [];
-    };
-
-    var startTwoColBlock = function () {
-      mode = 'two_col';
-      leftCol = [];
-      rightCol = [];
-      pastSplit = false;
-    };
-
-    for (var idx = 0; idx < elems.length; idx++) {
-      var el = elems[idx];
-      switch (self.markerKind(el)) {
-        case 'begin_split':
-          sawSplitMarker = true;
-          if (mode === 'neutral') emitPendingAsFull();
-          else if (mode === 'two_col') flushTwoCol();
-          startTwoColBlock();
-          break;
-        case 'split':
-          sawSplitMarker = true;
-          if (mode === 'neutral') {
-            leftCol = pendingFields.slice(0);
-            pendingFields = [];
-            mode = 'two_col';
-          } else if (mode === 'full_only') {
-            startTwoColBlock();
-          }
-          pastSplit = true;
-          break;
-        case 'end_split':
-          sawSplitMarker = true;
-          if (mode === 'neutral') emitPendingAsFull();
-          else if (mode === 'two_col') flushTwoCol();
-          mode = 'full_only';
-          break;
-        case 'field':
-          if (mode === 'neutral') pendingFields.push(el);
-          else if (mode === 'full_only') rows.push({ kind: 'full', field: toField(el) });
-          else if (pastSplit) rightCol.push(el);
-          else leftCol.push(el);
-          break;
-        default:
-          break;
-      }
+  _emitPendingAsFull: function (state) {
+    for (const pendingField of state.pendingFields) {
+      state.rows.push({ kind: 'full', field: this.toField(pendingField) });
     }
+    state.pendingFields = [];
+  },
 
+  _startTwoColBlock: function (state) {
+    state.mode = 'two_col';
+    state.leftCol = [];
+    state.rightCol = [];
+    state.pastSplit = false;
+  },
+
+  _placeFieldEl: function (el, state) {
+    if (state.mode === 'neutral') state.pendingFields.push(el);
+    else if (state.mode === 'full_only') state.rows.push({ kind: 'full', field: this.toField(el) });
+    else if (state.pastSplit) state.rightCol.push(el);
+    else state.leftCol.push(el);
+  },
+
+  _processElement: function (el, state) {
+    const kind = this.markerKind(el);
+    if (kind === 'begin_split') {
+      if (state.mode === 'neutral') this._emitPendingAsFull(state);
+      else if (state.mode === 'two_col') this._flushTwoCol(state);
+      this._startTwoColBlock(state);
+      return true;
+    }
+    if (kind === 'split') {
+      if (state.mode === 'neutral') {
+        state.leftCol = state.pendingFields.slice(0);
+        state.pendingFields = [];
+        state.mode = 'two_col';
+      } else if (state.mode === 'full_only') {
+        this._startTwoColBlock(state);
+      }
+      state.pastSplit = true;
+      return true;
+    }
+    if (kind === 'end_split') {
+      if (state.mode === 'neutral') this._emitPendingAsFull(state);
+      else if (state.mode === 'two_col') this._flushTwoCol(state);
+      state.mode = 'full_only';
+      return true;
+    }
+    if (kind === 'field') this._placeFieldEl(el, state);
+    return false;
+  },
+
+  _finalizeElementRows: function (state, sawSplitMarker, fallbackColumns) {
+    const { rows, mode, pendingFields } = state;
     if (mode === 'neutral' && pendingFields.length) {
       if (!sawSplitMarker && fallbackColumns === 2) {
-        for (var j = 0; j < pendingFields.length; j += 2) {
+        for (let j = 0; j < pendingFields.length; j += 2) {
           if (j + 1 < pendingFields.length) {
-            rows.push({
-              kind: 'columns',
-              left: [toField(pendingFields[j])],
-              right: [toField(pendingFields[j + 1])],
-            });
+            rows.push({ kind: 'columns', left: [this.toField(pendingFields[j])], right: [this.toField(pendingFields[j + 1])] });
           } else {
-            rows.push({ kind: 'full', field: toField(pendingFields[j]) });
+            rows.push({ kind: 'full', field: this.toField(pendingFields[j]) });
           }
         }
       } else {
-        emitPendingAsFull();
+        this._emitPendingAsFull(state);
       }
     } else if (mode === 'two_col') {
-      flushTwoCol();
+      this._flushTwoCol(state);
     }
+  },
 
-    return rows;
+  parseElementRows: function (elems, fallbackColumns) {
+    const state = {
+      rows: [],
+      mode: 'neutral',
+      pendingFields: [],
+      leftCol: [],
+      rightCol: [],
+      pastSplit: false,
+    };
+    let sawSplitMarker = false;
+    for (const el of elems) {
+      if (this._processElement(el, state)) sawSplitMarker = true;
+    }
+    this._finalizeElementRows(state, sawSplitMarker, fallbackColumns);
+    return state.rows;
   },
 
   collectFieldNames: function (rows) {
-    var names = [];
-    for (var i = 0; i < rows.length; i++) {
-      var row = rows[i];
+    const names = [];
+    for (const row of rows) {
       if (row.kind === 'full') names.push(row.field.element);
       else {
-        for (var l = 0; l < row.left.length; l++) names.push(row.left[l].element);
-        for (var r = 0; r < row.right.length; r++) names.push(row.right[r].element);
+        for (const cell of row.left) names.push(cell.element);
+        for (const cell of row.right) names.push(cell.element);
       }
     }
     return names;
   },
 
   docLookupNames: function (elements) {
-    var names = {};
-    for (var i = 0; i < elements.length; i++) {
-      var el = elements[i];
+    const names = {};
+    for (const el of elements) {
       names[el] = true;
-      var dot = el.indexOf('.');
+      const dot = el.indexOf('.');
       if (dot > 0) names[el.substring(0, dot)] = true;
     }
     return Object.keys(names);
   },
 
-  applySectionLabels: function (tableName, sections) {
-    if (!sections || !sections.length) return sections;
-    var allNames = [];
-    for (var i = 0; i < sections.length; i++) {
-      allNames = allNames.concat(this.collectFieldNames(sections[i].rows));
+  _applyRowLabel: function (row, labelMap) {
+    if (row.kind === 'full') {
+      row.field.label = this._labelFor(labelMap, row.field.element);
+    } else {
+      for (const cell of row.left) cell.label = this._labelFor(labelMap, cell.element);
+      for (const cell of row.right) cell.label = this._labelFor(labelMap, cell.element);
     }
-    var labeled = this.labelFields(tableName, this.docLookupNames(allNames));
-    var labelMap = {};
-    for (var j = 0; j < labeled.length; j++) labelMap[labeled[j].element] = labeled[j].label;
+  },
 
-    var labelFor = function (element) {
-      if (labelMap[element]) return labelMap[element];
-      var dot = element.indexOf('.');
-      if (dot > 0 && labelMap[element.substring(0, dot)]) return labelMap[element.substring(0, dot)];
-      return element.replace(/_/g, ' ').replace(/\./g, ' \u203a ').replace(/\b\w/g, function (c) {
-        return c.toUpperCase();
-      });
-    };
+  _labelFor: function (labelMap, element) {
+    if (labelMap[element]) return labelMap[element];
+    const dot = element.indexOf('.');
+    if (dot > 0 && labelMap[element.substring(0, dot)]) return labelMap[element.substring(0, dot)];
+    return element.replaceAll('_', ' ').replaceAll('.', ' \u203a ').replaceAll(/\b\w/g, function (c) {
+      return c.toUpperCase();
+    });
+  },
 
-    for (var s = 0; s < sections.length; s++) {
-      var rows = sections[s].rows;
-      for (var ri = 0; ri < rows.length; ri++) {
-        var row = rows[ri];
-        if (row.kind === 'full') row.field.label = labelFor(row.field.element);
-        else {
-          for (var li = 0; li < row.left.length; li++) row.left[li].label = labelFor(row.left[li].element);
-          for (var ri2 = 0; ri2 < row.right.length; ri2++) row.right[ri2].label = labelFor(row.right[ri2].element);
-        }
-      }
+  applySectionLabels: function (tableName, sections) {
+    if (!sections?.length) return sections;
+    let allNames = [];
+    for (const section of sections) {
+      allNames = allNames.concat(this.collectFieldNames(section.rows));
+    }
+    const labeled = this.labelFields(tableName, this.docLookupNames(allNames));
+    const labelMap = {};
+    for (const item of labeled) labelMap[item.element] = item.label;
+
+    for (const section of sections) {
+      for (const row of section.rows) this._applyRowLabel(row, labelMap);
     }
     return sections;
   },
 
   findFormSysId: function (tableName, viewTitle) {
-    var queries = viewTitle
+    const queries = viewTitle
       ? [
         'name=' + tableName + '^view.title=' + viewTitle + '^sys_userISEMPTY^active=true',
         'name=' + tableName + '^view.title=' + viewTitle + '^sys_userISEMPTY',
       ]
       : ['name=' + tableName + '^view.name=^sys_userISEMPTY^active=true', 'name=' + tableName + '^view.name=^sys_userISEMPTY'];
-    for (var i = 0; i < queries.length; i++) {
-      var gr = new GlideRecord('sys_ui_form');
-      gr.addEncodedQuery(queries[i]);
+    for (const query of queries) {
+      const gr = new GlideRecord('sys_ui_form');
+      gr.addEncodedQuery(query);
       gr.setLimit(1);
       gr.query();
       if (gr.next()) return gr.getUniqueValue();
@@ -1318,47 +1331,49 @@ PortalMetadataHandler.prototype = {
   },
 
   loadLegacySingleSection: function (tableName, viewTitle) {
-    var query = viewTitle
+    const query = viewTitle
       ? 'sys_ui_section.view.title=' + viewTitle + '^sys_ui_section.name=' + tableName + '^ORDERBYposition'
       : 'sys_ui_section.view.name=^sys_ui_section.name=' + tableName + '^ORDERBYposition';
-    var elems = this.queryUiElements(query, 200);
-    var rows = this.parseElementRows(elems, 1);
+    const elems = this.queryUiElements(query, 200);
+    const rows = this.parseElementRows(elems, 1);
     if (!this.collectFieldNames(rows).length) return null;
     return [{ caption: null, rows: rows }];
   },
 
+  _buildSection: function (sectionId) {
+    const secGr = new GlideRecord('sys_ui_section');
+    if (!secGr.get(sectionId)) return null;
+    const captionRaw = String(secGr.getValue('caption') || '').trim();
+    const sectionColumns = Number.parseInt(secGr.getValue('columns'), 10) >= 2 ? 2 : 1;
+    const elems = this.queryUiElements('sys_ui_section=' + sectionId + '^ORDERBYposition', 200);
+    const rows = this.parseElementRows(elems, sectionColumns);
+    if (!this.collectFieldNames(rows).length && !captionRaw) return null;
+    return { caption: captionRaw || null, rows: rows };
+  },
+
   resolveFormLayoutFromTable: function (tableName, viewTitle) {
-    var formId = this.findFormSysId(tableName, viewTitle);
+    const formId = this.findFormSysId(tableName, viewTitle);
     if (!formId) {
-      var legacy = this.loadLegacySingleSection(tableName, viewTitle);
+      const legacy = this.loadLegacySingleSection(tableName, viewTitle);
       return legacy ? this.applySectionLabels(tableName, legacy) : null;
     }
 
-    var fsGr = new GlideRecord('sys_ui_form_section');
+    const fsGr = new GlideRecord('sys_ui_form_section');
     fsGr.addQuery('sys_ui_form', formId);
     fsGr.orderBy('position');
     fsGr.setLimit(50);
     fsGr.query();
     if (!fsGr.hasNext()) {
-      var legacy2 = this.loadLegacySingleSection(tableName, viewTitle);
+      const legacy2 = this.loadLegacySingleSection(tableName, viewTitle);
       return legacy2 ? this.applySectionLabels(tableName, legacy2) : null;
     }
 
-    var sections = [];
+    const sections = [];
     while (fsGr.next()) {
-      var sectionId = fsGr.getValue('sys_ui_section');
+      const sectionId = fsGr.getValue('sys_ui_section');
       if (!sectionId) continue;
-
-      var secGr = new GlideRecord('sys_ui_section');
-      if (!secGr.get(sectionId)) continue;
-      var captionRaw = String(secGr.getValue('caption') || '').trim();
-      var sectionColumns = parseInt(secGr.getValue('columns'), 10) >= 2 ? 2 : 1;
-
-      var elems = this.queryUiElements('sys_ui_section=' + sectionId + '^ORDERBYposition', 200);
-      var rows = this.parseElementRows(elems, sectionColumns);
-      var fieldNames = this.collectFieldNames(rows);
-      if (!fieldNames.length && !captionRaw) continue;
-      sections.push({ caption: captionRaw || null, rows: rows });
+      const section = this._buildSection(sectionId);
+      if (section) sections.push(section);
     }
 
     if (!sections.length) return null;
@@ -1366,11 +1381,11 @@ PortalMetadataHandler.prototype = {
   },
 
   tryLoadFormLayout: function (tableName, viewTitle) {
-    var sections = this.resolveFormLayoutFromTable(tableName, viewTitle);
-    if (!sections || !sections.length) return null;
-    var hasFields = false;
-    for (var i = 0; i < sections.length; i++) {
-      if (this.collectFieldNames(sections[i].rows).length) {
+    const sections = this.resolveFormLayoutFromTable(tableName, viewTitle);
+    if (!sections?.length) return null;
+    let hasFields = false;
+    for (const section of sections) {
+      if (this.collectFieldNames(section.rows).length) {
         hasFields = true;
         break;
       }
@@ -1384,8 +1399,8 @@ PortalMetadataHandler.prototype = {
   },
 
   resolveFormLayout: function (recordTable, viewTitle, parentTable) {
-    var parent = parentTable || this.getParentTable(recordTable);
-    var attempts = [
+    const parent = parentTable || this.getParentTable(recordTable);
+    const attempts = [
       { table: recordTable, viewTitle: viewTitle },
       { table: parent, viewTitle: viewTitle },
       { table: this.CMDB_CI_TABLE, viewTitle: viewTitle },
@@ -1393,14 +1408,13 @@ PortalMetadataHandler.prototype = {
       { table: parent, viewTitle: null },
       { table: this.CMDB_CI_TABLE, viewTitle: null },
     ];
-    var seen = {};
-    for (var i = 0; i < attempts.length; i++) {
-      var a = attempts[i];
+    const seen = {};
+    for (const a of attempts) {
       if (!a.table) continue;
-      var key = a.table + ':' + (a.viewTitle || 'default');
+      const key = a.table + ':' + (a.viewTitle || 'default');
       if (seen[key]) continue;
       seen[key] = true;
-      var result = this.tryLoadFormLayout(a.table, a.viewTitle);
+      const result = this.tryLoadFormLayout(a.table, a.viewTitle);
       if (result) return result;
     }
     return {
@@ -1411,11 +1425,11 @@ PortalMetadataHandler.prototype = {
   },
 
   handleViewLayout: function (request, response) {
-    var table = this.readParam(request, 'table');
-    var viewTitle = this.readParam(request, 'view_title');
-    var layoutType = this.readParam(request, 'type') || 'form';
-    var defaultLimit = parseInt(this.readParam(request, 'default_limit') || '20', 10);
-    var parentTable = this.readParam(request, 'parent_table');
+    const table = this.readParam(request, 'table');
+    const viewTitle = this.readParam(request, 'view_title');
+    const layoutType = this.readParam(request, 'type') || 'form';
+    const defaultLimit = Number.parseInt(this.readParam(request, 'default_limit') || '20', 10);
+    const parentTable = this.readParam(request, 'parent_table');
 
     if (!table || !this.isAllowedTable(table)) {
       this.jsonError(response, 400, 'Invalid or missing table parameter');
@@ -1450,7 +1464,7 @@ PortalMetadataHandler.prototype = {
     }
 
     if (layoutType === 'form') {
-      var title = viewTitle && this.isAllowedViewTitle(viewTitle) ? viewTitle : 'CLSA CMDB Workspace';
+      const title = viewTitle && this.isAllowedViewTitle(viewTitle) ? viewTitle : 'CLSA CMDB Workspace';
       this.jsonOk(response, {
         fields: this.resolveFormFieldList(table, title, defaultLimit),
       });

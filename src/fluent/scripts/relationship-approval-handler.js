@@ -1,4 +1,4 @@
-var RelationshipApprovalHandler = Class.create();
+var RelationshipApprovalHandler = Class.create(); // NOSONAR: ServiceNow Script Include class must use var (Class.create convention)
 RelationshipApprovalHandler.prototype = {
   initialize: function () {},
 
@@ -26,29 +26,29 @@ RelationshipApprovalHandler.prototype = {
 
   readField: function (obj, name) {
     if (!obj) return '';
-    var v = obj[name];
+    let v = obj[name];
     if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
     try {
       if (typeof obj.get === 'function') {
         v = obj.get(name);
         if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
       }
-    } catch (e1) {}
+    } catch (error) { gs.debug('relationship-approval readField obj.get probe failed: ' + error); }
     return '';
   },
 
   parseBody: function (request) {
     try {
-      var wrapper = request.body;
+      const wrapper = request.body;
       if (!wrapper) return {};
 
-      var raw = null;
+      let raw = null;
       if (wrapper.data) {
-        var data = wrapper.data;
+        const data = wrapper.data;
         if (typeof data === 'string') raw = JSON.parse(data);
         else raw = data;
       } else if (wrapper.dataString) {
-        var ds = String(wrapper.dataString);
+        const ds = String(wrapper.dataString);
         if (ds.length > 0) raw = JSON.parse(ds);
       }
 
@@ -57,7 +57,8 @@ RelationshipApprovalHandler.prototype = {
         decision: this.readField(raw, 'decision'),
         comments: this.readField(raw, 'comments') || this.readField(raw, 'approval_comments'),
       };
-    } catch (e) {
+    } catch (error) {
+      gs.debug('relationship-approval parseBody failed: ' + error);
       return null;
     }
   },
@@ -68,7 +69,7 @@ RelationshipApprovalHandler.prototype = {
 
   isRelationshipChangeDocument: function (documentId) {
     if (!documentId) return false;
-    var gr = new GlideRecord(this.CHANGE_TABLE);
+    const gr = new GlideRecord(this.CHANGE_TABLE);
     return gr.get(documentId);
   },
 
@@ -103,7 +104,7 @@ RelationshipApprovalHandler.prototype = {
   },
 
   queryRequestedForUser: function (currentUserId, documentId) {
-    var gr = new GlideRecord(this.APPROVAL_TABLE);
+    const gr = new GlideRecord(this.APPROVAL_TABLE);
     gr.addQuery('approver', currentUserId);
     gr.addQuery('state', 'requested');
     if (documentId) gr.addQuery('document_id', documentId);
@@ -113,13 +114,35 @@ RelationshipApprovalHandler.prototype = {
     return gr;
   },
 
+  _enrichApprovalRow: function (gr, inbox, ciSysId) {
+    const docId = this.sn(gr.getValue('document_id'));
+    if (!this.isRelationshipChangeDocument(docId)) return null;
+
+    if (ciSysId) {
+      const changeGr = new GlideRecord(this.CHANGE_TABLE);
+      if (!changeGr.get(docId)) return null;
+      const sourceCi = this.sn(changeGr.getValue('source_ci'));
+      const targetCi = this.sn(changeGr.getValue('target_ci'));
+      if (sourceCi !== ciSysId && targetCi !== ciSysId) return null;
+    }
+
+    const row = this.serializeApprovalRow(gr);
+    if (inbox === 'approver' || ciSysId) {
+      const change = new GlideRecord(this.CHANGE_TABLE);
+      if (change.get(docId)) {
+        row.change = this.serializeChangeSummary(change);
+      }
+    }
+    return row;
+  },
+
   handleGet: function (request, response) {
-    var currentUserId = gs.getUserID();
-    var documentId = request.queryParams.document_id
+    const currentUserId = gs.getUserID();
+    const documentId = request.queryParams.document_id
       ? request.queryParams.document_id.toString()
       : '';
-    var ciSysId = request.queryParams.ci_sys_id ? request.queryParams.ci_sys_id.toString() : '';
-    var inbox = request.queryParams.inbox ? request.queryParams.inbox.toString() : '';
+    const ciSysId = request.queryParams.ci_sys_id ? request.queryParams.ci_sys_id.toString() : '';
+    const inbox = request.queryParams.inbox ? request.queryParams.inbox.toString() : '';
 
     if (!documentId && !ciSysId && inbox !== 'approver') {
       this.jsonError(
@@ -130,29 +153,12 @@ RelationshipApprovalHandler.prototype = {
       return;
     }
 
-    var rows = [];
-    var gr = this.queryRequestedForUser(currentUserId, documentId);
+    const rows = [];
+    const gr = this.queryRequestedForUser(currentUserId, documentId);
 
     while (gr.next()) {
-      var docId = this.sn(gr.getValue('document_id'));
-      if (!this.isRelationshipChangeDocument(docId)) continue;
-
-      if (ciSysId) {
-        var changeGr = new GlideRecord(this.CHANGE_TABLE);
-        if (!changeGr.get(docId)) continue;
-        var sourceCi = this.sn(changeGr.getValue('source_ci'));
-        var targetCi = this.sn(changeGr.getValue('target_ci'));
-        if (sourceCi !== ciSysId && targetCi !== ciSysId) continue;
-      }
-
-      var row = this.serializeApprovalRow(gr);
-      if (inbox === 'approver' || ciSysId) {
-        var change = new GlideRecord(this.CHANGE_TABLE);
-        if (change.get(docId)) {
-          row.change = this.serializeChangeSummary(change);
-        }
-      }
-      rows.push(row);
+      const row = this._enrichApprovalRow(gr, inbox, ciSysId);
+      if (row) rows.push(row);
     }
 
     this.jsonOk(response, {
@@ -162,8 +168,8 @@ RelationshipApprovalHandler.prototype = {
   },
 
   handlePatch: function (request, response) {
-    var approvalSysId =
-      request.pathParams && request.pathParams.sys_id
+    const approvalSysId =
+      request.pathParams?.sys_id
         ? request.pathParams.sys_id.toString()
         : '';
     if (!approvalSysId) {
@@ -171,17 +177,17 @@ RelationshipApprovalHandler.prototype = {
       return;
     }
 
-    var body = this.parseBody(request);
+    const body = this.parseBody(request);
     if (!body) {
       this.jsonError(response, 400, 'Invalid JSON body');
       return;
     }
 
-    var decision = body.decision;
-    var comments = body.comments;
-    var currentUserId = gs.getUserID();
+    const decision = body.decision;
+    const comments = body.comments;
+    const currentUserId = gs.getUserID();
 
-    if (this.VALID_DECISIONS.indexOf(decision) === -1) {
+    if (!this.VALID_DECISIONS.includes(decision)) {
       this.jsonError(response, 400, 'Invalid decision. Use approve or reject.');
       return;
     }
@@ -191,15 +197,15 @@ RelationshipApprovalHandler.prototype = {
       return;
     }
 
-    var gr = new GlideRecord(this.APPROVAL_TABLE);
+    const gr = new GlideRecord(this.APPROVAL_TABLE);
     if (!gr.get(approvalSysId)) {
       this.jsonError(response, 404, 'Approval record not found');
       return;
     }
 
-    var approver = this.sn(gr.getValue('approver'));
-    var state = this.sn(gr.getValue('state'));
-    var documentId = this.sn(gr.getValue('document_id'));
+    const approver = this.sn(gr.getValue('approver'));
+    const state = this.sn(gr.getValue('state'));
+    const documentId = this.sn(gr.getValue('document_id'));
 
     if (!this.isRelationshipChangeDocument(documentId)) {
       this.jsonError(response, 400, 'Approval is not for a relationship change record');

@@ -19,9 +19,11 @@ export interface LiveRelationship {
 const sn = (v: unknown): string => {
   if (!v) return '';
   if (typeof v === 'string') return v;
-  if (typeof v === 'object' && v !== null && 'value' in v)
-    return String((v as Record<string, unknown>).value ?? '');
-  return String(v);
+  if (typeof v === 'object' && v !== null && 'value' in v) {
+    const val = (v as Record<string, unknown>).value;
+    return typeof val === 'object' && val !== null ? JSON.stringify(val) : String((val ?? '') as string | number | boolean);
+  }
+  return typeof v === 'object' ? JSON.stringify(v) : String(v as number | boolean);
 };
 
 function classifyDirection(
@@ -134,6 +136,11 @@ export interface RelCIPeer {
   direction: RelationshipDirection;
 }
 
+function directionFromSets(isUp: boolean, isDown: boolean): RelationshipDirection {
+  if (isUp && isDown) return 'bidirectional';
+  return isUp ? 'upstream' : 'downstream';
+}
+
 export async function loadAppRelationshipPeers(centerSysId: string): Promise<RelCIPeer[]> {
   const { typeQuery } = await getAppRelationshipTypes();
   const [{ result: asParent = [] }, { result: asChild = [] }] = await Promise.all([
@@ -183,6 +190,6 @@ export async function loadAppRelationshipPeers(centerSysId: string): Promise<Rel
     name,
     sysClass: cls,
     departmentDescription: deptDesc,
-    direction: upSet.has(id) && dnSet.has(id) ? 'bidirectional' : upSet.has(id) ? 'upstream' : 'downstream',
+    direction: directionFromSets(upSet.has(id), dnSet.has(id)),
   }));
 }

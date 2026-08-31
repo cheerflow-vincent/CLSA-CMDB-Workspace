@@ -16,6 +16,7 @@ import {
   scoreTextClass,
   toneFromScore,
   type HealthResultRow,
+  type HealthTone,
 } from '../utils/cmdbHealthResults';
 
 function val(row: HealthResultRow, key: string): string {
@@ -24,7 +25,7 @@ function val(row: HealthResultRow, key: string): string {
   return v && v !== '—' ? v : '';
 }
 
-function resolveTone(row: HealthResultRow, columns: ViewField[]): 'good' | 'warning' | 'bad' | 'neutral' {
+function resolveTone(row: HealthResultRow, columns: ViewField[]): HealthTone {
   for (const col of columns) {
     if (isBadgeElement(col.element)) {
       const statusVal = val(row, col.element);
@@ -45,9 +46,9 @@ function BodyField({
   row,
   tone,
 }: {
-  col: ViewField;
-  row: HealthResultRow;
-  tone: 'good' | 'warning' | 'bad' | 'neutral';
+  readonly col: ViewField;
+  readonly row: HealthResultRow;
+  readonly tone: 'good' | 'warning' | 'bad' | 'neutral';
 }) {
   if (!(col.element in row.values)) return null;
   const value = val(row, col.element);
@@ -94,12 +95,19 @@ function BodyField({
   );
 }
 
+function toneStatusLabel(tone: HealthTone): string {
+  if (tone === 'good') return 'OK';
+  if (tone === 'warning') return 'Needs attention';
+  if (tone === 'bad') return 'Action required';
+  return 'Metric';
+}
+
 export function HealthResultCard({
   row,
   columns,
 }: {
-  row: HealthResultRow;
-  columns: ViewField[];
+  readonly row: HealthResultRow;
+  readonly columns: ViewField[];
 }) {
   if (!columns.length) return null;
 
@@ -131,12 +139,12 @@ export function HealthResultCard({
 
       <div className="mt-3 pt-2 border-t border-gray-50 flex items-center justify-between gap-2">
         <span className="typo-caption flex items-center gap-1">
-          {tone === 'good'
-            ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-            : tone === 'warning' || tone === 'bad'
-              ? <AlertCircle className="w-3.5 h-3.5 text-yellow-500" />
-              : <Shield className="w-3.5 h-3.5 text-gray-400" />}
-          {tone === 'good' ? 'OK' : tone === 'warning' ? 'Needs attention' : tone === 'bad' ? 'Action required' : 'Metric'}
+          {(() => {
+            if (tone === 'good') return <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />;
+            if (tone === 'warning' || tone === 'bad') return <AlertCircle className="w-3.5 h-3.5 text-yellow-500" />;
+            return <Shield className="w-3.5 h-3.5 text-gray-400" />;
+          })()}
+          {toneStatusLabel(tone)}
         </span>
         <a
           href={healthRecordUrl(row.sysId)}
@@ -156,9 +164,9 @@ export default function HealthResultsPanel({
   onAccessResolved,
   refreshKey = 0,
 }: {
-  ciSysId: string;
-  onAccessResolved?: (access: TableAccess) => void;
-  refreshKey?: number;
+  readonly ciSysId: string;
+  readonly onAccessResolved?: (access: TableAccess) => void;
+  readonly refreshKey?: number;
 }) {
   const [rows, setRows] = useState<HealthResultRow[]>([]);
   const [columns, setColumns] = useState<ViewField[]>([]);

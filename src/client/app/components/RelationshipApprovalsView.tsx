@@ -8,7 +8,7 @@ import RelationshipChangeActions, {
 import { relTypeLabel } from '../utils/appRelationshipTypes';
 
 interface Props {
-  onNavigateToApp?: (sysId: string) => void;
+  readonly onNavigateToApp?: (sysId: string) => void;
 }
 
 function AppNameLink({
@@ -16,9 +16,9 @@ function AppNameLink({
   name,
   onNavigate,
 }: {
-  sysId?: string;
-  name?: string;
-  onNavigate?: (sysId: string) => void;
+  readonly sysId?: string;
+  readonly name?: string;
+  readonly onNavigate?: (sysId: string) => void;
 }) {
   const label = name || '—';
   if (!sysId || !onNavigate) {
@@ -102,16 +102,23 @@ export default function RelationshipApprovalsView({ onNavigateToApp }: Props) {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
-            <Loader2 className="w-5 h-5 animate-spin" /> Loading…
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="max-w-md mx-auto text-center py-16">
-            <GitBranch className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="typo-body text-gray-500">No pending relationship removal requests.</p>
-          </div>
-        ) : (
+        {(() => {
+          if (loading) {
+            return (
+              <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
+                <Loader2 className="w-5 h-5 animate-spin" /> Loading…
+              </div>
+            );
+          }
+          if (rows.length === 0) {
+            return (
+              <div className="max-w-md mx-auto text-center py-16">
+                <GitBranch className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="typo-body text-gray-500">No pending relationship removal requests.</p>
+              </div>
+            );
+          }
+          return (
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -219,7 +226,8 @@ export default function RelationshipApprovalsView({ onNavigateToApp }: Props) {
               </table>
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

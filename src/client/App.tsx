@@ -446,8 +446,8 @@ export function App() {
 
 // ── Record not found ─────────────────────────────────────────────────────────
 function NotFoundView({ table, sysId, onGoHome, onGoSearch }: {
-  table: string; sysId: string;
-  onGoHome: () => void; onGoSearch: () => void;
+  readonly table: string; readonly sysId: string;
+  readonly onGoHome: () => void; readonly onGoSearch: () => void;
 }) {
   return (
     <div className="flex-1 h-full flex items-center justify-center p-12">

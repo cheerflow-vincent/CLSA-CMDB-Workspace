@@ -1,7 +1,7 @@
 export interface EditFieldLabelProps {
-  label: string;
-  required?: boolean;
-  className?: string;
+  readonly label: string;
+  readonly required?: boolean;
+  readonly className?: string;
 }
 
 export default function EditFieldLabel({

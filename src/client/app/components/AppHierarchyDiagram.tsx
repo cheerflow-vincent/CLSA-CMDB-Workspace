@@ -19,20 +19,18 @@ import type { AppItem } from '../data/appData';
 import {
   loadAppFamilyHierarchyForRecord,
   type AppFamilyHierarchyData,
-  type ThreeLevelMapping,
-  type TwoLevelMapping,
   type LiveInstance,
 } from '../utils/appHomeLoader';
 import { Z_INDEX } from '../utils/layering';
 import { useDismissOnPointerDown } from '../utils/useDismissOnPointerDown';
 
 interface Props {
-  selectedApp: AppItem;
-  hierarchyMode?: boolean;
-  serviceType?: 'service' | 'instance' | null;
-  nodeSearch?: string;
-  refreshKey?: number;
-  onSelectApp?: (app: AppItem) => void;
+  readonly selectedApp: AppItem;
+  readonly hierarchyMode?: boolean;
+  readonly serviceType?: 'service' | 'instance' | null;
+  readonly nodeSearch?: string;
+  readonly refreshKey?: number;
+  readonly onSelectApp?: (app: AppItem) => void;
 }
 
 type HierarchyLevel = 'business' | 'service' | 'instance';
@@ -432,8 +430,8 @@ const HierarchyNode = memo(({ id, data }: NodeProps) => {
 
 const NODE_TYPES = { hierarchyNode: HierarchyNode };
 
-function MI({ icon, label, onClick }: {
-  icon: React.ReactNode; label: string; onClick: () => void;
+function MenuItem({ icon, label, onClick }: {
+  readonly icon: React.ReactNode; readonly label: string; readonly onClick: () => void;
 }) {
   return (
     <button type="button" onClick={onClick}
@@ -588,7 +586,6 @@ function DiagramCanvas({
           ref={nodeMenuRef}
           className="clsa-portal fixed w-60 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
           style={{ left: nodeMenu.x, top: nodeMenu.y, zIndex: Z_INDEX.diagramNodeMenu }}
-          onClick={e => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b border-gray-100 flex items-start justify-between gap-2">
             <div className="min-w-0">
@@ -611,7 +608,7 @@ function DiagramCanvas({
           </div>
 
           <div className="py-1">
-            <MI
+            <MenuItem
               icon={<Eye size={14} className="text-gray-400" />}
               label="View Details"
               onClick={() => {

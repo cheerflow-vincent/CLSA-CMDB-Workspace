@@ -7,10 +7,10 @@ export default function CollapsibleFormSection({
   isFirst,
   children,
 }: {
-  caption: string | null;
-  defaultOpen?: boolean;
-  isFirst?: boolean;
-  children: React.ReactNode;
+  readonly caption: string | null;
+  readonly defaultOpen?: boolean;
+  readonly isFirst?: boolean;
+  readonly children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 

@@ -1,5 +1,4 @@
-import type { TableAccess } from '../../api/servicenow';
-import type { FieldAccessEntry, FieldAccessResponse } from '../../api/servicenow';
+import type { TableAccess, FieldAccessEntry, FieldAccessResponse } from '../../api/servicenow';
 import type { ViewField, FormSectionLayout, FormLayoutRow } from './viewFields';
 
 export type { TableAccess };

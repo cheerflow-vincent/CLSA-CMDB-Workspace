@@ -1,4 +1,4 @@
-var ApplicationHomeHandler = Class.create();
+var ApplicationHomeHandler = Class.create(); // NOSONAR: ServiceNow Script Include class must use var (Class.create convention)
 ApplicationHomeHandler.prototype = {
   initialize: function () {},
 
@@ -57,29 +57,29 @@ ApplicationHomeHandler.prototype = {
 
   readField: function (obj, name) {
     if (!obj) return '';
-    var v = obj[name];
+    let v = obj[name];
     if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
     try {
       if (typeof obj.get === 'function') {
         v = obj.get(name);
         if (v !== undefined && v !== null && String(v) !== '') return this.sn(v);
       }
-    } catch (e1) {}
+    } catch (error) { gs.debug('application-home readField obj.get probe failed: ' + error); }
     return '';
   },
 
   readStringArray: function (obj, name) {
-    var raw = obj[name];
+    const raw = obj[name];
     if (!raw) return [];
     if (Array.isArray(raw)) {
-      var out = [];
-      for (var i = 0; i < raw.length; i++) {
-        var s = this.sn(raw[i]);
+      const out = [];
+      for (const element of raw) {
+        const s = this.sn(element);
         if (s) out.push(s);
       }
       return out;
     }
-    var single = this.sn(raw);
+    const single = this.sn(raw);
     return single ? [single] : [];
   },
 
@@ -88,11 +88,13 @@ ApplicationHomeHandler.prototype = {
     if (typeof raw === 'string') {
       try {
         return JSON.parse(raw);
-      } catch (e1) {
+      } catch (parseError) {
+        gs.debug('application-home bodyToObject JSON.parse failed, using GlideJSON: ' + parseError);
         try {
-          var parser = new global.JSON();
+          const parser = new global.JSON();
           return parser.decode(raw);
-        } catch (e2) {
+        } catch (decodeError) {
+          gs.debug('application-home bodyToObject GlideJSON decode failed: ' + decodeError);
           return null;
         }
       }
@@ -103,20 +105,20 @@ ApplicationHomeHandler.prototype = {
 
   parseBody: function (request) {
     try {
-      var wrapper = request.body;
+      const wrapper = request.body;
       if (!wrapper) return {};
 
-      var fromData = this.bodyToObject(wrapper.data);
+      const fromData = this.bodyToObject(wrapper.data);
       if (fromData && typeof fromData === 'object') return fromData;
 
       if (wrapper.dataString) {
-        var parsed = this.bodyToObject(String(wrapper.dataString));
+        const parsed = this.bodyToObject(String(wrapper.dataString));
         if (parsed) return parsed;
       }
 
       if (typeof wrapper.hasNext === 'function' && wrapper.hasNext()) {
-        var entry = wrapper.nextEntry();
-        var fromEntry = this.bodyToObject(entry);
+        const entry = wrapper.nextEntry();
+        const fromEntry = this.bodyToObject(entry);
         if (fromEntry) return fromEntry;
       }
 
@@ -124,44 +126,48 @@ ApplicationHomeHandler.prototype = {
       if (this.readField(wrapper, 'hierarchy_mode')) return wrapper;
 
       return {};
-    } catch (e) {
+    } catch (error) {
+      gs.debug('application-home parseBody failed: ' + error);
       return null;
     }
   },
 
+  _parseStructuredFilters: function (rawFilters) {
+    const filters = {};
+    for (const key in rawFilters) {
+      if (!rawFilters.hasOwnProperty(key)) continue;
+      const vals = this.readStringArray(rawFilters, key);
+      if (vals.length) filters[key] = vals;
+    }
+    return filters;
+  },
+
   normalizeCriteria: function (body) {
-    var filters = {};
-    var rawFilters = body.filters;
+    const rawFilters = body.filters;
+    let filters = {};
     if (rawFilters && typeof rawFilters === 'object' && !Array.isArray(rawFilters)) {
-      for (var key in rawFilters) {
-        if (!rawFilters.hasOwnProperty(key)) continue;
-        var vals = this.readStringArray(rawFilters, key);
-        if (vals.length) filters[key] = vals;
-      }
+      filters = this._parseStructuredFilters(rawFilters);
     } else {
-      var env = this.readStringArray(body, 'env');
-      var status = this.readStringArray(body, 'status');
-      var dept = this.readStringArray(body, 'dept');
-      var bizUnit = this.readStringArray(body, 'biz_unit');
-      var tier = this.readStringArray(body, 'tier');
+      const env = this.readStringArray(body, 'env');
+      const status = this.readStringArray(body, 'status');
+      const dept = this.readStringArray(body, 'dept');
+      const bizUnit = this.readStringArray(body, 'biz_unit');
+      const tier = this.readStringArray(body, 'tier');
       if (env.length) filters.environment = env;
       if (status.length) filters.operational_status = status;
       if (dept.length) filters.department = dept;
       if (bizUnit.length) filters.business_unit = bizUnit;
       if (tier.length) filters.u_tier = tier;
     }
-    return {
-      search: this.readField(body, 'search'),
-      filters: filters,
-    };
+    return { search: this.readField(body, 'search'), filters: filters };
   },
 
   hasActiveFilters: function (criteria) {
     if (criteria.search && String(criteria.search).trim()) return true;
-    var filters = criteria.filters || {};
-    for (var key in filters) {
+    const filters = criteria.filters || {};
+    for (const key in filters) {
       if (!filters.hasOwnProperty(key)) continue;
-      if (filters[key] && filters[key].length) return true;
+      if (filters[key]?.length) return true;
     }
     return false;
   },
@@ -195,22 +201,21 @@ ApplicationHomeHandler.prototype = {
   },
 
   loadFilterConfigRaw: function (threeLevel) {
-    var propName = threeLevel ? this.FILTER_CONFIG_PROP_3 : this.FILTER_CONFIG_PROP_2;
-    var raw = gs.getProperty(propName, '');
-    var parsed = this.parseJsonProperty(raw);
-    if (!parsed || !parsed.filters || !parsed.filters.length) {
+    const propName = threeLevel ? this.FILTER_CONFIG_PROP_3 : this.FILTER_CONFIG_PROP_2;
+    const raw = gs.getProperty(propName, '');
+    const parsed = this.parseJsonProperty(raw);
+    if (!parsed?.filters?.length) {
       return this.defaultFilterConfig(threeLevel);
     }
     return parsed;
   },
 
   getFilterDefsForHierarchy: function (threeLevel) {
-    var raw = this.loadFilterConfigRaw(threeLevel);
-    var filters = raw.filters || [];
-    var defs = [];
-    for (var i = 0; i < filters.length; i++) {
-      var def = filters[i];
-      if (!def || !def.field) continue;
+    const raw = this.loadFilterConfigRaw(threeLevel);
+    const filters = raw.filters || [];
+    const defs = [];
+    for (const def of filters) {
+      if (!def?.field) continue;
       defs.push({
         field: String(def.field),
         dotWalk: Boolean(def.dotWalk),
@@ -221,57 +226,56 @@ ApplicationHomeHandler.prototype = {
 
   refSysId: function (gr, field) {
     try {
-      var v = gr.getValue(field);
+      const v = gr.getValue(field);
       if (v) return String(v);
-    } catch (e1) {}
+    } catch (error) { gs.debug('application-home refSysId getValue failed for ' + field + ': ' + error); }
     try {
-      var el = gr.getElement(field);
+      const el = gr.getElement(field);
       if (el && !el.nil()) return String(el.toString());
-    } catch (e2) {}
+    } catch (error) { gs.debug('application-home refSysId getElement failed for ' + field + ': ' + error); }
     return '';
   },
 
   safeRefDisplay: function (gr, refField) {
     try {
-      var el = gr.getElement(refField);
+      const el = gr.getElement(refField);
       if (el && !el.nil()) {
         return String(el.getDisplayValue() || '');
       }
-    } catch (e) {}
+    } catch (error) { gs.debug('application-home safeRefDisplay failed for ' + refField + ': ' + error); }
     return '';
   },
 
   safeRefField: function (gr, refField, subField) {
     try {
-      var el = gr.getElement(refField);
+      const el = gr.getElement(refField);
       if (el && !el.nil()) {
         return String(el[subField] || '');
       }
-    } catch (e) {}
+    } catch (error) { gs.debug('application-home safeRefField failed for ' + refField + '.' + subField + ': ' + error); }
     return '';
   },
 
   /** Mirror client buildRelCiInstanceEdgeQuery — Table API encoded query on cmdb_rel_ci. */
   buildRelCiInstanceEdgeQuery: function (criteria, twoLevel, filterDefs) {
-    var parts = [
+    const parts = [
       twoLevel
         ? 'type.name=Connects to::Connected by'
         : 'type.name=Contains::Contained by',
     ];
-    var child = 'child.';
-    var childRef = twoLevel ? 'child.ref_cmdb_ci_service.' : 'child.ref_cmdb_ci_service_auto.';
+    const child = 'child.';
+    const childRef = twoLevel ? 'child.ref_cmdb_ci_service.' : 'child.ref_cmdb_ci_service_auto.';
     if (twoLevel) parts.push(childRef + 'u_service_type=instance');
 
-    var q = (criteria.search || '').trim();
+    const q = (criteria.search || '').trim();
     if (q) parts.push(child + 'nameLIKE' + q);
 
-    var defs = filterDefs && filterDefs.length ? filterDefs : this.getFilterDefsForHierarchy(!twoLevel);
-    var filters = criteria.filters || {};
-    for (var i = 0; i < defs.length; i++) {
-      var def = defs[i];
-      var values = filters[def.field];
-      if (!values || !values.length) continue;
-      var prefix = def.dotWalk ? childRef : child;
+    const defs = filterDefs?.length ? filterDefs : this.getFilterDefsForHierarchy(!twoLevel);
+    const filters = criteria.filters || {};
+    for (const def of defs) {
+      const values = filters[def.field];
+      if (!values?.length) continue;
+      const prefix = def.dotWalk ? childRef : child;
       parts.push(prefix + def.field + 'IN' + values.join(','));
     }
 
@@ -289,25 +293,24 @@ ApplicationHomeHandler.prototype = {
 
   /** Same encoded-query pattern as client chunkedINParallel on cmdb_rel_ci. */
   queryRelCiInChunks: function (inField, ids, extraQuery, rowHandler, logLabel) {
-    if (!ids.length) return 'ok';
-    var chunkSize = this.REL_CI_IN_CHUNK;
-    var self = this;
-    var chunkNum = 0;
-    for (var i = 0; i < ids.length; i += chunkSize) {
+    if (!ids.length) return;
+    const chunkSize = this.REL_CI_IN_CHUNK;
+    let chunkNum = 0;
+    for (let i = 0; i < ids.length; i += chunkSize) {
       chunkNum += 1;
-      var slice = ids.slice(i, i + chunkSize);
-      var encoded = inField + 'IN' + slice.join(',');
+      const slice = ids.slice(i, i + chunkSize);
+      let encoded = inField + 'IN' + slice.join(',');
       if (extraQuery) encoded += '^' + extraQuery;
-      var gr = new GlideRecord('cmdb_rel_ci');
+      const gr = new GlideRecord('cmdb_rel_ci');
       gr.addEncodedQuery(encoded);
       gr.setLimit(5000);
       gr.query();
-      var count = 0;
+      let count = 0;
       while (gr.next()) {
         count += 1;
-        rowHandler(self.relCiRow(gr));
+        rowHandler(this.relCiRow(gr));
       }
-      self.logQuery(
+      this.logQuery(
         logLabel || 'rel_ci_chunk',
         'table=cmdb_rel_ci chunk=' + chunkNum + '/' + Math.ceil(ids.length / chunkSize)
           + ' id_count=' + slice.length
@@ -315,27 +318,24 @@ ApplicationHomeHandler.prototype = {
           + ' sysparm_query=' + encoded
       );
     }
-    return 'ok';
   },
 
   queryTableInChunks: function (table, ids, fields, rowHandler) {
-    if (!ids.length) return 'ok';
-    var chunkSize = 150;
-    for (var i = 0; i < ids.length; i += chunkSize) {
-      var slice = ids.slice(i, i + chunkSize);
-      var gr = new GlideRecord(table);
+    if (!ids.length) return;
+    const chunkSize = 150;
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const slice = ids.slice(i, i + chunkSize);
+      const gr = new GlideRecord(table);
       gr.addQuery('sys_id', 'IN', slice.join(','));
       gr.query();
       while (gr.next()) {
-        var row = {};
-        for (var f = 0; f < fields.length; f++) {
-          var field = fields[f];
+        const row = {};
+        for (const field of fields) {
           row[field] = gr.getValue(field) || gr.getDisplayValue(field) || '';
         }
         rowHandler(row);
       }
     }
-    return 'ok';
   },
 
   /** Session cache token — gs.generateGUID() is scoped-app safe (no GlideChecksum/GlideDigest). */
@@ -348,24 +348,25 @@ ApplicationHomeHandler.prototype = {
   },
 
   storeFilterCache: function (token, families, instanceIds, orphanIds) {
-    var data = {
+    const data = {
       families: families,
       instance_ids: instanceIds,
       orphan_ids: orphanIds || [],
-      created_at: new Date().getTime(),
+      created_at: Date.now(),
     };
     gs.getSession().putClientData(this.cacheKey(token), JSON.stringify(data));
   },
 
   loadFilterCache: function (token) {
-    var raw = gs.getSession().getClientData(this.cacheKey(token));
+    const raw = gs.getSession().getClientData(this.cacheKey(token));
     if (!raw) return null;
     try {
-      var data = JSON.parse(raw);
-      if (!data || !data.created_at) return null;
-      if (new Date().getTime() - data.created_at > this.CACHE_TTL_MS) return null;
+      const data = JSON.parse(raw);
+      if (!data?.created_at) return null;
+      if (Date.now() - data.created_at > this.CACHE_TTL_MS) return null;
       return data;
-    } catch (e) {
+    } catch (error) {
+      gs.debug('application-home loadFilterCache parse failed: ' + error);
       return null;
     }
   },
@@ -378,31 +379,32 @@ ApplicationHomeHandler.prototype = {
     gs.getSession().putClientData(this.unfilteredCacheKey(twoLevel), JSON.stringify({
       families: families,
       orphan_ids: orphanIds || [],
-      created_at: new Date().getTime(),
+      created_at: Date.now(),
     }));
   },
 
   loadUnfilteredCache: function (twoLevel) {
-    var raw = gs.getSession().getClientData(this.unfilteredCacheKey(twoLevel));
+    const raw = gs.getSession().getClientData(this.unfilteredCacheKey(twoLevel));
     if (!raw) return null;
     try {
-      var data = JSON.parse(raw);
-      if (!data || !data.created_at || !Array.isArray(data.families)) return null;
-      if (new Date().getTime() - data.created_at > this.CACHE_TTL_MS) return null;
-      if (!Object.prototype.hasOwnProperty.call(data, 'orphan_ids')) return null;
+      const data = JSON.parse(raw);
+      if (!data?.created_at || !Array.isArray(data.families)) return null;
+      if (Date.now() - data.created_at > this.CACHE_TTL_MS) return null;
+      if (!Object.hasOwn(data, 'orphan_ids')) return null;
       return {
         families: data.families,
         orphan_ids: data.orphan_ids || [],
       };
-    } catch (e) {
+    } catch (error) {
+      gs.debug('application-home loadUnfilteredCache parse failed: ' + error);
       return null;
     }
   },
 
   fetchAllInstanceSysIds: function (twoLevel) {
-    var ids = [];
-    var table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_service_auto';
-    var gr = new GlideRecord(table);
+    const ids = [];
+    const table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_service_auto';
+    const gr = new GlideRecord(table);
     if (twoLevel) gr.addQuery('u_service_type', 'instance');
     gr.query();
     while (gr.next()) ids.push(gr.getUniqueValue());
@@ -411,9 +413,9 @@ ApplicationHomeHandler.prototype = {
 
   /** All app-family / business-app family sys_ids (not just visible/paged families). */
   fetchAllFamilyIds: function (twoLevel) {
-    var ids = [];
-    var table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_business_app';
-    var gr = new GlideRecord(table);
+    const ids = [];
+    const table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_business_app';
+    const gr = new GlideRecord(table);
     if (twoLevel) gr.addQuery('u_service_type', 'service');
     gr.query();
     while (gr.next()) ids.push(gr.getUniqueValue());
@@ -422,44 +424,47 @@ ApplicationHomeHandler.prototype = {
 
   /** Instance sys_ids reachable from any real app family via hierarchy rel_ci walks. */
   fetchLinkedInstanceIds: function (twoLevel, restrictSet) {
-    var linked = {};
-    var familyIds = this.fetchAllFamilyIds(twoLevel);
+    const linked = {};
+    const familyIds = this.fetchAllFamilyIds(twoLevel);
     if (!familyIds.length) return linked;
 
-    var families = [];
-    for (var fi = 0; fi < familyIds.length; fi++) {
-      families.push({ sys_id: familyIds[fi], name: '', short_description: '' });
+    const families = [];
+    for (const familyId of familyIds) {
+      families.push({ sys_id: familyId, name: '', short_description: '' });
     }
 
-    var mapping = twoLevel
+    const mapping = twoLevel
       ? this.buildTwoLevelMapping(families, restrictSet)
       : this.buildThreeLevelMapping(families, restrictSet);
 
     if (!mapping) return linked;
+    this._collectInstancesFromMapping(mapping, twoLevel, linked);
+    return linked;
+  },
 
+  _collectInstancesFromMapping: function (mapping, twoLevel, linked) {
     if (twoLevel) {
-      for (var appId in mapping.app_to_instances) {
+      for (const appId in mapping.app_to_instances) {
         if (!mapping.app_to_instances.hasOwnProperty(appId)) continue;
         if (appId === this.OTHERS_FAMILY_ID) continue;
-        var instArr = mapping.app_to_instances[appId] || [];
-        for (var i = 0; i < instArr.length; i++) linked[instArr[i]] = true;
+        const instArr = mapping.app_to_instances[appId] || [];
+        for (const instId of instArr) linked[instId] = true;
       }
     } else {
-      var instIds = mapping.instance_ids || [];
-      for (var j = 0; j < instIds.length; j++) linked[instIds[j]] = true;
+      const instIds = mapping.instance_ids || [];
+      for (const instId of instIds) linked[instId] = true;
     }
-    return linked;
   },
 
   /** Instances with no app-family link — grouped into [Others] on the home page. */
   computeOrphanInstanceIds: function (twoLevel, restrictSet) {
-    var universe = restrictSet ? Object.keys(restrictSet) : this.fetchAllInstanceSysIds(twoLevel);
+    const universe = restrictSet ? Object.keys(restrictSet) : this.fetchAllInstanceSysIds(twoLevel);
     if (!universe.length) return [];
 
-    var linked = this.fetchLinkedInstanceIds(twoLevel, restrictSet);
-    var orphans = [];
-    for (var k = 0; k < universe.length; k++) {
-      if (!linked[universe[k]]) orphans.push(universe[k]);
+    const linked = this.fetchLinkedInstanceIds(twoLevel, restrictSet);
+    const orphans = [];
+    for (const element of universe) {
+      if (!linked[element]) orphans.push(element);
     }
     this.logQuery(
       'orphan_instances',
@@ -475,12 +480,12 @@ ApplicationHomeHandler.prototype = {
     if (!orphanIds.length) return mapping;
 
     if (!mapping) {
-      var onlyMeta = {};
+      const onlyMeta = {};
       onlyMeta[this.OTHERS_FAMILY_ID] = {
         name: this.OTHERS_FAMILY_NAME,
         short_description: '',
       };
-      var onlyMap = {};
+      const onlyMap = {};
       onlyMap[this.OTHERS_FAMILY_ID] = orphanIds.slice();
       return {
         app_family_meta: onlyMeta,
@@ -495,10 +500,10 @@ ApplicationHomeHandler.prototype = {
     };
     mapping.app_to_instances[this.OTHERS_FAMILY_ID] = orphanIds.slice();
 
-    var instMap = {};
-    var existing = mapping.instance_svc_ids || [];
-    for (var ei = 0; ei < existing.length; ei++) instMap[existing[ei]] = true;
-    for (var oi = 0; oi < orphanIds.length; oi++) instMap[orphanIds[oi]] = true;
+    const instMap = {};
+    const existing = mapping.instance_svc_ids || [];
+    for (const existingId of existing) instMap[existingId] = true;
+    for (const orphanId of orphanIds) instMap[orphanId] = true;
     mapping.instance_svc_ids = Object.keys(instMap);
     return mapping;
   },
@@ -507,14 +512,14 @@ ApplicationHomeHandler.prototype = {
     if (!orphanIds.length) return mapping;
 
     if (!mapping) {
-      var onlySvcMap = {};
+      const onlySvcMap = {};
       onlySvcMap[this.OTHERS_SVC_ID] = {
         name: this.OTHERS_FAMILY_NAME,
         short_description: '',
       };
-      var onlyBAppToSvcs = {};
+      const onlyBAppToSvcs = {};
       onlyBAppToSvcs[this.OTHERS_FAMILY_ID] = [this.OTHERS_SVC_ID];
-      var onlySvcToInst = {};
+      const onlySvcToInst = {};
       onlySvcToInst[this.OTHERS_SVC_ID] = orphanIds.slice();
       return {
         b_apps: [{
@@ -536,9 +541,9 @@ ApplicationHomeHandler.prototype = {
     mapping.b_app_to_svcs[this.OTHERS_FAMILY_ID] = [this.OTHERS_SVC_ID];
     mapping.svc_to_inst_ids[this.OTHERS_SVC_ID] = orphanIds.slice();
 
-    var hasOthers = false;
-    for (var bi = 0; bi < mapping.b_apps.length; bi++) {
-      if (mapping.b_apps[bi].sys_id === this.OTHERS_FAMILY_ID) {
+    let hasOthers = false;
+    for (const bApp of mapping.b_apps) {
+      if (bApp.sys_id === this.OTHERS_FAMILY_ID) {
         hasOthers = true;
         break;
       }
@@ -551,17 +556,17 @@ ApplicationHomeHandler.prototype = {
       });
     }
 
-    var instMap = {};
-    var existing = mapping.instance_ids || [];
-    for (var ei = 0; ei < existing.length; ei++) instMap[existing[ei]] = true;
-    for (var oi = 0; oi < orphanIds.length; oi++) instMap[orphanIds[oi]] = true;
+    const instMap = {};
+    const existing = mapping.instance_ids || [];
+    for (const existingId of existing) instMap[existingId] = true;
+    for (const orphanId of orphanIds) instMap[orphanId] = true;
     mapping.instance_ids = Object.keys(instMap);
     return mapping;
   },
 
   /** Scan all family rows; return only those with at least one instance (session-cached). */
   resolveUnfilteredVisibleFamilies: function (twoLevel) {
-    var cached = this.loadUnfilteredCache(twoLevel);
+    const cached = this.loadUnfilteredCache(twoLevel);
     if (cached) {
       this.logQuery(
         'unfiltered_cache_hit',
@@ -570,11 +575,11 @@ ApplicationHomeHandler.prototype = {
       return cached;
     }
 
-    var table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_business_app';
-    var scanBatch = 50;
-    var offset = 0;
-    var visible = [];
-    var tableRowsScanned = 0;
+    const table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_business_app';
+    const scanBatch = 50;
+    let offset = 0;
+    let visible = [];
+    let tableRowsScanned = 0;
 
     this.logQuery(
       'unfiltered_visible_scan_start',
@@ -582,53 +587,19 @@ ApplicationHomeHandler.prototype = {
     );
 
     while (true) {
-      var gr = new GlideRecord(table);
-      if (twoLevel) gr.addQuery('u_service_type', 'service');
-      gr.orderBy('name');
-      gr.chooseWindow(offset, offset + scanBatch);
-      gr.query();
-
-      var batch = [];
-      while (gr.next()) {
-        batch.push({
-          sys_id: gr.getUniqueValue(),
-          name: gr.getValue('name') || gr.getDisplayValue('name') || gr.getUniqueValue(),
-          short_description: gr.getValue('short_description') || '',
-        });
-      }
+      const batch = this._fetchOneFamilyBatch(table, twoLevel, offset, scanBatch);
       if (!batch.length) break;
-
       tableRowsScanned += batch.length;
-      var mapping = twoLevel
+      const mapping = twoLevel
         ? this.buildTwoLevelMapping(batch, null)
         : this.buildThreeLevelMapping(batch, null);
-
-      if (mapping) {
-        if (twoLevel) {
-          for (var appId in mapping.app_family_meta) {
-            if (!mapping.app_family_meta.hasOwnProperty(appId)) continue;
-            if (appId === this.OTHERS_FAMILY_ID) continue;
-            var meta = mapping.app_family_meta[appId];
-            visible.push({
-              sys_id: appId,
-              name: meta.name,
-              short_description: meta.short_description || '',
-            });
-          }
-        } else {
-          for (var i = 0; i < mapping.b_apps.length; i++) {
-            if (mapping.b_apps[i].sys_id === this.OTHERS_FAMILY_ID) continue;
-            visible.push(mapping.b_apps[i]);
-          }
-        }
-      }
-
+      if (mapping) this._processBatch(mapping, twoLevel, visible);
       offset += batch.length;
       if (batch.length < scanBatch) break;
     }
 
     visible = this.sortFamilies(visible);
-    var orphanIds = this.computeOrphanInstanceIds(twoLevel, null);
+    const orphanIds = this.computeOrphanInstanceIds(twoLevel, null);
     this.storeUnfilteredCache(twoLevel, visible, orphanIds);
     this.logQuery(
       'unfiltered_visible_scan_result',
@@ -639,6 +610,39 @@ ApplicationHomeHandler.prototype = {
     return { families: visible, orphan_ids: orphanIds };
   },
 
+  _fetchOneFamilyBatch: function (table, twoLevel, offset, limit) {
+    const gr = new GlideRecord(table);
+    if (twoLevel) gr.addQuery('u_service_type', 'service');
+    gr.orderBy('name');
+    gr.chooseWindow(offset, offset + limit);
+    gr.query();
+    const batch = [];
+    while (gr.next()) {
+      batch.push({
+        sys_id: gr.getUniqueValue(),
+        name: gr.getValue('name') || gr.getDisplayValue('name') || gr.getUniqueValue(),
+        short_description: gr.getValue('short_description') || '',
+      });
+    }
+    return batch;
+  },
+
+  _processBatch: function (mapping, twoLevel, visible) {
+    if (twoLevel) {
+      for (const appId in mapping.app_family_meta) {
+        if (!mapping.app_family_meta.hasOwnProperty(appId)) continue;
+        if (appId === this.OTHERS_FAMILY_ID) continue;
+        const meta = mapping.app_family_meta[appId];
+        visible.push({ sys_id: appId, name: meta.name, short_description: meta.short_description || '' });
+      }
+    } else {
+      for (const bApp of mapping.b_apps) {
+        if (bApp.sys_id === this.OTHERS_FAMILY_ID) continue;
+        visible.push(bApp);
+      }
+    }
+  },
+
   sortFamilies: function (families) {
     families.sort(function (a, b) {
       return String(a.name).localeCompare(String(b.name));
@@ -647,9 +651,9 @@ ApplicationHomeHandler.prototype = {
   },
 
   queryFilteredInstanceEdges: function (criteria, twoLevel, filterDefs, limit, offset) {
-    var rows = [];
-    var encoded = this.buildRelCiInstanceEdgeQuery(criteria, twoLevel, filterDefs);
-    var gr = new GlideRecord('cmdb_rel_ci');
+    const rows = [];
+    const encoded = this.buildRelCiInstanceEdgeQuery(criteria, twoLevel, filterDefs);
+    const gr = new GlideRecord('cmdb_rel_ci');
     gr.addEncodedQuery(encoded);
     gr.orderBy('child.name');
     if (offset !== undefined && limit !== undefined) {
@@ -675,37 +679,44 @@ ApplicationHomeHandler.prototype = {
     return rows;
   },
 
-  resolveFilteredTwoLevel: function (criteria, filterDefs) {
-    var instanceIdMap = {};
-    var intermediateIdMap = {};
-    var offset = 0;
-    var truncated = false;
-    var totalEdges = 0;
+  _applyFamilyHopRow: function (row, familyMap) {
+    if (!row.parent || familyMap[row.parent]) return;
+    familyMap[row.parent] = {
+      sys_id: row.parent,
+      name: row.parentName || row.parent,
+      short_description: row.parentShortDescription || '',
+    };
+  },
 
+  _collectEdgeIdMaps: function (criteria, twoLevel, filterDefs) {
+    const childMap = {};
+    const parentMap = {};
+    let offset = 0;
+    let truncated = false;
+    let totalEdges = 0;
     while (true) {
-      var batch = this.queryFilteredInstanceEdges(criteria, true, filterDefs, this.EDGE_BATCH, offset);
+      const batch = this.queryFilteredInstanceEdges(criteria, twoLevel, filterDefs, this.EDGE_BATCH, offset);
       if (!batch.length) break;
-
-      for (var i = 0; i < batch.length; i++) {
-        var row = batch[i];
-        if (row.child) instanceIdMap[row.child] = true;
-        if (row.parent) intermediateIdMap[row.parent] = true;
+      for (const row of batch) {
+        if (row.child) childMap[row.child] = true;
+        if (row.parent) parentMap[row.parent] = true;
       }
-
       totalEdges += batch.length;
       offset += batch.length;
       if (batch.length < this.EDGE_BATCH) break;
-      if (totalEdges >= this.MAX_EDGES) {
-        truncated = true;
-        break;
-      }
+      if (totalEdges >= this.MAX_EDGES) { truncated = true; break; }
     }
+    return { childIds: Object.keys(childMap), parentIds: Object.keys(parentMap), truncated: truncated, totalEdges: totalEdges };
+  },
 
-    var instanceIds = Object.keys(instanceIdMap);
-    var intermediateIds = Object.keys(intermediateIdMap);
+  resolveFilteredTwoLevel: function (criteria, filterDefs) {
+    const edges = this._collectEdgeIdMaps(criteria, true, filterDefs);
+    const instanceIds = edges.childIds;
+    const intermediateIds = edges.parentIds;
+    const truncated = edges.truncated;
     this.logQuery(
       'resolve_2level_summary',
-      'total_edges=' + totalEdges + ' instance_ids=' + instanceIds.length
+      'total_edges=' + edges.totalEdges + ' instance_ids=' + instanceIds.length
         + ' intermediate_ids=' + intermediateIds.length + ' truncated=' + truncated
     );
     if (!intermediateIds.length) {
@@ -713,7 +724,7 @@ ApplicationHomeHandler.prototype = {
     }
 
     // u_service_type exists only on cmdb_ci_service — parent is the app-family service CI.
-    var hopExtraQuery =
+    const hopExtraQuery =
       'type.name=Connects to::Connected by^parent.ref_cmdb_ci_service.u_service_type=service';
     this.logQuery(
       'resolve_2level_hop_query',
@@ -723,24 +734,17 @@ ApplicationHomeHandler.prototype = {
         + '^' + hopExtraQuery
     );
 
-    var familyMap = {};
+    const familyMap = {};
     this.queryRelCiInChunks(
       'child.sys_id',
       intermediateIds,
       hopExtraQuery,
-      function (row) {
-        if (!row.parent || familyMap[row.parent]) return;
-        familyMap[row.parent] = {
-          sys_id: row.parent,
-          name: row.parentName || row.parent,
-          short_description: row.parentShortDescription || '',
-        };
-      },
+      (row) => { this._applyFamilyHopRow(row, familyMap); },
       'resolve_2level_hop'
     );
 
-    var families = [];
-    for (var fid in familyMap) {
+    const families = [];
+    for (const fid in familyMap) {
       if (familyMap.hasOwnProperty(fid)) families.push(familyMap[fid]);
     }
 
@@ -761,60 +765,30 @@ ApplicationHomeHandler.prototype = {
   },
 
   resolveFilteredThreeLevel: function (criteria, filterDefs) {
-    var instanceIdMap = {};
-    var serviceIdMap = {};
-    var offset = 0;
-    var truncated = false;
-    var totalEdges = 0;
-
-    while (true) {
-      var batch = this.queryFilteredInstanceEdges(criteria, false, filterDefs, this.EDGE_BATCH, offset);
-      if (!batch.length) break;
-
-      for (var i = 0; i < batch.length; i++) {
-        var row = batch[i];
-        if (row.child) instanceIdMap[row.child] = true;
-        if (row.parent) serviceIdMap[row.parent] = true;
-      }
-
-      totalEdges += batch.length;
-      offset += batch.length;
-      if (batch.length < this.EDGE_BATCH) break;
-      if (totalEdges >= this.MAX_EDGES) {
-        truncated = true;
-        break;
-      }
-    }
-
-    var instanceIds = Object.keys(instanceIdMap);
-    var serviceIds = Object.keys(serviceIdMap);
+    const edges = this._collectEdgeIdMaps(criteria, false, filterDefs);
+    const instanceIds = edges.childIds;
+    const serviceIds = edges.parentIds;
+    const truncated = edges.truncated;
     this.logQuery(
       'resolve_3level_summary',
-      'total_edges=' + totalEdges + ' instance_ids=' + instanceIds.length
+      'total_edges=' + edges.totalEdges + ' instance_ids=' + instanceIds.length
         + ' service_ids=' + serviceIds.length + ' truncated=' + truncated
     );
     if (!serviceIds.length) {
       return { access: 'ok', families: [], instance_ids: instanceIds, truncated: truncated };
     }
 
-    var familyMap = {};
+    const familyMap = {};
     this.queryRelCiInChunks(
       'child.sys_id',
       serviceIds,
       'type.name=Consumes::Consumed by',
-      function (row) {
-        if (!row.parent || familyMap[row.parent]) return;
-        familyMap[row.parent] = {
-          sys_id: row.parent,
-          name: row.parentName || row.parent,
-          short_description: row.parentShortDescription || '',
-        };
-      },
+      (row) => { this._applyFamilyHopRow(row, familyMap); },
       'resolve_3level_hop'
     );
 
-    var families = [];
-    for (var fid in familyMap) {
+    const families = [];
+    for (const fid in familyMap) {
       if (familyMap.hasOwnProperty(fid)) families.push(familyMap[fid]);
     }
 
@@ -827,28 +801,28 @@ ApplicationHomeHandler.prototype = {
   },
 
   fetchUnfilteredFamilies: function (twoLevel, page, pageSize) {
-    var table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_business_app';
-    var encoded = twoLevel ? 'u_service_type=service' : '';
+    const table = twoLevel ? 'cmdb_ci_service' : 'cmdb_ci_business_app';
+    const encoded = twoLevel ? 'u_service_type=service' : '';
     this.logQuery(
       'unfiltered_families_query',
       'table=' + table + ' page=' + page + ' page_size=' + pageSize
         + ' sysparm_query=' + encoded + '^ORDERBYname'
     );
-    var gr = new GlideRecord(table);
+    const gr = new GlideRecord(table);
     if (twoLevel) gr.addQuery('u_service_type', 'service');
 
-    var ga = new GlideAggregate(table);
+    const ga = new GlideAggregate(table);
     if (twoLevel) ga.addQuery('u_service_type', 'service');
     ga.addAggregate('COUNT');
     ga.query();
-    var totalFamilies = 0;
-    if (ga.next()) totalFamilies = parseInt(ga.getAggregate('COUNT'), 10) || 0;
+    let totalFamilies = 0;
+    if (ga.next()) totalFamilies = Number.parseInt(ga.getAggregate('COUNT'), 10) || 0;
 
     gr.orderBy('name');
     gr.chooseWindow(page * pageSize, (page + 1) * pageSize);
     gr.query();
 
-    var families = [];
+    const families = [];
     while (gr.next()) {
       families.push({
         sys_id: gr.getUniqueValue(),
@@ -865,13 +839,18 @@ ApplicationHomeHandler.prototype = {
     return { access: 'ok', families: families, totalFamilies: totalFamilies };
   },
 
+  _applyHopRow: function (row, hopMap) {
+    if (!row.parent || !row.child) return;
+    if (!hopMap[row.parent]) hopMap[row.parent] = [];
+    hopMap[row.parent].push(row.child);
+  },
+
   buildTwoLevelMapping: function (families, restrictSet) {
     if (!families.length) return null;
 
-    var appFamilyMeta = {};
-    var familyIds = [];
-    for (var i = 0; i < families.length; i++) {
-      var f = families[i];
+    const appFamilyMeta = {};
+    const familyIds = [];
+    for (const f of families) {
       appFamilyMeta[f.sys_id] = {
         name: f.name,
         short_description: f.short_description || '',
@@ -879,57 +858,50 @@ ApplicationHomeHandler.prototype = {
       familyIds.push(f.sys_id);
     }
 
-    var hop1Map = {};
+    const hop1Map = {};
     this.queryRelCiInChunks(
       'parent.sys_id',
       familyIds,
       'type.name=Connects to::Connected by',
-      function (row) {
-        if (!row.parent || !row.child) return;
-        if (!hop1Map[row.parent]) hop1Map[row.parent] = [];
-        hop1Map[row.parent].push(row.child);
-      },
+      (row) => { this._applyHopRow(row, hop1Map); },
       'mapping_2level_hop1'
     );
 
-    var intermediateIds = [];
-    var seenInt = {};
-    for (var pid in hop1Map) {
+    const intermediateIds = [];
+    const seenInt = {};
+    for (const pid in hop1Map) {
       if (!hop1Map.hasOwnProperty(pid)) continue;
-      var ints = hop1Map[pid];
-      for (var j = 0; j < ints.length; j++) {
-        if (!seenInt[ints[j]]) {
-          seenInt[ints[j]] = true;
-          intermediateIds.push(ints[j]);
+      const ints = hop1Map[pid];
+      for (const int of ints) {
+        if (!seenInt[int]) {
+          seenInt[int] = true;
+          intermediateIds.push(int);
         }
       }
     }
 
-    var hop2Map = {};
+    const hop2Map = {};
     if (intermediateIds.length) {
       this.queryRelCiInChunks(
         'parent.sys_id',
         intermediateIds,
         'type.name=Connects to::Connected by^child.ref_cmdb_ci_service.u_service_type=instance',
-        function (row) {
-          if (!row.parent || !row.child) return;
-          if (!hop2Map[row.parent]) hop2Map[row.parent] = [];
-          hop2Map[row.parent].push(row.child);
-        },
+        (row) => { this._applyHopRow(row, hop2Map); },
         'mapping_2level_hop2'
       );
     }
 
-    var appToInstances = {};
-    for (var fi = 0; fi < familyIds.length; fi++) {
-      var appId = familyIds[fi];
-      var instList = [];
-      var instSeen = {};
-      var mids = hop1Map[appId] || [];
-      for (var mi = 0; mi < mids.length; mi++) {
-        var instIds = hop2Map[mids[mi]] || [];
-        for (var ii = 0; ii < instIds.length; ii++) {
-          var instId = instIds[ii];
+    const appToInstances = this._buildAppToInstances(familyIds, hop1Map, hop2Map, restrictSet);
+    return this._pruneTwoLevelResult(familyIds, appToInstances, appFamilyMeta);
+  },
+
+  _buildAppToInstances: function (familyIds, hop1Map, hop2Map, restrictSet) {
+    const appToInstances = {};
+    for (const appId of familyIds) {
+      const instList = [];
+      const instSeen = {};
+      for (const mid of (hop1Map[appId] || [])) {
+        for (const instId of (hop2Map[mid] || [])) {
           if (restrictSet && !restrictSet[instId]) continue;
           if (!instSeen[instId]) {
             instSeen[instId] = true;
@@ -939,20 +911,21 @@ ApplicationHomeHandler.prototype = {
       }
       appToInstances[appId] = instList;
     }
+    return appToInstances;
+  },
 
-    var prunedMeta = {};
-    var prunedMap = {};
-    var prunedInstMap = {};
-    for (var fi2 = 0; fi2 < familyIds.length; fi2++) {
-      var fid = familyIds[fi2];
-      var insts = appToInstances[fid] || [];
+  _pruneTwoLevelResult: function (familyIds, appToInstances, appFamilyMeta) {
+    const prunedMeta = {};
+    const prunedMap = {};
+    const prunedInstMap = {};
+    for (const fid of familyIds) {
+      const insts = appToInstances[fid] || [];
       if (!insts.length) continue;
       prunedMeta[fid] = appFamilyMeta[fid];
       prunedMap[fid] = insts;
-      for (var xi = 0; xi < insts.length; xi++) prunedInstMap[insts[xi]] = true;
+      for (const instId of insts) prunedInstMap[instId] = true;
     }
     if (!Object.keys(prunedMap).length) return null;
-
     return {
       app_family_meta: prunedMeta,
       app_to_instances: prunedMap,
@@ -960,104 +933,106 @@ ApplicationHomeHandler.prototype = {
     };
   },
 
+  _applySvcMetaRow: function (row, svcMap) {
+    svcMap[row.sys_id] = {
+      name: row.name || row.sys_id,
+      short_description: row.short_description || '',
+    };
+  },
+
   buildThreeLevelMapping: function (bApps, restrictSet) {
     if (!bApps.length) return null;
 
-    var bAppIds = [];
-    for (var i = 0; i < bApps.length; i++) bAppIds.push(bApps[i].sys_id);
+    const bAppIds = [];
+    for (const bApp of bApps) bAppIds.push(bApp.sys_id);
 
-    var consumesRows = [];
+    const consumesRows = [];
     this.queryRelCiInChunks(
       'parent.sys_id',
       bAppIds,
       'type.name=Consumes::Consumed by',
-      function (row) {
-        consumesRows.push(row);
-      },
+      function (row) { consumesRows.push(row); },
       'mapping_3level_consumes'
     );
 
-    var serviceIdMap = {};
-    for (var cr = 0; cr < consumesRows.length; cr++) {
-      if (consumesRows[cr].child) serviceIdMap[consumesRows[cr].child] = true;
+    const serviceIdMap = {};
+    for (const consumesRow of consumesRows) {
+      if (consumesRow.child) serviceIdMap[consumesRow.child] = true;
     }
-    var serviceIds = Object.keys(serviceIdMap);
+    const serviceIds = Object.keys(serviceIdMap);
 
-    var svcMap = {};
+    const svcMap = {};
     if (serviceIds.length) {
       this.queryTableInChunks(
         'cmdb_ci_service',
         serviceIds,
         ['sys_id', 'name', 'short_description'],
-        function (row) {
-          svcMap[row.sys_id] = {
-            name: row.name || row.sys_id,
-            short_description: row.short_description || '',
-          };
-        }
+        (row) => { this._applySvcMetaRow(row, svcMap); }
       );
     }
 
-    var containsRows = [];
+    const containsRows = [];
     if (serviceIds.length) {
       this.queryRelCiInChunks(
         'parent.sys_id',
         serviceIds,
         'type.name=Contains::Contained by',
-        function (row) {
-          containsRows.push(row);
-        },
+        function (row) { containsRows.push(row); },
         'mapping_3level_contains'
       );
     }
 
-    var bAppToSvcs = {};
-    for (var c1 = 0; c1 < consumesRows.length; c1++) {
-      var b = consumesRows[c1].parent;
-      var s = consumesRows[c1].child;
+    const bAppToSvcs = this._buildBAppToSvcs(consumesRows);
+    const svcToInstIds = this._buildSvcToInstIds(containsRows, restrictSet);
+    return this._pruneThreeLevelResult(bApps, bAppToSvcs, svcToInstIds, svcMap);
+  },
+
+  _buildBAppToSvcs: function (consumesRows) {
+    const bAppToSvcs = {};
+    for (const row of consumesRows) {
+      const b = row.parent, s = row.child;
       if (!b || !s) continue;
       if (!bAppToSvcs[b]) bAppToSvcs[b] = [];
       bAppToSvcs[b].push(s);
     }
+    return bAppToSvcs;
+  },
 
-    var svcToInstIds = {};
-    var instanceIdMap = {};
-    for (var c2 = 0; c2 < containsRows.length; c2++) {
-      var svc = containsRows[c2].parent;
-      var inst = containsRows[c2].child;
+  _buildSvcToInstIds: function (containsRows, restrictSet) {
+    const svcToInstIds = {};
+    for (const row of containsRows) {
+      const svc = row.parent, inst = row.child;
       if (!svc || !inst) continue;
       if (restrictSet && !restrictSet[inst]) continue;
       if (!svcToInstIds[svc]) svcToInstIds[svc] = [];
       svcToInstIds[svc].push(inst);
-      instanceIdMap[inst] = true;
     }
+    return svcToInstIds;
+  },
 
-    var prunedSvcToInstIds = {};
-    for (var svcId in svcToInstIds) {
-      if (!svcToInstIds.hasOwnProperty(svcId)) continue;
-      if (svcToInstIds[svcId].length) prunedSvcToInstIds[svcId] = svcToInstIds[svcId];
-    }
-
-    var prunedBAppToSvcs = {};
-    var visibleBApps = [];
-    for (var bi = 0; bi < bApps.length; bi++) {
-      var app = bApps[bi];
-      var svcList = bAppToSvcs[app.sys_id] || [];
-      var visibleSvcs = [];
-      for (var si = 0; si < svcList.length; si++) {
-        if (prunedSvcToInstIds[svcList[si]]) visibleSvcs.push(svcList[si]);
+  _pruneThreeLevelResult: function (bApps, bAppToSvcs, svcToInstIds, svcMap) {
+    const prunedSvcToInstIds = {};
+    for (const svcId in svcToInstIds) {
+      if (svcToInstIds.hasOwnProperty(svcId) && svcToInstIds[svcId].length) {
+        prunedSvcToInstIds[svcId] = svcToInstIds[svcId];
       }
+    }
+
+    const prunedBAppToSvcs = {};
+    const visibleBApps = [];
+    for (const app of bApps) {
+      const visibleSvcs = (bAppToSvcs[app.sys_id] || []).filter(s => prunedSvcToInstIds[s]);
       if (!visibleSvcs.length) continue;
       visibleBApps.push(app);
       prunedBAppToSvcs[app.sys_id] = visibleSvcs;
     }
     if (!visibleBApps.length) return null;
 
-    var prunedInstanceIdMap = {};
-    for (var svcKey in prunedSvcToInstIds) {
-      if (!prunedSvcToInstIds.hasOwnProperty(svcKey)) continue;
-      var instArr = prunedSvcToInstIds[svcKey];
-      for (var ik = 0; ik < instArr.length; ik++) prunedInstanceIdMap[instArr[ik]] = true;
+    const instanceIdMap = {};
+    for (const svcKey in prunedSvcToInstIds) {
+      if (prunedSvcToInstIds.hasOwnProperty(svcKey)) {
+        for (const instId of prunedSvcToInstIds[svcKey]) instanceIdMap[instId] = true;
+      }
     }
 
     return {
@@ -1065,47 +1040,100 @@ ApplicationHomeHandler.prototype = {
       svc_map: svcMap,
       b_app_to_svcs: prunedBAppToSvcs,
       svc_to_inst_ids: prunedSvcToInstIds,
-      instance_ids: Object.keys(prunedInstanceIdMap),
+      instance_ids: Object.keys(instanceIdMap),
     };
   },
 
   sliceFamilies: function (families, page, pageSize) {
-    var start = page * pageSize;
+    const start = page * pageSize;
     return families.slice(start, start + pageSize);
   },
 
   restrictSetFromArray: function (ids) {
-    var set = {};
-    for (var i = 0; i < ids.length; i++) set[ids[i]] = true;
+    const set = {};
+    for (const id of ids) set[id] = true;
     return set;
+  },
+
+  _handleFilteredRequest: function (twoLevel, criteria, filterDefs, filterToken, cache) {
+    // Empty families + non-empty instance_ids is a stale/broken cache (e.g. hop dot-walk fix).
+    const cacheUsable = cache
+      && Array.isArray(cache.families)
+      && (cache.families.length > 0 || !(cache.instance_ids?.length));
+    if (cacheUsable) {
+      const families = cache.families;
+      const instanceIds = cache.instance_ids || [];
+      const orphanIds = Object.hasOwn(cache, 'orphan_ids')
+        ? (cache.orphan_ids || [])
+        : this.computeOrphanInstanceIds(twoLevel, this.restrictSetFromArray(instanceIds));
+      this.logQuery(
+        'filter_cache_hit',
+        'families=' + families.length + ' instance_ids=' + instanceIds.length + ' orphans=' + orphanIds.length
+      );
+      return { families: families, totalFamilies: families.length, instanceIds: instanceIds, orphanIds: orphanIds, truncated: false, resultToken: filterToken };
+    }
+    if (cache) {
+      this.logQuery('filter_cache_skip', 'reason=instance_ids_without_families instance_ids=' + ((cache.instance_ids?.length) || 0));
+    }
+    const resolved = twoLevel
+      ? this.resolveFilteredTwoLevel(criteria, filterDefs)
+      : this.resolveFilteredThreeLevel(criteria, filterDefs);
+    const families = resolved.families || [];
+    const instanceIds = resolved.instance_ids || [];
+    const orphanIds = this.computeOrphanInstanceIds(twoLevel, this.restrictSetFromArray(instanceIds));
+    const resultToken = this.makeFilterToken();
+    this.storeFilterCache(resultToken, families, instanceIds, orphanIds);
+    return { families: families, totalFamilies: families.length, instanceIds: instanceIds, orphanIds: orphanIds, truncated: resolved.truncated || false, resultToken: resultToken };
+  },
+
+  _buildPageMapping: function (twoLevel, pageFamilies, restrictSet, orphanIds) {
+    let mapping = twoLevel
+      ? this.buildTwoLevelMapping(pageFamilies, restrictSet)
+      : this.buildThreeLevelMapping(pageFamilies, restrictSet);
+    if (orphanIds.length) {
+      mapping = twoLevel
+        ? this.appendOthersToTwoLevelMapping(mapping, orphanIds)
+        : this.appendOthersToThreeLevelMapping(mapping, orphanIds);
+    }
+    return mapping;
+  },
+
+  _parsePaginationParams: function (body) {
+    let page = Number.parseInt(this.readField(body, 'page') || '0', 10);
+    if (Number.isNaN(page) || page < 0) page = 0;
+    let pageSize = Number.parseInt(this.readField(body, 'page_size') || String(this.DEFAULT_PAGE_SIZE), 10);
+    if (Number.isNaN(pageSize) || pageSize < 1) pageSize = this.DEFAULT_PAGE_SIZE;
+    if (pageSize > 200) pageSize = 200;
+    return { page: page, pageSize: pageSize };
+  },
+
+  _handleUnfilteredRequest: function (twoLevel) {
+    const unfiltered = this.resolveUnfilteredVisibleFamilies(twoLevel);
+    const families = unfiltered.families || [];
+    const orphanIds = unfiltered.orphan_ids || [];
+    return { families: families, totalFamilies: families.length, instanceIds: [], orphanIds: orphanIds };
   },
 
   handlePost: function (request, response) {
     try {
-      var body = this.parseBody(request);
+      const body = this.parseBody(request);
       if (body === null) {
         this.jsonError(response, 400, 'Invalid JSON body');
         return;
       }
 
-      var hierarchyMode = this.readField(body, 'hierarchy_mode');
+      const hierarchyMode = this.readField(body, 'hierarchy_mode');
       if (hierarchyMode !== 'two_level' && hierarchyMode !== 'three_level') {
         this.jsonError(response, 400, 'hierarchy_mode must be two_level or three_level');
         return;
       }
 
-      var twoLevel = hierarchyMode === 'two_level';
-      var filterDefs = this.getFilterDefsForHierarchy(!twoLevel);
-      var criteria = this.normalizeCriteria(body);
-      var page = parseInt(this.readField(body, 'page') || '0', 10);
-      if (isNaN(page) || page < 0) page = 0;
-
-      var pageSize = parseInt(this.readField(body, 'page_size') || String(this.DEFAULT_PAGE_SIZE), 10);
-      if (isNaN(pageSize) || pageSize < 1) pageSize = this.DEFAULT_PAGE_SIZE;
-      if (pageSize > 200) pageSize = 200;
-
-      var filterToken = this.readField(body, 'filter_token');
-      var filtersActive = this.hasActiveFilters(criteria);
+      const twoLevel = hierarchyMode === 'two_level';
+      const filterDefs = this.getFilterDefsForHierarchy(!twoLevel);
+      const criteria = this.normalizeCriteria(body);
+      const { page, pageSize } = this._parsePaginationParams(body);
+      const filterToken = this.readField(body, 'filter_token');
+      const filtersActive = this.hasActiveFilters(criteria);
       this.logQuery(
         'request',
         'hierarchy_mode=' + hierarchyMode
@@ -1115,78 +1143,32 @@ ApplicationHomeHandler.prototype = {
           + ' filter_token=' + (filterToken || '')
           + ' criteria=' + JSON.stringify(criteria)
       );
-      var families = [];
-      var totalFamilies = 0;
-      var instanceIds = [];
-      var orphanIds = [];
-      var truncated = false;
-      var access = 'ok';
-      var resultToken = null;
+      let families, totalFamilies, instanceIds, orphanIds, truncated, resultToken;
 
       if (filtersActive) {
-        var cache = filterToken ? this.loadFilterCache(filterToken) : null;
-
-        // Empty families + non-empty instance_ids is a stale/broken cache (e.g. hop dot-walk fix).
-        var cacheUsable = cache
-          && Array.isArray(cache.families)
-          && (cache.families.length > 0
-            || !(cache.instance_ids && cache.instance_ids.length));
-        if (cacheUsable) {
-          families = cache.families;
-          instanceIds = cache.instance_ids || [];
-          orphanIds = Object.prototype.hasOwnProperty.call(cache, 'orphan_ids')
-            ? (cache.orphan_ids || [])
-            : this.computeOrphanInstanceIds(twoLevel, this.restrictSetFromArray(instanceIds));
-          totalFamilies = families.length;
-          resultToken = filterToken;
-          this.logQuery(
-            'filter_cache_hit',
-            'families=' + families.length + ' instance_ids=' + instanceIds.length
-              + ' orphans=' + orphanIds.length
-          );
-        } else {
-          if (cache) {
-            this.logQuery(
-              'filter_cache_skip',
-              'reason=instance_ids_without_families'
-                + ' instance_ids=' + ((cache.instance_ids && cache.instance_ids.length) || 0)
-            );
-          }
-          var resolved = twoLevel
-            ? this.resolveFilteredTwoLevel(criteria, filterDefs)
-            : this.resolveFilteredThreeLevel(criteria, filterDefs);
-
-          families = resolved.families || [];
-          instanceIds = resolved.instance_ids || [];
-          totalFamilies = families.length;
-          truncated = resolved.truncated || false;
-          resultToken = this.makeFilterToken();
-          orphanIds = this.computeOrphanInstanceIds(twoLevel, this.restrictSetFromArray(instanceIds));
-          this.storeFilterCache(resultToken, families, instanceIds, orphanIds);
-        }
+        const cache = filterToken ? this.loadFilterCache(filterToken) : null;
+        const r = this._handleFilteredRequest(twoLevel, criteria, filterDefs, filterToken, cache);
+        families = r.families;
+        totalFamilies = r.totalFamilies;
+        instanceIds = r.instanceIds;
+        orphanIds = r.orphanIds;
+        truncated = r.truncated;
+        resultToken = r.resultToken;
       } else {
-        var unfiltered = this.resolveUnfilteredVisibleFamilies(twoLevel);
-        families = unfiltered.families || [];
-        orphanIds = unfiltered.orphan_ids || [];
-        totalFamilies = families.length;
-        instanceIds = [];
+        const r = this._handleUnfilteredRequest(twoLevel);
+        families = r.families;
+        totalFamilies = r.totalFamilies;
+        instanceIds = r.instanceIds;
+        orphanIds = r.orphanIds;
+        truncated = false;
         resultToken = null;
       }
+      const pageFamilies = this.sliceFamilies(families, page, pageSize);
 
-      var pageFamilies = this.sliceFamilies(families, page, pageSize);
+      const restrictSet = filtersActive ? this.restrictSetFromArray(instanceIds) : null;
+      const mapping = this._buildPageMapping(twoLevel, pageFamilies, restrictSet, orphanIds);
 
-      var restrictSet = filtersActive ? this.restrictSetFromArray(instanceIds) : null;
-      var mapping = twoLevel
-        ? this.buildTwoLevelMapping(pageFamilies, restrictSet)
-        : this.buildThreeLevelMapping(pageFamilies, restrictSet);
-
-      if (orphanIds.length) {
-        mapping = twoLevel
-          ? this.appendOthersToTwoLevelMapping(mapping, orphanIds)
-          : this.appendOthersToThreeLevelMapping(mapping, orphanIds);
-      }
-
-      if (!mapping && pageFamilies.length > 0 && !orphanIds.length) access = 'error';
+      const access = (!mapping && pageFamilies.length > 0 && !orphanIds.length) ? 'error' : 'ok';
 
       this.logQuery(
         'response',
@@ -1210,8 +1192,8 @@ ApplicationHomeHandler.prototype = {
         mapping: mapping,
         truncated: truncated,
       });
-    } catch (e) {
-      this.jsonError(response, 500, this.scriptError(e));
+    } catch (error) {
+      this.jsonError(response, 500, this.scriptError(error));
     }
   },
 

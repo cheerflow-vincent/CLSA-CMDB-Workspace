@@ -69,7 +69,10 @@ export interface RelatedApplicationsResult {
 function refId(f: unknown): string {
   if (f == null) return '';
   if (typeof f === 'string') return f;
-  if (typeof f === 'object' && 'value' in f) return String((f as Record<string, unknown>).value ?? '');
+  if (typeof f === 'object' && 'value' in f) {
+    const val = (f as Record<string, unknown>).value;
+    return typeof val === 'object' && val !== null ? JSON.stringify(val) : String((val ?? '') as string | number | boolean);
+  }
   return '';
 }
 
@@ -102,6 +105,18 @@ async function chunkedIN<T>(
   return { rows: all, access };
 }
 
+function _processRelRows(
+  result: { parent: unknown; child: unknown }[],
+  appRole: 'parent' | 'child',
+  seen: Set<string>,
+): void {
+  const appField = appRole;
+  for (const r of result) {
+    const id = refId(r[appField as keyof typeof r]);
+    if (id) seen.add(id);
+  }
+}
+
 /** Parent app instances linked to a CI (reverse of app-detail related lists). */
 export async function fetchRelatedAppInstanceIds(
   ciSysId: string,
@@ -131,14 +146,40 @@ export async function fetchRelatedAppInstanceIds(
     });
     if (chunkAccess === 'denied') return { ids: [], access: 'denied' };
     if (chunkAccess === 'error') access = 'error';
-    const appField = appRole === 'parent' ? 'parent' : 'child';
-    for (const r of result) {
-      const id = refId(r[appField as keyof typeof r]);
-      if (id) seen.add(id);
-    }
+    _processRelRows(result, appRole, seen);
   }
 
   return { ids: [...seen], access };
+}
+
+function _applyIncidentCounts(rows: Record<string, unknown>[], instMap: Map<string, LiveInstance>): void {
+  for (const r of rows) {
+    const inst = instMap.get(str(r['ci_item.sys_id']));
+    if (!inst) continue;
+    inst.incidentRecords.push({
+      number: str(r['task.number']),
+      short: str(r['task.short_description']),
+      priority: str(r['task.priority']),
+      state: str(r['task.state']),
+      opened: str(r['task.opened_at']),
+      assignee: str(r['task.assigned_to']),
+    });
+  }
+}
+
+function _applyChangeCounts(rows: Record<string, unknown>[], instMap: Map<string, LiveInstance>): void {
+  for (const r of rows) {
+    const inst = instMap.get(str(r['ci_item.sys_id']));
+    if (!inst) continue;
+    inst.changeRecords.push({
+      number: str(r['task.number']),
+      short: str(r['task.short_description']),
+      type: str(r['task.type']),
+      state: str(r['task.state']),
+      scheduled: str(r['task.start_date']),
+      implementer: str(r['task.assigned_to']),
+    });
+  }
 }
 
 async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, LiveInstance>> {
@@ -202,31 +243,8 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
     });
   }
 
-  for (const r of incRows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
-    if (!inst) continue;
-    inst.incidentRecords.push({
-      number: str(r['task.number']),
-      short: str(r['task.short_description']),
-      priority: str(r['task.priority']),
-      state: str(r['task.state']),
-      opened: str(r['task.opened_at']),
-      assignee: str(r['task.assigned_to']),
-    });
-  }
-
-  for (const r of chgRows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
-    if (!inst) continue;
-    inst.changeRecords.push({
-      number: str(r['task.number']),
-      short: str(r['task.short_description']),
-      type: str(r['task.type']),
-      state: str(r['task.state']),
-      scheduled: str(r['task.start_date']),
-      implementer: str(r['task.assigned_to']),
-    });
-  }
+  _applyIncidentCounts(incRows, instMap);
+  _applyChangeCounts(chgRows, instMap);
 
   for (const inst of instMap.values()) {
     inst.incidents = inst.incidentRecords.length;
@@ -234,6 +252,48 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
   }
 
   return instMap;
+}
+
+function _groupSvcToInsts(
+  instanceIds: string[],
+  containsRows: Record<string, unknown>[],
+  instMap: Map<string, LiveInstance>,
+): { instToSvc: Map<string, { id: string; name: string; desc: string }>; svcToInsts: Map<string, LiveInstance[]> } {
+  const instToSvc = new Map<string, { id: string; name: string; desc: string }>();
+  const svcToInsts = new Map<string, LiveInstance[]>();
+  for (const id of instanceIds) {
+    const inst = instMap.get(id);
+    if (!inst) continue;
+    const row = containsRows.find(r => refId(r.child) === id);
+    const svcId = row ? refId(row.parent) : 'unknown';
+    const svcName = row ? str(row['parent.name']) : 'Unknown Service';
+    const svcDesc = row ? str(row['parent.short_description']) : '';
+    instToSvc.set(id, { id: svcId, name: svcName, desc: svcDesc });
+    if (!svcToInsts.has(svcId)) svcToInsts.set(svcId, []);
+    svcToInsts.get(svcId)!.push(inst);
+  }
+  return { instToSvc, svcToInsts };
+}
+
+function _buildAppsFromSvcGroups(
+  appToSvcs: Map<string, LiveService[]>,
+  svcToApp: Map<string, { id: string; name: string; desc: string }>,
+): LiveCoreApp[] {
+  const apps: LiveCoreApp[] = [];
+  for (const [appId, services] of appToSvcs) {
+    const meta = [...svcToApp.entries()].find(([, v]) => v.id === appId)?.[1]
+      ?? { id: appId, name: 'Related Applications', desc: '' };
+    apps.push({
+      sys_id: appId,
+      name: meta.name,
+      short_description: meta.desc,
+      services,
+      totalIncidents: services.reduce((s, sv) => s + sv.totalIncidents, 0),
+      totalChanges: services.reduce((s, sv) => s + sv.totalChanges, 0),
+      totalInstances: services.reduce((s, sv) => s + sv.instances.length, 0),
+    });
+  }
+  return apps.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function buildThreeLevelHierarchy(
@@ -249,21 +309,7 @@ async function buildThreeLevelHierarchy(
     5000,
   )).rows;
 
-  const instToSvc = new Map<string, { id: string; name: string; desc: string }>();
-  const svcToInsts = new Map<string, LiveInstance[]>();
-
-  for (const id of instanceIds) {
-    const inst = instMap.get(id);
-    if (!inst) continue;
-    const row = containsRows.find(r => refId(r.child) === id);
-    const svcId = row ? refId(row.parent) : 'unknown';
-    const svcName = row ? str(row['parent.name']) : 'Unknown Service';
-    const svcDesc = row ? str(row['parent.short_description']) : '';
-    instToSvc.set(id, { id: svcId, name: svcName, desc: svcDesc });
-    if (!svcToInsts.has(svcId)) svcToInsts.set(svcId, []);
-    svcToInsts.get(svcId)!.push(inst);
-  }
-
+  const { instToSvc, svcToInsts } = _groupSvcToInsts(instanceIds, containsRows, instMap);
   const svcIds = [...svcToInsts.keys()].filter(id => id !== 'unknown');
   const consumesRows = svcIds.length
     ? (await chunkedIN<Record<string, unknown>>(
@@ -300,22 +346,28 @@ async function buildThreeLevelHierarchy(
     appToSvcs.get(app.id)!.push(service);
   }
 
-  const apps: LiveCoreApp[] = [];
-  for (const [appId, services] of appToSvcs) {
-    const meta = [...svcToApp.entries()].find(([, v]) => v.id === appId)?.[1]
-      ?? { id: appId, name: 'Related Applications', desc: '' };
-    apps.push({
-      sys_id: appId,
-      name: meta.name,
-      short_description: meta.desc,
-      services,
-      totalIncidents: services.reduce((s, sv) => s + sv.totalIncidents, 0),
-      totalChanges: services.reduce((s, sv) => s + sv.totalChanges, 0),
-      totalInstances: services.reduce((s, sv) => s + sv.instances.length, 0),
-    });
-  }
+  return _buildAppsFromSvcGroups(appToSvcs, svcToApp);
+}
 
-  return apps.sort((a, b) => a.name.localeCompare(b.name));
+function _groupInstsByApp(
+  instanceIds: string[],
+  instMap: Map<string, LiveInstance>,
+  instToMid: Map<string, string>,
+  midToApp: Map<string, { id: string; name: string; desc: string }>,
+): { appToInsts: Map<string, LiveInstance[]>; appMeta: Map<string, { name: string; desc: string }> } {
+  const appToInsts = new Map<string, LiveInstance[]>();
+  const appMeta = new Map<string, { name: string; desc: string }>();
+  for (const id of instanceIds) {
+    const inst = instMap.get(id);
+    if (!inst) continue;
+    const midId = instToMid.get(id);
+    const app = midId ? midToApp.get(midId) : null;
+    const appId = app?.id ?? 'orphan';
+    appMeta.set(appId, app ? { name: app.name, desc: app.desc } : { name: 'Related Applications', desc: '' });
+    if (!appToInsts.has(appId)) appToInsts.set(appId, []);
+    appToInsts.get(appId)!.push(inst);
+  }
+  return { appToInsts, appMeta };
 }
 
 async function buildTwoLevelHierarchy(
@@ -357,20 +409,7 @@ async function buildTwoLevelHierarchy(
     });
   }
 
-  const appToInsts = new Map<string, LiveInstance[]>();
-  const appMeta = new Map<string, { name: string; desc: string }>();
-
-  for (const id of instanceIds) {
-    const inst = instMap.get(id);
-    if (!inst) continue;
-    const midId = instToMid.get(id);
-    const app = midId ? midToApp.get(midId) : null;
-    const appId = app?.id ?? 'orphan';
-    if (app) appMeta.set(appId, { name: app.name, desc: app.desc });
-    else appMeta.set(appId, { name: 'Related Applications', desc: '' });
-    if (!appToInsts.has(appId)) appToInsts.set(appId, []);
-    appToInsts.get(appId)!.push(inst);
-  }
+  const { appToInsts, appMeta } = _groupInstsByApp(instanceIds, instMap, instToMid, midToApp);
 
   return [...appToInsts.entries()]
     .map(([appId, instances]) => {

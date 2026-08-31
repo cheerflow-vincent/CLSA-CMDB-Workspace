@@ -14,9 +14,9 @@ import { editDisplayValue, editRawValue } from '../utils/editValues';
 import type { EditFieldValue } from '../utils/viewFields';
 
 interface Props {
-  selectedApp: { sysId: string; name: string };
-  onClose: () => void;
-  onSaved?: () => void;
+  readonly selectedApp: { sysId: string; name: string };
+  readonly onClose: () => void;
+  readonly onSaved?: () => void;
 }
 
 const SECTION_META: Record<InfraCIType, { title: string; Icon: typeof Server }> = {
@@ -37,11 +37,11 @@ function InfraPill({
   removing,
   onRemove,
 }: {
-  row: InfraRelationshipRow;
-  ciType: InfraCIType;
-  canEdit: boolean;
-  removing: boolean;
-  onRemove: () => void;
+  readonly row: InfraRelationshipRow;
+  readonly ciType: InfraCIType;
+  readonly canEdit: boolean;
+  readonly removing: boolean;
+  readonly onRemove: () => void;
 }) {
   const style = INFRA_CI_STYLE[ciType];
 
@@ -83,12 +83,12 @@ function InfraAddRow({
   onAdd,
   disabled,
 }: {
-  ciType: InfraCIType;
-  config: InfraRelationshipsByType['config'];
-  relTypesInUse: string[];
-  existingIds: Set<string>;
-  onAdd: (ciSysId: string, ciName: string, relType: string) => Promise<string | null>;
-  disabled?: boolean;
+  readonly ciType: InfraCIType;
+  readonly config: InfraRelationshipsByType['config'];
+  readonly relTypesInUse: string[];
+  readonly existingIds: Set<string>;
+  readonly onAdd: (ciSysId: string, ciName: string, relType: string) => Promise<string | null>;
+  readonly disabled?: boolean;
 }) {
   const meta = SECTION_META[ciType];
   const [selectedRelType, setSelectedRelType] = useState(config.relType);
@@ -137,8 +137,9 @@ function InfraAddRow({
         </div>
         {relTypesInUse.length > 1 && (
           <div className="w-44">
-            <label className="block typo-label mb-1">Type</label>
+            <label htmlFor="infra-rel-type" className="block typo-label mb-1">Type</label>
             <select
+              id="infra-rel-type"
               value={selectedRelType}
               disabled={disabled || adding}
               onChange={e => setSelectedRelType(e.target.value)}
@@ -171,10 +172,10 @@ function InfraSection({
   canEdit,
   onChanged,
 }: {
-  section: InfraRelationshipsByType;
-  appSysId: string;
-  canEdit: boolean;
-  onChanged: () => void;
+  readonly section: InfraRelationshipsByType;
+  readonly appSysId: string;
+  readonly canEdit: boolean;
+  readonly onChanged: () => void;
 }) {
   const { config, rows, relTypesInUse, ciType } = section;
   const meta = SECTION_META[ciType];
@@ -274,7 +275,6 @@ export default function EditInfrastructureRelationshipModal({
     >
       <div
         className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={e => e.stopPropagation()}
       >
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50 flex-shrink-0">
           <div>

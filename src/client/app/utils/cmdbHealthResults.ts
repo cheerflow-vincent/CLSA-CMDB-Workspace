@@ -175,14 +175,16 @@ export function healthListUrl(ciSysId: string): string {
 /** Parse a numeric score (0–100) from display or raw values. */
 export function parseHealthScore(value: string): number | null {
   if (!value) return null;
-  const match = value.match(/(\d+(?:\.\d+)?)/);
+  const match = /(\d+(?:\.\d+)?)/.exec(value);
   if (!match) return null;
-  const n = parseFloat(match[1]);
+  const n = Number.parseFloat(match[1]);
   if (Number.isNaN(n)) return null;
   return n > 100 ? Math.min(100, n) : n;
 }
 
-export function healthStatusTone(status: string): 'good' | 'warning' | 'bad' | 'neutral' {
+export type HealthTone = 'good' | 'warning' | 'bad' | 'neutral';
+
+export function healthStatusTone(status: string): HealthTone {
   const s = status.toLowerCase();
   if (!s) return 'neutral';
   if (s.includes('pass') || s.includes('good') || s.includes('ok') || s.includes('compliant') || s.includes('healthy')) {
@@ -208,7 +210,7 @@ export function isScoreElement(element: string): boolean {
   return SCORE_ELEMENTS.has(element);
 }
 
-export function statusBadgeClass(tone: 'good' | 'warning' | 'bad' | 'neutral'): string {
+export function statusBadgeClass(tone: HealthTone): string {
   switch (tone) {
     case 'good':    return 'bg-green-100 text-green-700';
     case 'warning': return 'bg-yellow-100 text-yellow-700';
@@ -217,7 +219,7 @@ export function statusBadgeClass(tone: 'good' | 'warning' | 'bad' | 'neutral'): 
   }
 }
 
-export function scoreBarClass(tone: 'good' | 'warning' | 'bad' | 'neutral'): string {
+export function scoreBarClass(tone: HealthTone): string {
   switch (tone) {
     case 'good':    return 'bg-green-500';
     case 'warning': return 'bg-yellow-500';
@@ -226,7 +228,7 @@ export function scoreBarClass(tone: 'good' | 'warning' | 'bad' | 'neutral'): str
   }
 }
 
-export function scoreTextClass(tone: 'good' | 'warning' | 'bad' | 'neutral'): string {
+export function scoreTextClass(tone: HealthTone): string {
   switch (tone) {
     case 'good':    return 'text-green-600';
     case 'warning': return 'text-yellow-600';
@@ -235,7 +237,7 @@ export function scoreTextClass(tone: 'good' | 'warning' | 'bad' | 'neutral'): st
   }
 }
 
-export function toneFromScore(score: number): 'good' | 'warning' | 'bad' | 'neutral' {
+export function toneFromScore(score: number): HealthTone {
   if (score >= 80) return 'good';
   if (score >= 60) return 'warning';
   return 'bad';

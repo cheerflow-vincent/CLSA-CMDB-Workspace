@@ -1,11 +1,11 @@
 (function process(request, response) {
   try {
     new CiSearchDistinctCountHandler().handlePost(request, response);
-  } catch (e) {
+  } catch (error) {
     response.setStatus(500);
     response.setContentType('application/json');
     response.setBody({
-      error: (e && e.message) ? String(e.message) : String(e),
+      error: (error?.message) ? String(error.message) : String(error),
     });
   }
 })(request, response);

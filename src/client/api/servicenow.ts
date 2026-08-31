@@ -381,7 +381,9 @@ export interface TableQueryResult<T> {
 
 /** Coerce an unknown access-state string from API responses to a typed TableAccess. */
 function toTableAccess(v: unknown): TableAccess {
-  return v === 'denied' ? 'denied' : v === 'error' ? 'error' : 'ok'
+  if (v === 'denied') return 'denied'
+  if (v === 'error') return 'error'
+  return 'ok'
 }
 
 /** Read logged-in user sys_id from page globals injected by ServiceNow (sync, no API call). */
@@ -425,7 +427,7 @@ async function executeTableQuery<T>(params: TableQueryParams): Promise<TableQuer
 
   try {
     const r = await axios.get(`/api/now/table/${table}`, { params: reqParams })
-    const totalCount = parseInt(r.headers['x-total-count'] ?? '0', 10)
+    const totalCount = Number.parseInt(r.headers['x-total-count'] ?? '0', 10)
     return { result: r.data.result ?? [], totalCount, access: 'ok' }
   } catch (err) {
     if (isAxiosForbidden(err)) {
@@ -458,7 +460,7 @@ function parseStatsCount(data: unknown): number {
   const d = data as { result?: { stats?: { count?: string | number } } | unknown[] }
   if (d?.result && typeof d.result === 'object' && !Array.isArray(d.result)) {
     const count = (d.result as { stats?: { count?: string | number } }).stats?.count
-    if (count != null) return parseInt(String(count), 10) || 0
+    if (count != null) return Number.parseInt(String(count), 10) || 0
   }
   if (Array.isArray(d?.result)) return d.result.length
   return 0
@@ -473,7 +475,7 @@ export async function queryStatsCount(
 
   try {
     const r = await axios.get(`/api/now/stats/${params.table}`, { params: reqParams })
-    const headerCount = parseInt(r.headers['x-total-count'] ?? '', 10)
+    const headerCount = Number.parseInt(r.headers['x-total-count'] ?? '', 10)
     const totalCount = Number.isFinite(headerCount) && headerCount > 0
       ? headerCount
       : parseStatsCount(r.data)
@@ -668,11 +670,11 @@ function parseSidebarPageResponse(result: Record<string, unknown>): CiSearchSide
     const values: Record<string, string> = {}
     if (valuesRaw && typeof valuesRaw === 'object') {
       for (const [key, val] of Object.entries(valuesRaw)) {
-        values[key] = val != null ? String(val) : ''
+        values[key] = primStr(val)
       }
     }
     return {
-      sys_id: String(row.sys_id ?? ''),
+      sys_id: primStr(row.sys_id),
       values,
     }
   }).filter(r => r.sys_id)
@@ -879,7 +881,7 @@ export async function fetchApplicationHomePage(
     const result = unwrapRestBody(unwrapRestBody(r.data)) as Record<string, unknown>
     if (!result || typeof result !== 'object') return EMPTY_APPLICATION_HOME
     return {
-      access: result.access === 'denied' ? 'denied' : result.access === 'error' ? 'error' : 'ok',
+      access: toTableAccess(result.access),
       hierarchy_mode: result.hierarchy_mode === 'two_level' ? 'two_level' : 'three_level',
       page: Number(result.page) || 0,
       page_size: Number(result.page_size) || 50,
@@ -1124,31 +1126,38 @@ export interface ReferenceOption {
 const tableLabelCache = new Map<string, string>()
 const displayFieldCache = new Map<string, string>()
 
+/** String() that never emits '[object Object]' — JSON-encodes unexpected objects. */
+  function primStr(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v as string | number | boolean | bigint | symbol)
+}
+
 function coerceDisplay(v: unknown): string {
   if (v == null) return ''
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>
-    if (o.display_value != null) return String(o.display_value)
-    if (o.value != null) return String(o.value)
+    if (o.display_value != null) return primStr(o.display_value)
+    if (o.value != null) return primStr(o.value)
   }
-  return String(v)
+  return primStr(v)
 }
 
 function coerceSysId(v: unknown): string {
   if (v == null) return ''
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>
-    if (o.value != null) return String(o.value)
+    if (o.value != null) return primStr(o.value)
   }
-  return String(v)
+  return primStr(v)
 }
 
 /** Human-readable label derived from a CMDB table name (strips cmdb_ci_ prefix, title-cases words). */
 export function formatCmdbTableLabel(tableName: string): string {
   return tableName
     .replace(/^cmdb_ci_/, '')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
+    .replaceAll('_', ' ')
+    .replaceAll(/\b\w/g, c => c.toUpperCase())
 }
 
 /** Human-readable label for a table (sys_db_object.label). */
@@ -1236,7 +1245,7 @@ export async function searchReferenceTable(
 
   try {
     const displayField = await getReferenceDisplayField(table)
-    const escaped = q.replace(/\^/g, '').replace(/=/g, '')
+    const escaped = q.replaceAll('^', '').replaceAll('=', '')
 
     let rows = await queryReferenceRows(
       table,
@@ -1306,6 +1315,7 @@ export async function resolveReferenceList(
 export type RelationshipChangeAction = 'create' | 'delete';
 export type RelationshipChangeState = 'pending_approval' | 'completed' | 'rejected' | 'cancelled';
 export type RelationshipApprovalDecision = 'approve' | 'reject';
+export type RelationshipDirection = 'upstream' | 'downstream' | 'bidirectional';
 
 export interface RelationshipChangeRequest {
   sys_id: string;
@@ -1321,7 +1331,7 @@ export interface RelationshipChangeRequest {
   target_ci_sys_id: string;
   source_ci_name: string;
   target_ci_name: string;
-  direction: 'upstream' | 'downstream' | 'bidirectional';
+  direction: RelationshipDirection;
   requested_by_sys_id: string;
   requested_by_name: string;
   requested_at: string;
@@ -1431,7 +1441,7 @@ export async function fetchRelationshipApprovalInbox(): Promise<RelationshipAppr
 export interface CreateRelationshipChangeBody {
   source_ci_sys_id: string;
   target_ci_sys_id: string;
-  direction: 'upstream' | 'downstream' | 'bidirectional';
+  direction: RelationshipDirection;
   rel_type: string;
 }
 
@@ -1458,14 +1468,13 @@ export async function requestRelationshipDelete(body: {
   source_ci_sys_id: string;
   relationship_sys_id?: string;
   relationship_sys_ids?: string[];
-  direction?: 'upstream' | 'downstream' | 'bidirectional';
+  direction?: RelationshipDirection;
 }): Promise<{ ok: true; change: RelationshipChangeRequest } | { ok: false; error: string }> {
   try {
-    const relationshipSysIds = body.relationship_sys_ids?.length
-      ? body.relationship_sys_ids
-      : body.relationship_sys_id
-        ? [body.relationship_sys_id]
-        : [];
+    const relationshipSysIds = (() => {
+      if (body.relationship_sys_ids?.length) return body.relationship_sys_ids;
+      return body.relationship_sys_id ? [body.relationship_sys_id] : [];
+    })();
     const r = await axios.post(`/api/${APP_SCOPE}/portal/relationship_change`, {
       action: 'delete',
       source_ci: body.source_ci_sys_id,
@@ -1480,39 +1489,52 @@ export async function requestRelationshipDelete(body: {
   }
 }
 
+function httpStatusMessage(status: number | undefined, context: 'relationship' | 'table'): string {
+  if (context === 'relationship') {
+    if (status === 404) return 'Relationship change API not found. Deploy the latest portal REST changes.';
+    if (status === 403) return 'You do not have permission to perform this relationship change.';
+    if (status === 401) return 'Session expired. Refresh the page and try again.';
+  } else if (status === 404) {
+    return 'Record not found.';
+  }
+  if (status) return `Request failed (HTTP ${status}). Please try again.`;
+  return 'Request failed. Please try again.';
+}
+
+function _extractFromErrorField(err: unknown): string | null {
+  if (typeof err === 'string' && err.trim()) return err;
+  if (err && typeof err === 'object') {
+    const nested = err as { message?: string; detail?: string };
+    if (typeof nested.message === 'string' && nested.message.trim()) return nested.message;
+    if (typeof nested.detail === 'string' && nested.detail.trim()) return nested.detail;
+  }
+  return null;
+}
+
+function _extractFromResult(result: unknown): string | null {
+  if (result && typeof result === 'object') {
+    const r = result as Record<string, unknown>;
+    if (typeof r.error === 'string' && r.error.trim()) return r.error;
+    if (typeof r.message === 'string' && r.message.trim()) return r.message;
+  }
+  if (typeof result === 'string' && result.trim()) return result;
+  return null;
+}
+
+function _extractErrorFromData(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  return _extractFromErrorField(d.error) ?? _extractFromResult(d.result);
+}
+
 function extractRelationshipChangeError(err: unknown): string {
   if (typeof err !== 'object' || err === null || !('response' in err)) {
     return 'Request failed. Please try again.';
   }
   const resp = (err as { response?: { status?: number; data?: unknown } }).response;
-  const data = resp?.data;
-  const status = resp?.status;
-
-  if (data && typeof data === 'object') {
-    const d = data as Record<string, unknown>;
-
-    if (typeof d.error === 'string' && d.error.trim()) return d.error;
-
-    if (d.error && typeof d.error === 'object') {
-      const nested = d.error as { message?: string; detail?: string };
-      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message;
-      if (typeof nested.detail === 'string' && nested.detail.trim()) return nested.detail;
-    }
-
-    const result = d.result;
-    if (result && typeof result === 'object') {
-      const r = result as Record<string, unknown>;
-      if (typeof r.error === 'string' && r.error.trim()) return r.error;
-      if (typeof r.message === 'string' && r.message.trim()) return r.message;
-    }
-    if (typeof result === 'string' && result.trim()) return result;
-  }
-
-  if (status === 404) return 'Relationship change API not found. Deploy the latest portal REST changes.';
-  if (status === 403) return 'You do not have permission to perform this relationship change.';
-  if (status === 401) return 'Session expired. Refresh the page and try again.';
-  if (status) return `Request failed (HTTP ${status}). Please try again.`;
-  return 'Request failed. Please try again.';
+  const fromData = _extractErrorFromData(resp?.data);
+  if (fromData) return fromData;
+  return httpStatusMessage(resp?.status, 'relationship');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1584,19 +1606,9 @@ function extractTableApiError(err: unknown): string {
     return 'Request failed. Please try again.';
   }
   const resp = (err as { response?: { status?: number; data?: unknown } }).response;
-  const data = resp?.data;
-  if (data && typeof data === 'object') {
-    const d = data as Record<string, unknown>;
-    if (typeof d.error === 'object' && d.error !== null) {
-      const nested = d.error as { message?: string; detail?: string };
-      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message;
-      if (typeof nested.detail === 'string' && nested.detail.trim()) return nested.detail;
-    }
-    if (typeof d.error === 'string' && d.error.trim()) return d.error;
-  }
-  if (resp?.status === 404) return 'Record not found.';
-  if (resp?.status) return `Request failed (HTTP ${resp.status}). Please try again.`;
-  return 'Request failed. Please try again.';
+  const fromData = _extractErrorFromData(resp?.data);
+  if (fromData) return fromData;
+  return httpStatusMessage(resp?.status, 'table');
 }
 
 export async function decideRelationshipApproval(

@@ -35,16 +35,33 @@ import { editDisplayValue, editRawValue } from '../utils/editValues';
 
 type ModalStep = 'edit' | 'review' | 'complete';
 
+function stepDotClass(isCurrent: boolean, isDone: boolean): string {
+  if (isCurrent) return 'bg-blue-600 text-white';
+  if (isDone) return 'bg-green-500 text-white';
+  return 'bg-gray-200 text-gray-500';
+}
+
+function stepLabel(s: ModalStep): string {
+  if (s === 'edit') return 'Edit';
+  if (s === 'review') return 'Review';
+  return 'Done';
+}
+
+function relIdsOverlap(r: LiveRelationship, relIds: Set<string>): boolean {
+  const ids = r.relationshipSysIds?.length ? r.relationshipSysIds : [r.sysId];
+  return ids.some(id => relIds.has(id));
+}
+
 export interface RelationshipMutation {
   changeSysId: string;
   action: 'create' | 'delete';
 }
 
 interface EditRelationshipModalProps {
-  selectedApp: { sysId: string; name: string };
-  hierarchyMode?: boolean;
-  onClose: () => void;
-  onSubmitted?: (mutations: RelationshipMutation[]) => void;
+  readonly selectedApp: { sysId: string; name: string };
+  readonly hierarchyMode?: boolean;
+  readonly onClose: () => void;
+  readonly onSubmitted?: (mutations: RelationshipMutation[]) => void;
 }
 
 const DIR_META: Record<RelationshipDirection, { label: string; tagCls: string; icon: React.ReactNode }> = {
@@ -81,14 +98,14 @@ function AddRelationshipRow({
   disabled,
   error,
 }: {
-  direction: RelationshipDirection;
-  defaultRelType: string;
-  relTypeOptions: { value: string; label: string }[];
-  referenceTable: string;
-  referenceQuery: string;
-  onAdd: (appSysId: string, appName: string, relType: string) => void;
-  disabled?: boolean;
-  error?: string;
+  readonly direction: RelationshipDirection;
+  readonly defaultRelType: string;
+  readonly relTypeOptions: { value: string; label: string }[];
+  readonly referenceTable: string;
+  readonly referenceQuery: string;
+  readonly onAdd: (appSysId: string, appName: string, relType: string) => void;
+  readonly disabled?: boolean;
+  readonly error?: string;
 }) {
   const [refValue, setRefValue] = useState<EditFieldValue>(emptyRefValue());
   const [relType, setRelType] = useState(defaultRelType);
@@ -121,8 +138,9 @@ function AddRelationshipRow({
           />
         </div>
         <div className="w-36">
-          <label className="block typo-label mb-1">Type</label>
+          <label htmlFor="edit-rel-type" className="block typo-label mb-1">Type</label>
           <select
+            id="edit-rel-type"
             value={relType}
             disabled={disabled || noTypes}
             onChange={e => setRelType(e.target.value)}
@@ -171,20 +189,20 @@ function RelSection({
   onAdd,
   onRemoveAdded,
 }: {
-  direction: RelationshipDirection;
-  group: DirectionGroup;
-  liveRels: LiveRelationship[];
-  pendingChanges: RelationshipChangeRequest[];
-  allDraftRemovals: LiveRelationship[];
-  allDraftAdds: DraftAdd[];
-  sourceCi: string;
-  referenceTable: string;
-  referenceQuery: string;
-  relTypeOptions: { value: string; label: string }[];
-  onRemoveExisting: (rel: LiveRelationship) => void;
-  onUndoRemove: (rel: LiveRelationship) => void;
-  onAdd: (appSysId: string, appName: string, relType: string) => void;
-  onRemoveAdded: (id: string) => void;
+  readonly direction: RelationshipDirection;
+  readonly group: DirectionGroup;
+  readonly liveRels: LiveRelationship[];
+  readonly pendingChanges: RelationshipChangeRequest[];
+  readonly allDraftRemovals: LiveRelationship[];
+  readonly allDraftAdds: DraftAdd[];
+  readonly sourceCi: string;
+  readonly referenceTable: string;
+  readonly referenceQuery: string;
+  readonly relTypeOptions: { value: string; label: string }[];
+  readonly onRemoveExisting: (rel: LiveRelationship) => void;
+  readonly onUndoRemove: (rel: LiveRelationship) => void;
+  readonly onAdd: (appSysId: string, appName: string, relType: string) => void;
+  readonly onRemoveAdded: (id: string) => void;
 }) {
   const meta = DIR_META[direction];
   const [addError, setAddError] = useState('');
@@ -361,10 +379,7 @@ export default function EditRelationshipModal({
     const relIds = new Set(rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId]);
     updateGroup(dir, g => ({
       ...g,
-      existing: g.existing.filter(r => {
-        const ids = r.relationshipSysIds?.length ? r.relationshipSysIds : [r.sysId];
-        return !ids.some(id => relIds.has(id));
-      }),
+      existing: g.existing.filter(r => !relIdsOverlap(r, relIds)),
       draftRemovals: [...g.draftRemovals, rel],
     }));
   };
@@ -373,10 +388,7 @@ export default function EditRelationshipModal({
     const relIds = new Set(rel.relationshipSysIds?.length ? rel.relationshipSysIds : [rel.sysId]);
     updateGroup(dir, g => ({
       ...g,
-      draftRemovals: g.draftRemovals.filter(r => {
-        const ids = r.relationshipSysIds?.length ? r.relationshipSysIds : [r.sysId];
-        return !ids.some(id => relIds.has(id));
-      }),
+      draftRemovals: g.draftRemovals.filter(r => !relIdsOverlap(r, relIds)),
       existing: [...g.existing, rel],
     }));
   };
@@ -463,11 +475,11 @@ export default function EditRelationshipModal({
           {(['edit', 'review', 'complete'] as ModalStep[]).map((s, i) => (
             <div key={s} className="flex items-center gap-1.5">
               <div className={`w-5 h-5 rounded-full flex items-center justify-center typo-badge font-bold
-                ${step === s ? 'bg-blue-600 text-white' : step === 'complete' || (step === 'review' && i === 0) ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                ${stepDotClass(step === s, step === 'complete' || (step === 'review' && i === 0))}`}>
                 {(step === 'review' && i === 0) || step === 'complete' ? <Check size={10} /> : i + 1}
               </div>
               <span className={`typo-badge ${step === s ? 'text-blue-700' : 'text-gray-400'}`}>
-                {s === 'edit' ? 'Edit' : s === 'review' ? 'Review' : 'Done'}
+                {stepLabel(s)}
               </span>
               {i < 2 && <div className="w-6 h-px bg-gray-200" />}
             </div>
@@ -475,16 +487,21 @@ export default function EditRelationshipModal({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <div className="flex items-center justify-center py-12 text-gray-400 gap-2">
-              <Loader2 className="w-5 h-5 animate-spin" /> Loading relationships…
-            </div>
-          ) : step === 'edit' ? (
+          {(() => {
+            if (loading) {
+              return (
+                <div className="flex items-center justify-center py-12 text-gray-400 gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin" /> Loading relationships…
+                </div>
+              );
+            }
+            if (step === 'edit') {
+              return (
             <div>
               <p className="typo-caption text-gray-500 mb-4 leading-relaxed">
                 Add or remove applications from each relationship direction.
-                Select a relationship type when adding.
-                <span className="text-amber-700 font-medium"> Removals require approval from the target app owner.</span>
+                Select a relationship type when adding.{' '}
+                <span className="text-amber-700 font-medium">Removals require approval from the target app owner.</span>
               </p>
               {DIRS.map(dir => (
                 <RelSection
@@ -506,7 +523,10 @@ export default function EditRelationshipModal({
                 />
               ))}
             </div>
-          ) : step === 'review' ? (
+              );
+            }
+            if (step === 'review') {
+              return (
             <div className="space-y-4">
               <p className="typo-body text-gray-600 mb-4">Please review the changes before confirming.</p>
               {DIRS.map(dir => {
@@ -559,7 +579,9 @@ export default function EditRelationshipModal({
               )}
               {submitError && <p className="typo-body text-red-600">{submitError}</p>}
             </div>
-          ) : (
+              );
+            }
+            return (
             <div className="text-center py-6">
               <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Check size={24} className="text-green-600" />
@@ -571,7 +593,8 @@ export default function EditRelationshipModal({
                 {totalRemoved > 0 && <p className="text-amber-600">{totalRemoved} removal approval{totalRemoved > 1 ? 's' : ''} pending</p>}
               </div>
             </div>
-          )}
+              );
+          })()}
         </div>
 
         <div className="px-6 py-3.5 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3">

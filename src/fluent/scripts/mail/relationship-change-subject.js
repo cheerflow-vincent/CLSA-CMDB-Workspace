@@ -1,8 +1,7 @@
 (function runMailScript(/* GlideRecord */ current, /* TemplatePrinter */ template,
-  /* Optional EmailOutbound */ email, /* Optional GlideRecord */ email_action,
-  /* Optional GlideRecord */ event) {
-  var changeGr = current;
-  var prefix = '';
+  /* Optional EmailOutbound */ email, /* Optional GlideRecord */ email_action) {
+  let changeGr = current;
+  let prefix = '';
 
   if (current.getTableName() === 'sysapproval_approver') {
     prefix = 'Approval required: ';
@@ -13,11 +12,11 @@
     }
   }
 
-  var action = changeGr.getDisplayValue('action') || '';
-  var direction = changeGr.getDisplayValue('direction') || '';
-  var source = changeGr.getDisplayValue('source_ci') || '';
-  var target = changeGr.getDisplayValue('target_ci') || '';
-  var subject = action + ' | ' + direction + ' | ' + source + ' \u2194 ' + target;
+  const action = changeGr.getDisplayValue('action') || '';
+  const direction = changeGr.getDisplayValue('direction') || '';
+  const source = changeGr.getDisplayValue('source_ci') || '';
+  const target = changeGr.getDisplayValue('target_ci') || '';
+  const subject = action + ' | ' + direction + ' | ' + source + ' \u2194 ' + target;
 
   email.setSubject(prefix + subject);
-})(current, template, email, email_action, event);
+})(current, template, email, email_action);

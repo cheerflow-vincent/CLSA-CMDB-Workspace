@@ -79,7 +79,7 @@ export function defaultsSidebarFromFilters(filters: ResolvedAppHomeFilter[]): Si
 
 export function sidebarFiltersEqual(a: SidebarFilterState, b: SidebarFilterState): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  const norm = (arr: string[]) => [...arr].sort().join('\0');
+  const norm = (arr: string[]) => [...arr].sort((x, y) => x.localeCompare(y)).join('\0');
   for (const key of keys) {
     if (norm(a[key] ?? []) !== norm(b[key] ?? [])) return false;
   }

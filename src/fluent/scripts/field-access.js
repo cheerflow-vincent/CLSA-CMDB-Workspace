@@ -5,40 +5,40 @@
     response.setBody({ error: message });
   }
 
-  var table = request.queryParams.table.toString();
-  var sysId = request.queryParams.sys_id.toString();
-  var fieldsParam = request.queryParams.fields.toString();
+  const table = request.queryParams.table.toString();
+  const sysId = request.queryParams.sys_id.toString();
+  const fieldsParam = request.queryParams.fields.toString();
 
   if (!table || !sysId || !fieldsParam) {
     jsonError(400, 'Missing required query parameter: table, sys_id, or fields');
     return;
   }
 
-  var gr = new GlideRecord(table);
+  const gr = new GlideRecord(table);
   if (!gr.get(sysId)) {
     jsonError(404, 'Record not found');
     return;
   }
 
   function getParentTable(tableName) {
-    var db = new GlideRecord('sys_db_object');
+    const db = new GlideRecord('sys_db_object');
     db.addQuery('name', tableName);
     db.setLimit(1);
     db.query();
     if (!db.next()) return '';
-    if (db.super_class.nil && db.super_class.nil()) return '';
+    if (db.super_class.nil?.()) return '';
     if (!db.super_class) return '';
     return String(db.super_class.name || '');
   }
 
   function lookupDictionary(tableName, elementName) {
-    var current = tableName;
-    var seen = {};
-    for (var i = 0; i < 12; i++) {
+    let current = tableName;
+    const seen = {};
+    for (let i = 0; i < 12; i++) {
       if (!current || seen[current]) break;
       seen[current] = true;
 
-      var dict = new GlideRecord('sys_dictionary');
+      const dict = new GlideRecord('sys_dictionary');
       dict.addQuery('name', current);
       dict.addQuery('element', elementName);
       dict.addQuery('active', true);
@@ -52,8 +52,8 @@
   }
 
   function getChoices(tableName, element) {
-    var choices = [];
-    var choiceGr = new GlideRecord('sys_choice');
+    const choices = [];
+    const choiceGr = new GlideRecord('sys_choice');
     choiceGr.addQuery('name', tableName);
     choiceGr.addQuery('element', element);
     choiceGr.addQuery('inactive', false);
@@ -61,8 +61,8 @@
     choiceGr.orderBy('sequence');
     choiceGr.query();
     while (choiceGr.next()) {
-      var value = String(choiceGr.getValue('value') || '');
-      var label = String(choiceGr.getValue('label') || value);
+      const value = String(choiceGr.getValue('value') || '');
+      const label = String(choiceGr.getValue('label') || value);
       if (!value) continue;
       choices.push({ value: value, label: label });
     }
@@ -70,12 +70,12 @@
   }
 
   function getChoicesForField(tableName, element) {
-    var current = tableName;
-    var seen = {};
-    for (var i = 0; i < 12; i++) {
+    let current = tableName;
+    const seen = {};
+    for (let i = 0; i < 12; i++) {
       if (!current || seen[current]) break;
       seen[current] = true;
-      var choices = getChoices(current, element);
+      const choices = getChoices(current, element);
       if (choices.length) return choices;
       current = getParentTable(current);
     }
@@ -84,7 +84,7 @@
 
   function isNoneChoice(choice) {
     if (choice === null || choice === undefined || choice === '') return true;
-    var normalized = String(choice).replace(/^\s+|\s+$/g, '').toUpperCase();
+    const normalized = String(choice).trim().toUpperCase();
     return normalized === '0' || normalized === 'NONE';
   }
 
@@ -98,17 +98,18 @@
   function attachChoicesSafely(entry, tableName, name, internalType, dict) {
     try {
       if (!shouldLoadChoices(internalType, dict)) return entry;
-      var choices = getChoicesForField(tableName, name);
+      const choices = getChoicesForField(tableName, name);
       if (choices.length) entry.choices = choices;
-    } catch (e) {
+    } catch (error) {
       // Choice metadata must never break field_access (canWriteRecord probe).
+      gs.debug('field-access attachChoices failed for ' + tableName + '.' + name + ': ' + error);
     }
     return entry;
   }
 
   function parseMandatoryValue(value) {
     if (value === true || value === 1) return true;
-    var normalized = String(value == null ? '' : value).replace(/^\s+|\s+$/g, '').toLowerCase();
+    const normalized = String(value == null ? '' : value).trim().toLowerCase();
     return normalized === 'true' || normalized === '1' || normalized === 'yes';
   }
 
@@ -116,8 +117,9 @@
     if (!ed) return false;
     try {
       if (typeof ed.isMandatory === 'function' && ed.isMandatory()) return true;
-    } catch (e) {
+    } catch (error) {
       // Fall back to dictionary below.
+      gs.debug('field-access isMandatoryFromElement probe failed: ' + error);
     }
     return false;
   }
@@ -127,7 +129,8 @@
     try {
       if (parseMandatoryValue(dict.getValue('mandatory'))) return true;
       if (parseMandatoryValue(dict.mandatory)) return true;
-    } catch (e) {
+    } catch (error) {
+      gs.debug('field-access isMandatoryFromDictionary probe failed: ' + error);
       return false;
     }
     return false;
@@ -143,11 +146,11 @@
   }
 
   function entryFromGlideElement(ge, tableName, name, dict) {
-    var ed = ge.getED();
+    const ed = ge.getED();
     if (!ed) return null;
 
-    var internalType = String(ed.getInternalType());
-    var entry = {
+    const internalType = String(ed.getInternalType());
+    const entry = {
       read: ge.canRead(),
       write: ge.canWrite(),
       internal_type: internalType,
@@ -158,9 +161,9 @@
   }
 
   function resolveFieldAccess(tableName, name) {
-    var dict = lookupDictionary(tableName, name);
-    var ge = gr.getElement(name);
-    var entry = entryFromGlideElement(ge, tableName, name, dict);
+    const dict = lookupDictionary(tableName, name);
+    let ge = gr.getElement(name);
+    let entry = entryFromGlideElement(ge, tableName, name, dict);
     if (entry) return entry;
 
     if (!dict) return null;
@@ -169,32 +172,33 @@
     entry = entryFromGlideElement(ge, tableName, name, dict);
     if (entry) return entry;
 
-    var dictType = String(dict.getValue('internal_type') || 'string');
-    var dictEd = ge.getED();
-    var dictEntry = {
+    const dictType = String(dict.getValue('internal_type') || 'string');
+    const dictEd = ge.getED();
+    const dictEntry = {
       read: ge.canRead(),
       write: ge.canWrite(),
       internal_type: dictType,
       reference: String(dict.getValue('reference') || ''),
-      max_length: parseInt(dict.getValue('max_length'), 10) || 0,
+      max_length: Number.parseInt(dict.getValue('max_length'), 10) || 0,
     };
     return attachFieldMeta(dictEntry, tableName, name, dictType, dict, dictEd);
   }
 
-  var canWriteRecord = gr.canWrite();
-  var fields = {};
-  var fieldNames = String(fieldsParam).split(',');
+  const canWriteRecord = gr.canWrite();
+  const fields = {};
+  const fieldNames = String(fieldsParam).split(',');
 
-  for (var i = 0; i < fieldNames.length; i++) {
-    var name = fieldNames[i].replace(/^\s+|\s+$/g, '');
+  for (const fieldName of fieldNames) {
+    const name = fieldName.trim();
     if (!name) continue;
 
     try {
-      var entry = resolveFieldAccess(table, name);
-      if (!entry || !entry.read) continue;
+      const entry = resolveFieldAccess(table, name);
+      if (!entry?.read) continue;
       fields[name] = entry;
-    } catch (e) {
+    } catch (error) {
       // Skip unreadable/broken fields; keep canWriteRecord response intact.
+      gs.debug('field-access resolveFieldAccess failed for ' + name + ': ' + error);
     }
   }
 

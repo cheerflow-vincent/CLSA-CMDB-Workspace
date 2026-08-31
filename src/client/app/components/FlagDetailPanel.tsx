@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { AlertCircle, Calendar, ChevronLeft, ChevronRight, Loader2, Shield, X } from 'lucide-react';
 import { TaskCard } from './taskListCards';
 import { HealthResultCard } from './HealthResultsPanel';
@@ -23,7 +23,33 @@ import { isAccessDenied } from '../utils/acl';
 
 export type FlagType = 'incident' | 'change' | 'health';
 
-/** @deprecated Legacy mock/demo shape — live panel uses recordSysId + API fetch */
+/** Shared loading / empty / list body for panel record views. */
+function renderPanelListBody<T>(
+  loading: boolean,
+  rows: readonly T[],
+  emptyMessage: string,
+  renderRow: (row: T) => ReactNode,
+): ReactNode {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
+        <Loader2 className="w-5 h-5 animate-spin" /> Loading…
+      </div>
+    );
+  }
+  if (!rows.length) {
+    return <p className="typo-body text-gray-400 text-center mt-10">{emptyMessage}</p>;
+  }
+  return rows.map(renderRow);
+}
+
+/** Footer label with pluralisation, falling back to a generic label when empty. */
+function panelFooterLabel(count: number, noun: string, fallback: string): string {
+  if (count <= 0) return fallback;
+  return `${count} ${noun}${count !== 1 ? 's' : ''} from ServiceNow`;
+}
+
+/** Row shape for incident tasks (mock/demo fallback and live loader record arrays). */
 export interface IncidentRecord {
   number: string;
   priority: string;
@@ -33,7 +59,7 @@ export interface IncidentRecord {
   assignee: string;
 }
 
-/** @deprecated Legacy mock/demo shape — live panel uses recordSysId + API fetch */
+/** Row shape for change tasks (mock/demo fallback and live loader record arrays). */
 export interface ChangeRecord {
   number: string;
   type: string;
@@ -44,19 +70,19 @@ export interface ChangeRecord {
 }
 
 interface FlagDetailPanelProps {
-  title: string;
-  subtitle?: string;
-  flagType: FlagType;
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly flagType: FlagType;
   /** CI / instance sys_id — fetches live tasks via task_ci */
-  recordSysId?: string;
+  readonly recordSysId?: string;
   /** Full encoded query (CI search summary) or CI-only prefix for legacy callers */
-  queryPrefix?: string;
-  encodedQuery?: string;
+  readonly queryPrefix?: string;
+  readonly encodedQuery?: string;
   /** Per-tab/chunk encoded queries — merged client-side for All Results sidebar. */
-  encodedQueries?: string[];
+  readonly encodedQueries?: string[];
   /** Demo/mock fallback when recordSysId is absent */
-  records?: IncidentRecord[] | ChangeRecord[];
-  onClose: () => void;
+  readonly records?: IncidentRecord[] | ChangeRecord[];
+  readonly onClose: () => void;
 }
 
 const priorityColor: Record<string, string> = {
@@ -88,13 +114,13 @@ function PanelPaginationFooter({
   onNext,
   footerLabel,
 }: {
-  loading: boolean;
-  totalCount: number;
-  page: number;
-  pageSize: number;
-  onPrev: () => void;
-  onNext: () => void;
-  footerLabel: string;
+  readonly loading: boolean;
+  readonly totalCount: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly onPrev: () => void;
+  readonly onNext: () => void;
+  readonly footerLabel: string;
 }) {
   const start = totalCount === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, totalCount);
@@ -145,11 +171,11 @@ function LiveFlagRecords({
   encodedQueries,
   flagType,
 }: {
-  recordSysId?: string;
-  queryPrefix?: string;
-  encodedQuery?: string;
-  encodedQueries?: string[];
-  flagType: 'incident' | 'change';
+  readonly recordSysId?: string;
+  readonly queryPrefix?: string;
+  readonly encodedQuery?: string;
+  readonly encodedQueries?: string[];
+  readonly flagType: 'incident' | 'change';
 }) {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<RelatedTaskRow[]>([]);
@@ -169,13 +195,13 @@ function LiveFlagRecords({
     let cancelled = false;
     setLoading(true);
 
-    const fetchPage = encodedQueries?.length
-      ? fetchRelatedTasksFromBranches(encodedQueries, config, page, pageSize)
-      : encodedQuery
-        ? fetchRelatedTasksFromBranches([encodedQuery], config, page, pageSize)
-        : queryPrefix
-          ? fetchRelatedTaskPageByQuery(taskCiQuery(queryPrefix, config), config, page, pageSize)
-          : fetchRelatedTaskPage(recordSysId!, config, page, pageSize);
+    const buildFetchPage = () => {
+      if (encodedQueries?.length) return fetchRelatedTasksFromBranches(encodedQueries, config, page, pageSize);
+      if (encodedQuery) return fetchRelatedTasksFromBranches([encodedQuery], config, page, pageSize);
+      if (queryPrefix) return fetchRelatedTaskPageByQuery(taskCiQuery(queryPrefix, config), config, page, pageSize);
+      return fetchRelatedTaskPage(recordSysId!, config, page, pageSize);
+    };
+    const fetchPage = buildFetchPage();
 
     fetchPage
       .then(({ rows: pageRows, columns: pageCols, totalCount: count, access }) => {
@@ -211,17 +237,9 @@ function LiveFlagRecords({
   return (
     <>
       <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
-            <Loader2 className="w-5 h-5 animate-spin" /> Loading…
-          </div>
-        ) : !rows.length ? (
-          <p className="typo-body text-gray-400 text-center mt-10">No records found.</p>
-        ) : (
-          rows.map(row => (
-            <TaskCard key={row.sysId} row={row} config={config} columns={columns} />
-          ))
-        )}
+        {renderPanelListBody(loading, rows, 'No records found.', row => (
+          <TaskCard key={row.sysId} row={row} config={config} columns={columns} />
+        ))}
       </div>
 
       <PanelPaginationFooter
@@ -231,11 +249,7 @@ function LiveFlagRecords({
         pageSize={pageSize}
         onPrev={() => setPage(p => p - 1)}
         onNext={() => setPage(p => p + 1)}
-        footerLabel={
-          totalCount > 0
-            ? `${totalCount} linked task${totalCount !== 1 ? 's' : ''} from ServiceNow`
-            : 'Linked tasks from ServiceNow'
-        }
+        footerLabel={panelFooterLabel(totalCount, 'linked task', 'Linked tasks from ServiceNow')}
       />
     </>
   );
@@ -247,10 +261,10 @@ function LiveHealthRecords({
   encodedQuery,
   encodedQueries,
 }: {
-  recordSysId?: string;
-  queryPrefix?: string;
-  encodedQuery?: string;
-  encodedQueries?: string[];
+  readonly recordSysId?: string;
+  readonly queryPrefix?: string;
+  readonly encodedQuery?: string;
+  readonly encodedQueries?: string[];
 }) {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<HealthResultRow[]>([]);
@@ -269,14 +283,15 @@ function LiveHealthRecords({
     let cancelled = false;
     setLoading(true);
 
-    const fetchPage = encodedQueries?.length
-      ? fetchCmdbHealthFromBranches(encodedQueries, page, pageSize)
-      : (encodedQuery ?? queryPrefix)
-        ? fetchCmdbHealthFromBranches([encodedQuery ?? queryPrefix!], page, pageSize)
-        : fetchCmdbHealthResults(recordSysId!).then(result => ({
-            ...result,
-            totalCount: result.totalCount || result.rows.length,
-          }));
+    const buildFetchPage = () => {
+      if (encodedQueries?.length) return fetchCmdbHealthFromBranches(encodedQueries, page, pageSize);
+      if (encodedQuery ?? queryPrefix) return fetchCmdbHealthFromBranches([encodedQuery ?? queryPrefix!], page, pageSize);
+      return fetchCmdbHealthResults(recordSysId!).then(result => ({
+        ...result,
+        totalCount: result.totalCount || result.rows.length,
+      }));
+    };
+    const fetchPage = buildFetchPage();
 
     fetchPage
       .then(({ rows: pageRows, columns: pageCols, totalCount: count, access }) => {
@@ -312,17 +327,9 @@ function LiveHealthRecords({
   return (
     <>
       <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
-            <Loader2 className="w-5 h-5 animate-spin" /> Loading…
-          </div>
-        ) : !rows.length ? (
-          <p className="typo-body text-gray-400 text-center mt-10">No health metrics found.</p>
-        ) : (
-          rows.map(row => (
-            <HealthResultCard key={row.sysId} row={row} columns={columns} />
-          ))
-        )}
+        {renderPanelListBody(loading, rows, 'No health metrics found.', row => (
+          <HealthResultCard key={row.sysId} row={row} columns={columns} />
+        ))}
       </div>
 
       <PanelPaginationFooter
@@ -332,11 +339,7 @@ function LiveHealthRecords({
         pageSize={pageSize}
         onPrev={() => setPage(p => p - 1)}
         onNext={() => setPage(p => p + 1)}
-        footerLabel={
-          totalCount > 0
-            ? `${totalCount} active health metric${totalCount !== 1 ? 's' : ''} from ServiceNow`
-            : 'Health metrics from ServiceNow'
-        }
+        footerLabel={panelFooterLabel(totalCount, 'active health metric', 'Health metrics from ServiceNow')}
       />
     </>
   );
@@ -346,8 +349,8 @@ function LegacyRecordList({
   flagType,
   records,
 }: {
-  flagType: 'incident' | 'change';
-  records: IncidentRecord[] | ChangeRecord[];
+  readonly flagType: 'incident' | 'change';
+  readonly records: IncidentRecord[] | ChangeRecord[];
 }) {
   const [page, setPage] = useState(0);
   const pageSize = RELATED_TASK_PAGE_SIZE;
@@ -472,9 +475,47 @@ export default function FlagDetailPanel({
   const useLive = Boolean(recordSysId || queryPrefix || encodedQuery || encodedQueries?.length);
   const isSummary = Boolean(encodedQueries?.length || encodedQuery || queryPrefix);
 
+  const renderRecordsContent = () => {
+    if (flagType === 'health') {
+      if (useLive) {
+        return (
+          <LiveHealthRecords
+            recordSysId={recordSysId}
+            queryPrefix={queryPrefix}
+            encodedQuery={encodedQuery}
+            encodedQueries={encodedQueries}
+          />
+        );
+      }
+      return (
+        <div className="flex-1 overflow-y-auto p-5 min-h-0">
+          <p className="typo-body text-gray-400 text-center mt-10">No records found.</p>
+        </div>
+      );
+    }
+    if (useLive) {
+      return (
+        <LiveFlagRecords
+          recordSysId={recordSysId}
+          queryPrefix={queryPrefix}
+          encodedQuery={encodedQuery}
+          encodedQueries={encodedQueries}
+          flagType={flagType}
+        />
+      );
+    }
+    return <LegacyRecordList flagType={flagType} records={records} />;
+  };
+
   return (
     <>
-      <div className="fixed inset-0 z-30 bg-black/20" onClick={onClose} />
+      <button
+        type="button"
+        className="fixed inset-0 z-30 bg-black/20"
+        onClick={onClose}
+        onKeyDown={e => { if (e.key === 'Escape') onClose(); }}
+        aria-label="Close panel"
+      />
 
       <div
         className="fixed right-0 top-0 h-full w-[420px] z-40 bg-white shadow-2xl flex flex-col"
@@ -509,30 +550,7 @@ export default function FlagDetailPanel({
           </button>
         </div>
 
-        {flagType === 'health' ? (
-          useLive ? (
-            <LiveHealthRecords
-              recordSysId={recordSysId}
-              queryPrefix={queryPrefix}
-              encodedQuery={encodedQuery}
-              encodedQueries={encodedQueries}
-            />
-          ) : (
-            <div className="flex-1 overflow-y-auto p-5 min-h-0">
-              <p className="typo-body text-gray-400 text-center mt-10">No records found.</p>
-            </div>
-          )
-        ) : useLive ? (
-          <LiveFlagRecords
-            recordSysId={recordSysId}
-            queryPrefix={queryPrefix}
-            encodedQuery={encodedQuery}
-            encodedQueries={encodedQueries}
-            flagType={flagType}
-          />
-        ) : (
-          <LegacyRecordList flagType={flagType} records={records} />
-        )}
+        {renderRecordsContent()}
       </div>
 
       <style>{`

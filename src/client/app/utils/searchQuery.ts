@@ -5,7 +5,7 @@ const MAX_SEARCH_TOKENS = 5;
 
 /** Strip characters that break encoded-query syntax in LIKE values. */
 export function escapeLikeTerm(term: string): string {
-  return term.replace(/\^/g, '').replace(/=/g, '');
+  return term.replaceAll('^', '').replaceAll('=', '');
 }
 
 /** Split input on whitespace; dedupe; cap count; min length per token. */
@@ -63,14 +63,14 @@ function prefixQuerySegment(segment: string, prefix: string): string {
 
   if (segment.startsWith('OR')) {
     const rest = segment.slice(2);
-    const match = rest.match(FIELD_OP_RE);
+    const match = FIELD_OP_RE.exec(rest);
     if (match) {
       return `OR${applyPrefix(match[1], rest.slice(match[1].length))}`;
     }
     return segment;
   }
 
-  const match = segment.match(FIELD_OP_RE);
+  const match = FIELD_OP_RE.exec(segment);
   if (match) {
     return applyPrefix(match[1], segment.slice(match[1].length));
   }

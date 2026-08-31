@@ -1,5 +1,5 @@
 import { useState, useEffect, type ElementType } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Loader2, ExternalLink } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
 import type { CIItem } from './CIDetailView';
 import FlagDetailPanel, { type FlagType } from './FlagDetailPanel';
 import CIFlagBadges from './CIFlagBadges';
@@ -34,11 +34,14 @@ import {
 
 export type RelatedListVariant = 'table' | 'compact' | 'cards';
 
-function EnvBadge({ env }: { env: string }) {
-  const cls =
-    env === 'Production'     ? 'bg-green-100 text-green-700' :
-    env === 'DR'             ? 'bg-orange-100 text-orange-700' :
-                               'bg-yellow-100 text-yellow-700';
+function envBadgeClass(env: string): string {
+  if (env === 'Production') return 'bg-green-100 text-green-700';
+  if (env === 'DR') return 'bg-orange-100 text-orange-700';
+  return 'bg-yellow-100 text-yellow-700';
+}
+
+function EnvBadge({ env }: { readonly env: string }) {
+  const cls = envBadgeClass(env);
   const short = env === 'Non-production' ? 'Non-prod' : env;
   return (
     <span className={`inline-flex typo-badge px-1.5 py-0.5 rounded whitespace-nowrap ${cls}`}>
@@ -93,9 +96,9 @@ function TaskCompactRow({
   config,
   isIncident,
 }: {
-  row: RelatedTaskRow;
-  config: RelatedTaskConfig;
-  isIncident: boolean;
+  readonly row: RelatedTaskRow;
+  readonly config: RelatedTaskConfig;
+  readonly isIncident: boolean;
 }) {
   const number = val(row, 'number') || row.sysId;
   const priority = val(row, 'priority');
@@ -159,12 +162,12 @@ function RelatedCICard({
   showCIFlags,
   onFlagClick,
 }: {
-  row: RelatedCIRow;
-  columns: ViewField[];
-  onViewCI?: (ci: CIItem) => void;
-  hoverRow?: string;
-  showCIFlags?: boolean;
-  onFlagClick?: (type: FlagType) => void;
+  readonly row: RelatedCIRow;
+  readonly columns: ViewField[];
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly hoverRow?: string;
+  readonly showCIFlags?: boolean;
+  readonly onFlagClick?: (type: FlagType) => void;
 }) {
   if (!columns.length) return null;
 
@@ -239,13 +242,13 @@ function PaginationBar({
   onPrev,
   onNext,
 }: {
-  start: number;
-  end: number;
-  totalCount: number;
-  page: number;
-  pageSize: number;
-  onPrev: () => void;
-  onNext: () => void;
+  readonly start: number;
+  readonly end: number;
+  readonly totalCount: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly onPrev: () => void;
+  readonly onNext: () => void;
 }) {
   return (
     <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
@@ -300,34 +303,34 @@ export default function RelatedListSection({
   showCIFlags = false,
   nodeSearch = '',
 }: {
-  config: RelatedCIConfig | RelatedTaskConfig;
-  recordSysId?: string;
+  readonly config: RelatedCIConfig | RelatedTaskConfig;
+  readonly recordSysId?: string;
   /** When set, load direct infra relationships from cmdb_rel_ci for this CI. */
-  ciSysId?: string;
-  isOpen: boolean;
-  onToggle: () => void;
-  onViewCI?: (ci: CIItem) => void;
-  title: string;
-  Icon: ElementType;
-  iconBg: string;
-  iconColor: string;
-  badgeBg: string;
-  badgeText: string;
-  badgeBorder: string;
-  hoverRow?: string;
-  emptyMessage?: string;
+  readonly ciSysId?: string;
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly title: string;
+  readonly Icon: ElementType;
+  readonly iconBg: string;
+  readonly iconColor: string;
+  readonly badgeBg: string;
+  readonly badgeText: string;
+  readonly badgeBorder: string;
+  readonly hoverRow?: string;
+  readonly emptyMessage?: string;
   /** Resolves emptyMessage from task config when prop is omitted. */
-  recordContext?: RelatedTaskRecordContext;
+  readonly recordContext?: RelatedTaskRecordContext;
   /** Bump to refetch count and list data. */
-  refreshKey?: number;
-  variant?: RelatedListVariant;
-  embedded?: boolean;
+  readonly refreshKey?: number;
+  readonly variant?: RelatedListVariant;
+  readonly embedded?: boolean;
   /** When false, keep table/compact layout even in narrow containers (e.g. app detail sidebar). */
-  responsiveLayout?: boolean;
+  readonly responsiveLayout?: boolean;
   /** Show incident/change flag badges next to related CI names. */
-  showCIFlags?: boolean;
+  readonly showCIFlags?: boolean;
   /** Client-side filter for related CI name (infrastructure table search). */
-  nodeSearch?: string;
+  readonly nodeSearch?: string;
 }) {
   const [flagPanel, setFlagPanel] = useState<{
     recordSysId: string;
@@ -349,9 +352,8 @@ export default function RelatedListSection({
   const isIncident = taskConfig?.taskClass === 'incident';
   const displayVariant = taskMode ? variant : 'table';
   const { ref: narrowRef, narrow } = useNarrowContainer();
-  const resolvedVariant = responsiveLayout
-    ? useResponsiveListVariant(displayVariant, narrow, 'cards')
-    : displayVariant;
+  const responsiveVariant = useResponsiveListVariant(displayVariant, narrow, 'cards');
+  const resolvedVariant = responsiveLayout ? responsiveVariant : displayVariant;
   const contentOpen = embedded || isOpen;
   const ciMode = !taskMode && !!ciSysId;
   const anchorId = ciMode ? ciSysId : recordSysId;
@@ -365,11 +367,12 @@ export default function RelatedListSection({
       setAccess('ok');
       return;
     }
-    const loadCount = taskMode
-      ? fetchRelatedTaskCount(anchorId, config)
-      : ciMode
-        ? fetchRelatedCICountForCi(ciSysId!, config as RelatedCIConfig)
-        : fetchRelatedCICount(anchorId, config as RelatedCIConfig);
+    const buildLoadCount = () => {
+      if (taskMode) return fetchRelatedTaskCount(anchorId, config);
+      if (ciMode) return fetchRelatedCICountForCi(ciSysId!, config as RelatedCIConfig);
+      return fetchRelatedCICount(anchorId, config as RelatedCIConfig);
+    };
+    const loadCount = buildLoadCount();
     loadCount
       .then(({ totalCount: count, access: acc }) => {
         setTotalCount(count);
@@ -384,11 +387,12 @@ export default function RelatedListSection({
   useEffect(() => {
     if (!contentOpen || !anchorId) return;
     setLoading(true);
-    const loadPage = taskMode
-      ? fetchRelatedTaskPage(anchorId, config, page)
-      : ciMode
-        ? fetchRelatedCIPageForCi(ciSysId!, config as RelatedCIConfig, page)
-        : fetchRelatedCIPage(anchorId, config as RelatedCIConfig, page);
+    const buildLoadPage = () => {
+      if (taskMode) return fetchRelatedTaskPage(anchorId, config, page);
+      if (ciMode) return fetchRelatedCIPageForCi(ciSysId!, config as RelatedCIConfig, page);
+      return fetchRelatedCIPage(anchorId, config as RelatedCIConfig, page);
+    };
+    const loadPage = buildLoadPage();
     loadPage
       .then(({ rows: pageRows, columns: pageCols, totalCount: count, access: acc }) => {
         setRows(pageRows);
@@ -626,17 +630,20 @@ export default function RelatedListSection({
     );
   }
 
-  const listBody = (
-    <>
-      {loading ? (
+  const renderListInner = () => {
+    if (loading) {
+      return (
         <div className="flex items-center justify-center py-8 text-gray-400 gap-2 typo-caption">
           <Loader2 className="w-4 h-4 animate-spin" /> Loading…
         </div>
-      ) : totalCount === 0 ? (
-        <p className={`typo-caption italic text-center ${embedded ? 'py-10' : 'px-3 py-6'}`}>{resolvedEmptyMessage}</p>
-      ) : (
-        <>
-          {taskMode ? renderTaskList() : renderCIList()}
+      );
+    }
+    if (totalCount === 0) {
+      return <p className={`typo-caption italic text-center ${embedded ? 'py-10' : 'px-3 py-6'}`}>{resolvedEmptyMessage}</p>;
+    }
+    return (
+      <>
+        {taskMode ? renderTaskList() : renderCIList()}
 
           {showPagination && (
             <PaginationBar
@@ -649,10 +656,11 @@ export default function RelatedListSection({
               onNext={() => setPage(p => p + 1)}
             />
           )}
-        </>
-      )}
-    </>
-  );
+      </>
+    );
+  };
+
+  const listBody = renderListInner();
 
   if (isAccessDenied(access)) {
     return null;

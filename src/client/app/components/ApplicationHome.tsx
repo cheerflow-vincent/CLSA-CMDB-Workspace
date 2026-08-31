@@ -1,13 +1,13 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Search, AlertCircle, Calendar, CheckCircle2, Clock,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, X, LayoutGrid, List,
   Layers, TrendingUp, ArrowRight, Building2, SlidersHorizontal,
-  Box, Package, Database, Loader2, ExternalLink,
+  Box, Package, Database,
 } from 'lucide-react';
 import FlagDetailPanel, { type FlagType, type IncidentRecord, type ChangeRecord } from './FlagDetailPanel';
 import AppSearchHeader from './AppSearchHeader';
-import { fetchPortalMetadata, type TableAccess } from '../../api/servicenow';
+import { fetchPortalMetadata, type TableAccess, type FilterOptionDto } from '../../api/servicenow';
 import { isAccessDenied } from '../utils/acl';
 import { str } from '../utils/viewFields';
 import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG } from '../utils/relatedTasks';
@@ -20,6 +20,7 @@ import {
   type LiveInstance,
   type TwoLevelMapping,
   type ThreeLevelMapping,
+  type LiveFilterCriteria,
   fetchFlagCountsForIds,
   loadInstanceCatalog,
   mergeFilterCriteria,
@@ -50,7 +51,7 @@ import {
 } from './applicationInstanceViews';
 
 interface ApplicationHomeProps {
-  onSelectApp: (app: AppItem) => void;
+  readonly onSelectApp: (app: AppItem) => void;
 }
 
 type LivePanelState =
@@ -228,21 +229,27 @@ function assembleTwoLevelFamilies(
 
 const safe = str;
 
-// ─── Main component ───────────────────────────────────────────────────────────
-function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }: {
-  svc: LiveService;
-  viewMode: 'grid' | 'list';
-  onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
-  onExpand?: () => void;
-}) {
+/** Collapsible open state that fires onExpand only when opening. */
+function useToggleWithExpand(onExpand?: () => void): [boolean, () => void] {
   const [open, setOpen] = useState(false);
-  const instanceCount = svc.instanceIds.length;
   const toggleOpen = () => {
     const next = !open;
     setOpen(next);
     if (next) onExpand?.();
   };
+  return [open, toggleOpen];
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }: {
+  readonly svc: LiveService;
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  readonly onExpand?: () => void;
+}) {
+  const [open, toggleOpen] = useToggleWithExpand(onExpand);
+  const instanceCount = svc.instanceIds.length;
   return (
     <div className="mb-4">
       <button
@@ -326,19 +333,14 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }:
 
 // ─── 2-level: Application Service Section ────────────────────────────────────
 function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick, onExpand }: {
-  appSvc: LiveAppSvc;
-  viewMode: 'grid' | 'list';
-  onSelectApp: (a: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
-  onExpand?: () => void;
+  readonly appSvc: LiveAppSvc;
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (a: AppItem) => void;
+  readonly onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  readonly onExpand?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, toggleOpen] = useToggleWithExpand(onExpand);
   const instanceCount = appSvc.instanceIds.length;
-  const toggleOpen = () => {
-    const next = !open;
-    setOpen(next);
-    if (next) onExpand?.();
-  };
   return (
     <div className="mb-6">
       <button
@@ -425,11 +427,11 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick, onExpan
 
 // ─── Live Core Application Section (1st level) ───────────────────────────────
 function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick, onExpandService }: {
-  app: LiveCoreApp;
-  viewMode: 'grid' | 'list';
-  onSelectApp: (a: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
-  onExpandService?: (svc: LiveService) => void;
+  readonly app: LiveCoreApp;
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (a: AppItem) => void;
+  readonly onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  readonly onExpandService?: (svc: LiveService) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -493,7 +495,7 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick, onExpandS
 
 // ─── FilterSection accordion ──────────────────────────────────────────────────
 function FilterSection({ title, children, defaultOpen = true }: {
-  title: string; children: React.ReactNode; defaultOpen?: boolean;
+  readonly title: string; readonly children: React.ReactNode; readonly defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -507,13 +509,51 @@ function FilterSection({ title, children, defaultOpen = true }: {
   );
 }
 
+function renderFilterSectionBody(
+  def: { field: string; options: FilterOptionDto[] },
+  filtersLoading: boolean,
+  draftSidebar: Record<string, string[]>,
+  toggleDraftFilter: (field: string, value: string) => void,
+) {
+  if (filtersLoading) return <p className="typo-caption animate-pulse">Loading…</p>;
+  if (def.options.length === 0) return <p className="typo-caption italic">No options</p>;
+  return def.options.map(opt => (
+    <FilterOption
+      key={opt.value}
+      field={def.field}
+      opt={opt}
+      checked={(draftSidebar[def.field] ?? []).includes(opt.value)}
+      onToggle={() => toggleDraftFilter(def.field, opt.value)}
+    />
+  ));
+}
+
+function FilterOption({ field, opt, checked, onToggle }: {
+  readonly field: string;
+  readonly opt: FilterOptionDto;
+  readonly checked: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onToggle}
+        className="rounded border-gray-300 text-blue-600"
+      />
+      <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
+    </label>
+  );
+}
+
 // ─── Application group — demo data (middle tier) ──────────────────────────────
 function AppGroup({ appName, instances, viewMode, onSelectApp, onFlagClick }: {
-  appName: string;
-  instances: AppItem[];
-  viewMode: 'grid' | 'list';
-  onSelectApp: (app: AppItem) => void;
-  onFlagClick: (app: AppItem, flagType: FlagType) => void;
+  readonly appName: string;
+  readonly instances: AppItem[];
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly onFlagClick: (app: AppItem, flagType: FlagType) => void;
 }) {
   const [open, setOpen] = useState(true);
   const totalIncidents = instances.reduce((s, a) => s + a.incidents, 0);
@@ -572,11 +612,11 @@ function AppGroup({ appName, instances, viewMode, onSelectApp, onFlagClick }: {
 
 // ─── Application family section — demo data (outermost tier) ─────────────────
 function FamilySection({ family, appGroups, viewMode, onSelectApp, onFlagClick }: {
-  family: AppFamily;
-  appGroups: Map<string, AppItem[]>;
-  viewMode: 'grid' | 'list';
-  onSelectApp: (app: AppItem) => void;
-  onFlagClick: (app: AppItem, flagType: FlagType) => void;
+  readonly family: AppFamily;
+  readonly appGroups: Map<string, AppItem[]>;
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly onFlagClick: (app: AppItem, flagType: FlagType) => void;
 }) {
   const [open, setOpen] = useState(true);
   const allInstances  = [...appGroups.values()].flat();
@@ -637,6 +677,101 @@ function FamilySection({ family, appGroups, viewMode, onSelectApp, onFlagClick }
       )}
     </div>
   );
+}
+
+interface LoadAppHomeParams {
+  requestId: number;
+  appliedFilterCriteria: LiveFilterCriteria;
+  filterDefs: ResolvedAppHomeFilter[];
+  hierarchyMode: boolean;
+  familyPage: number;
+  tokenToSend: string | null;
+  criteriaKey: string;
+  filtersActive: boolean;
+  loadRequestRef: React.MutableRefObject<number>;
+  filterTokenRef: React.MutableRefObject<string | null>;
+  criteriaKeyRef: React.MutableRefObject<string>;
+  setLiveError: React.Dispatch<React.SetStateAction<string | null>>;
+  setLiveLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  setThreeLevelMapping: React.Dispatch<React.SetStateAction<ThreeLevelMapping | null>>;
+  setTwoLevelMapping: React.Dispatch<React.SetStateAction<TwoLevelMapping | null>>;
+  setFilteredInstIds: React.Dispatch<React.SetStateAction<Set<string> | null>>;
+  setTotalFamilies: React.Dispatch<React.SetStateAction<number>>;
+  setFlagCounts: React.Dispatch<React.SetStateAction<Map<string, CITaskFlagCounts>>>;
+}
+
+function _applyMappingAndFlags(p: LoadAppHomeParams, result: Awaited<ReturnType<typeof fetchApplicationHomePageUnified>>): void {
+  p.setFilteredInstIds(result.instanceIds);
+  p.setTotalFamilies(result.totalFamilies);
+  if (p.hierarchyMode) {
+    p.setThreeLevelMapping(result.threeLevelMapping);
+    p.setTwoLevelMapping(null);
+    const ids = result.threeLevelMapping?.instanceIds ?? [];
+    if (ids.length) {
+      fetchFlagCountsForIds(ids).then(counts => {
+        if (p.requestId === p.loadRequestRef.current) p.setFlagCounts(counts);
+      });
+    } else {
+      p.setFlagCounts(new Map());
+    }
+  } else {
+    p.setTwoLevelMapping(result.twoLevelMapping);
+    p.setThreeLevelMapping(null);
+    const ids = result.twoLevelMapping?.instanceSvcIds ?? [];
+    if (ids.length) {
+      fetchFlagCountsForIds(ids).then(counts => {
+        if (p.requestId === p.loadRequestRef.current) p.setFlagCounts(counts);
+      });
+    } else {
+      p.setFlagCounts(new Map());
+    }
+  }
+}
+
+async function loadApplicationHome(p: LoadAppHomeParams): Promise<void> {
+  try {
+    const result = await fetchApplicationHomePageUnified(
+      p.appliedFilterCriteria,
+      p.filterDefs,
+      p.hierarchyMode,
+      p.familyPage,
+      FAMILY_PAGE_SIZE,
+      p.tokenToSend,
+    );
+    if (p.requestId !== p.loadRequestRef.current) return;
+
+    p.filterTokenRef.current = result.filterToken;
+    p.criteriaKeyRef.current = p.criteriaKey;
+
+    if (result.access === 'denied') {
+      p.setLiveError('Access denied while loading application data.');
+      p.setThreeLevelMapping(null);
+      p.setTwoLevelMapping(null);
+      p.setFilteredInstIds(p.filtersActive ? new Set() : null);
+      p.setTotalFamilies(0);
+      p.setFlagCounts(new Map());
+      return;
+    }
+
+    if (result.access === 'error') {
+      p.setLiveError('Could not load application home data from the server.');
+      p.setThreeLevelMapping(null);
+      p.setTwoLevelMapping(null);
+      p.setTotalFamilies(0);
+      p.setFlagCounts(new Map());
+      return;
+    }
+
+    _applyMappingAndFlags(p, result);
+  } catch (e) {
+    if (p.requestId === p.loadRequestRef.current) {
+      p.setLiveError(String((e as Error)?.message ?? e));
+    }
+  } finally {
+    if (p.requestId === p.loadRequestRef.current) {
+      p.setLiveLoading(false);
+    }
+  }
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -772,7 +907,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const handleStatSummaryClick = useCallback((flagType: 'incident' | 'change') => {
     if (hierarchyMode === null) return;
     const config = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
-    const instanceIds = filtersActive ? (filteredInstIds ? [...filteredInstIds] : []) : null;
+    let instanceIds: string[] | null = null;
+    if (filtersActive) instanceIds = filteredInstIds ? [...filteredInstIds] : [];
     const encodedQueries = buildAppHomeTaskSummaryBranches(instanceIds, hierarchyMode, config);
     setLivePanel({
       kind: 'summary',
@@ -802,76 +938,13 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     const criteriaChanged = criteriaKey !== criteriaKeyRef.current;
     const tokenToSend = filtersActive && !criteriaChanged ? filterTokenRef.current : null;
 
-    (async () => {
-      try {
-        const result = await fetchApplicationHomePageUnified(
-          appliedFilterCriteria,
-          filterDefs,
-          hierarchyMode,
-          familyPage,
-          FAMILY_PAGE_SIZE,
-          tokenToSend,
-        );
-        if (requestId !== loadRequestRef.current) return;
-
-        filterTokenRef.current = result.filterToken;
-        criteriaKeyRef.current = criteriaKey;
-
-        if (result.access === 'denied') {
-          setLiveError('Access denied while loading application data.');
-          setThreeLevelMapping(null);
-          setTwoLevelMapping(null);
-          setFilteredInstIds(filtersActive ? new Set() : null);
-          setTotalFamilies(0);
-          setFlagCounts(new Map());
-          return;
-        }
-
-        if (result.access === 'error') {
-          setLiveError('Could not load application home data from the server.');
-          setThreeLevelMapping(null);
-          setTwoLevelMapping(null);
-          setTotalFamilies(0);
-          setFlagCounts(new Map());
-          return;
-        }
-
-        setFilteredInstIds(result.instanceIds);
-        setTotalFamilies(result.totalFamilies);
-
-        if (hierarchyMode) {
-          setThreeLevelMapping(result.threeLevelMapping);
-          setTwoLevelMapping(null);
-          const ids = result.threeLevelMapping?.instanceIds ?? [];
-          if (ids.length) {
-            fetchFlagCountsForIds(ids).then(counts => {
-              if (requestId === loadRequestRef.current) setFlagCounts(counts);
-            });
-          } else {
-            setFlagCounts(new Map());
-          }
-        } else {
-          setTwoLevelMapping(result.twoLevelMapping);
-          setThreeLevelMapping(null);
-          const ids = result.twoLevelMapping?.instanceSvcIds ?? [];
-          if (ids.length) {
-            fetchFlagCountsForIds(ids).then(counts => {
-              if (requestId === loadRequestRef.current) setFlagCounts(counts);
-            });
-          } else {
-            setFlagCounts(new Map());
-          }
-        }
-      } catch (e) {
-        if (requestId === loadRequestRef.current) {
-          setLiveError(String((e as Error)?.message ?? e));
-        }
-      } finally {
-        if (requestId === loadRequestRef.current) {
-          setLiveLoading(false);
-        }
-      }
-    })();
+    void loadApplicationHome({
+      requestId, appliedFilterCriteria, filterDefs, hierarchyMode, familyPage,
+      tokenToSend, criteriaKey, filtersActive,
+      loadRequestRef, filterTokenRef, criteriaKeyRef,
+      setLiveError, setLiveLoading, setThreeLevelMapping, setTwoLevelMapping,
+      setFilteredInstIds, setTotalFamilies, setFlagCounts,
+    });
   }, [
     hierarchyMode,
     familyPage,
@@ -1006,20 +1079,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
             {filterDefs.map(def => (
               <FilterSection key={def.field} title={def.label} defaultOpen={def.defaultOpen}>
-                {filtersLoading ? <p className="typo-caption animate-pulse">Loading…</p>
-                  : def.options.length === 0 ? <p className="typo-caption italic">No options</p>
-                  : def.options.map(opt => (
-                      <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer group">
-                        <input
-                          type="checkbox"
-                          checked={(draftSidebar[def.field] ?? []).includes(opt.value)}
-                          onChange={() => toggleDraftFilter(def.field, opt.value)}
-                          className="rounded border-gray-300 text-blue-600"
-                        />
-                        <span className="typo-body group-hover:text-gray-900">{opt.label}</span>
-                      </label>
-                    ))
-                }
+                {renderFilterSectionBody(def, filtersLoading, draftSidebar, toggleDraftFilter)}
               </FilterSection>
             ))}
           </div>
@@ -1259,9 +1319,9 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
 // ─── App Card (grid view) — demo data ────────────────────────────────────────
 function AppCard({ app, onViewDetails, onFlagClick }: {
-  app: AppItem;
-  onViewDetails: () => void;
-  onFlagClick: (flagType: FlagType) => void;
+  readonly app: AppItem;
+  readonly onViewDetails: () => void;
+  readonly onFlagClick: (flagType: FlagType) => void;
 }) {
   const st = statusBadge[app.status] ?? statusBadge['Operational'];
   return (
@@ -1317,15 +1377,21 @@ function AppCard({ app, onViewDetails, onFlagClick }: {
 }
 
 // ─── App Row (list view) — demo data ─────────────────────────────────────────
+function envBarClass(env: string): string {
+  if (env === 'Production') return 'bg-green-500';
+  if (env === 'Non-Prod (UAT)') return 'bg-amber-400';
+  return 'bg-blue-400';
+}
+
 function AppRow({ app, onViewDetails, onFlagClick }: {
-  app: AppItem;
-  onViewDetails: () => void;
-  onFlagClick: (flagType: FlagType) => void;
+  readonly app: AppItem;
+  readonly onViewDetails: () => void;
+  readonly onFlagClick: (flagType: FlagType) => void;
 }) {
   const st = statusBadge[app.status] ?? statusBadge['Operational'];
   return (
     <div className="bg-white rounded-xl border border-gray-200 hover:shadow-sm transition-all px-5 py-4 flex items-center gap-5">
-      <div className={`w-1 h-12 rounded-full shrink-0 ${app.env === 'Production' ? 'bg-green-500' : app.env === 'Non-Prod (UAT)' ? 'bg-amber-400' : 'bg-blue-400'}`} />
+      <div className={`w-1 h-12 rounded-full shrink-0 ${envBarClass(app.env)}`} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <p className="typo-panel-title truncate">{app.name}</p>

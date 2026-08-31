@@ -7,26 +7,26 @@ import { editDisplayValue, editRawValue } from '../utils/editValues';
 import { needsReferenceDisplayResolve } from '../utils/editFormLoad';
 import EditFieldLabel from './EditFieldLabel';
 
+function inputShellStateClass(disabled: boolean, focused: boolean): string {
+  if (disabled) return 'bg-gray-50 cursor-not-allowed opacity-60 border-gray-200';
+  if (focused) return 'border-blue-400 ring-1 ring-blue-300 bg-white';
+  return 'border-gray-300 bg-white';
+}
+
 function inputShellClass(disabled: boolean, focused: boolean): string {
-  return `flex items-center border rounded-lg px-3 py-2 gap-2 transition-colors ${
-    disabled
-      ? 'bg-gray-50 cursor-not-allowed opacity-60 border-gray-200'
-      : focused
-        ? 'border-blue-400 ring-1 ring-blue-300 bg-white'
-        : 'border-gray-300 bg-white'
-  }`;
+  return `flex items-center border rounded-lg px-3 py-2 gap-2 transition-colors ${inputShellStateClass(disabled, focused)}`;
 }
 
 export interface ReferenceAutocompleteProps {
-  label: string;
-  required?: boolean;
-  referenceTable: string;
+  readonly label: string;
+  readonly required?: boolean;
+  readonly referenceTable: string;
   /** Additional encoded query filters prepended to every search (e.g. u_service_type=instance). */
-  referenceQuery?: string;
-  value: EditFieldValue;
-  disabled?: boolean;
-  onChange: (value: EditFieldValue) => void;
-  onOpenChange?: (open: boolean) => void;
+  readonly referenceQuery?: string;
+  readonly value: EditFieldValue;
+  readonly disabled?: boolean;
+  readonly onChange: (value: EditFieldValue) => void;
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
 export default function ReferenceAutocomplete({

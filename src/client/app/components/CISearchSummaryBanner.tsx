@@ -4,17 +4,17 @@ import { isAccessDenied } from '../utils/acl';
 import type { SummaryFlagType } from '../utils/ciSearchSummary';
 
 export interface CiSearchSummaryBannerProps {
-  incidents: number;
-  changes: number;
-  health: number;
-  access: {
+  readonly incidents: number;
+  readonly changes: number;
+  readonly health: number;
+  readonly access: {
     incidents: TableAccess;
     changes: TableAccess;
     health: TableAccess;
   };
-  loading: boolean;
-  matchingCiCount: number;
-  onChipClick: (flagType: SummaryFlagType) => void;
+  readonly loading: boolean;
+  readonly matchingCiCount: number;
+  readonly onChipClick: (flagType: SummaryFlagType) => void;
 }
 
 export default function CISearchSummaryBanner({

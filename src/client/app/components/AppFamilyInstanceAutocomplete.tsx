@@ -9,13 +9,15 @@ import {
 } from '../utils/ciSearchAppFilter';
 
 interface AppFamilyInstanceAutocompleteProps {
-  value: AppFilterSelection | null;
-  onChange: (value: AppFilterSelection | null) => void;
-  hierarchyMode: boolean;
-  disabled?: boolean;
+  readonly value: AppFilterSelection | null;
+  readonly onChange: (value: AppFilterSelection | null) => void;
+  readonly hierarchyMode: boolean;
+  readonly disabled?: boolean;
   /** Match toolbar height in CISearchView search row. */
-  compact?: boolean;
-  className?: string;
+  readonly compact?: boolean;
+  readonly className?: string;
+  /** id applied to the text input so an external <label htmlFor> can associate with it. */
+  readonly inputId?: string;
 }
 
 function optionToSelection(opt: AppFamilyInstanceOption): AppFilterSelection {
@@ -29,6 +31,7 @@ export default function AppFamilyInstanceAutocomplete({
   disabled = false,
   compact = false,
   className = '',
+  inputId,
 }: AppFamilyInstanceAutocompleteProps) {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -117,6 +120,7 @@ export default function AppFamilyInstanceAutocomplete({
           : <Search className="w-4 h-4 text-gray-400 shrink-0" />
         }
         <input
+          id={inputId}
           type="text"
           className="flex-1 typo-body bg-transparent outline-none placeholder-gray-400 min-w-0 disabled:cursor-not-allowed"
           placeholder={compact ? 'App or Instance…' : `Search ${familyLabel} or Instance…`}

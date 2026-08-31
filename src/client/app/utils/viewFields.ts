@@ -3,16 +3,23 @@ import { fetchViewLayout, getCurrentUserSysId, queryTable, queryTableWithAccess,
 /** One field configured in a form view */
 export interface ViewField { element: string; label: string }
 
+/** String() that never emits '[object Object]' — JSON-encodes unexpected objects. */
+const primStr = (v: unknown): string => {
+  if (v == null) return '';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v as string | number | boolean | bigint | symbol);
+};
+
 /** Coerce any API value to a plain string (prefers display_value). */
 export const str = (v: unknown): string => {
   if (v == null) return '';
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
-    if (o.display_value != null) return String(o.display_value);
-    if (o.value        != null) return String(o.value);
+    if (o.display_value != null) return primStr(o.display_value);
+    if (o.value        != null) return primStr(o.value);
     return '';
   }
-  return String(v);
+  return primStr(v);
 };
 
 /** Coerce any API value to its raw database value (prefers value). */
@@ -20,11 +27,11 @@ export const raw = (v: unknown): string => {
   if (v == null) return '';
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
-    if (o.value        != null) return String(o.value);
-    if (o.display_value != null) return String(o.display_value);
+    if (o.value        != null) return primStr(o.value);
+    if (o.display_value != null) return primStr(o.display_value);
     return '';
   }
-  return String(v);
+  return primStr(v);
 };
 
 /** Fetch field elements from sys_ui_element and resolve their labels from sys_documentation. */
@@ -51,7 +58,7 @@ export async function resolveViewFields(
   const labelMap = new Map(docs.map(d => [str(d.element), str(d.label)]));
   return fieldNames.map(e => ({
     element: e,
-    label: labelMap.get(e) || e.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    label: labelMap.get(e) || e.replaceAll('_', ' ').replaceAll(/\b\w/g, c => c.toUpperCase()),
   }));
 }
 
@@ -101,7 +108,7 @@ async function labelListElements(
   const labelMap = new Map(docs.map(d => [str(d.element), str(d.label)]));
   return fieldNames.map(e => ({
     element: e,
-    label: labelMap.get(e) || e.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    label: labelMap.get(e) || e.replaceAll('_', ' ').replaceAll(/\b\w/g, c => c.toUpperCase()),
   }));
 }
 
@@ -158,6 +165,40 @@ export interface ListFieldsResult {
   listSysId?: string;
 }
 
+async function _loadPersonalList(tableName: string, listTitle: string, userId: string): Promise<ListFieldsResult | null> {
+  let personalListId = await findListSysId(`name=${tableName}^view.title=${listTitle}^sys_user=${userId}`);
+  if (!personalListId) personalListId = await findListSysId(`name=${tableName}^view.title=${listTitle}^sys_user=${userId}^active=true`);
+  if (!personalListId) return null;
+  const fields = await resolveListElementsByListId(tableName, personalListId, 50);
+  if (!fields?.length) return null;
+  return { fields, resolvedLayout: 'personal', listSysId: personalListId };
+}
+
+async function _loadSharedList(tableName: string, listTitle: string): Promise<ListFieldsResult | null> {
+  let sharedListId = await findListSysId(`name=${tableName}^view.title=${listTitle}^sys_userISEMPTY^active=true`);
+  if (!sharedListId) sharedListId = await findListSysId(`name=${tableName}^view.title=${listTitle}^sys_userISEMPTY`);
+  if (!sharedListId) return null;
+  const fields = await resolveListElementsByListId(tableName, sharedListId, 50);
+  if (!fields?.length) return null;
+  return { fields, resolvedLayout: 'shared', listSysId: sharedListId };
+}
+
+async function _loadDefaultList(tableName: string): Promise<ListFieldsResult | null> {
+  const defaultListId = await findListSysId(`name=${tableName}^view.name=^sys_userISEMPTY`);
+  if (!defaultListId) return null;
+  const fields = await resolveListElementsByListId(tableName, defaultListId, 20);
+  if (!fields?.length) return null;
+  return { fields, resolvedLayout: 'default', listSysId: defaultListId };
+}
+
+async function _loadFromViewLayout(tableName: string, listTitle: string): Promise<ListFieldsResult | null> {
+  try {
+    const res = await fetchViewLayout({ table: tableName, view_title: listTitle, type: 'list' });
+    if (res.fields?.length) return { fields: res.fields, resolvedLayout: res.resolved_layout ?? 'shared', listSysId: res.list_sys_id };
+  } catch { /* fall through */ }
+  return null;
+}
+
 /**
  * Load list-layout columns for a CI table:
  *  1. User-specific sys_ui_list (sys_user = logged-in user)
@@ -173,80 +214,22 @@ export async function loadListFieldsWithMeta(
   defaultFields: ViewField[] = [],
 ): Promise<ListFieldsResult> {
   const userId = await getCurrentUserSysId();
-
   if (userId) {
-    let personalListId = await findListSysId(
-      `name=${tableName}^view.title=${listTitle}^sys_user=${userId}`,
-    );
-    if (!personalListId) {
-      personalListId = await findListSysId(
-        `name=${tableName}^view.title=${listTitle}^sys_user=${userId}^active=true`,
-      );
-    }
-    if (personalListId) {
-      const personalFields = await resolveListElementsByListId(tableName, personalListId, 50);
-      if (personalFields?.length) {
-        return {
-          fields: personalFields,
-          resolvedLayout: 'personal',
-          listSysId: personalListId,
-        };
-      }
-    }
+    const personal = await _loadPersonalList(tableName, listTitle, userId);
+    if (personal) return personal;
   }
 
-  let sharedListId = await findListSysId(
-    `name=${tableName}^view.title=${listTitle}^sys_userISEMPTY^active=true`,
-  );
-  if (!sharedListId) {
-    sharedListId = await findListSysId(
-      `name=${tableName}^view.title=${listTitle}^sys_userISEMPTY`,
-    );
-  }
-  if (sharedListId) {
-    const sharedFields = await resolveListElementsByListId(tableName, sharedListId, 50);
-    if (sharedFields?.length) {
-      return {
-        fields: sharedFields,
-        resolvedLayout: 'shared',
-        listSysId: sharedListId,
-      };
-    }
-  }
+  const shared = await _loadSharedList(tableName, listTitle);
+  if (shared) return shared;
 
-  const defaultListId = await findListSysId(`name=${tableName}^view.name=^sys_userISEMPTY`);
-  if (defaultListId) {
-    const defaultFieldsFromList = await resolveListElementsByListId(tableName, defaultListId, 20);
-    if (defaultFieldsFromList?.length) {
-      return {
-        fields: defaultFieldsFromList,
-        resolvedLayout: 'default',
-        listSysId: defaultListId,
-      };
-    }
-  }
+  const defaultList = await _loadDefaultList(tableName);
+  if (defaultList) return defaultList;
 
   const dotWalkFields = await resolveListFieldsDotWalk(tableName, listTitle, 50);
-  if (dotWalkFields?.length) {
-    return { fields: dotWalkFields, resolvedLayout: 'shared' };
-  }
+  if (dotWalkFields?.length) return { fields: dotWalkFields, resolvedLayout: 'shared' };
 
-  try {
-    const res = await fetchViewLayout({
-      table: tableName,
-      view_title: listTitle,
-      type: 'list',
-    });
-    if (res.fields?.length) {
-      return {
-        fields: res.fields,
-        resolvedLayout: res.resolved_layout ?? 'shared',
-        listSysId: res.list_sys_id,
-      };
-    }
-  } catch {
-    // fall through to defaults
-  }
+  const viewLayout = await _loadFromViewLayout(tableName, listTitle);
+  if (viewLayout) return viewLayout;
 
   return { fields: defaultFields, resolvedLayout: 'default' };
 }
@@ -322,7 +305,7 @@ function markerKind(el: RawUiElement): MarkerKind {
 function toRawUiElement(rec: { element: unknown; position: unknown; type: unknown }): RawUiElement {
   return {
     element: str(rec.element),
-    position: parseInt(str(rec.position), 10) || 0,
+    position: Number.parseInt(str(rec.position), 10) || 0,
     type: str(rec.type),
   };
 }
@@ -397,13 +380,13 @@ function toEditFieldValue(v: unknown): EditFieldValue {
   if (v == null) return '';
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
-    const rawVal = o.value != null ? String(o.value) : '';
-    const dispVal = o.display_value != null ? String(o.display_value) : '';
+    const rawVal = o.value != null ? primStr(o.value) : '';
+    const dispVal = o.display_value != null ? primStr(o.display_value) : '';
     if (dispVal) return { value: rawVal, display_value: dispVal };
     if (rawVal && !SYS_ID_PATTERN.test(rawVal)) return { value: rawVal, display_value: rawVal };
     return { value: rawVal, display_value: '' };
   }
-  const s = String(v);
+  const s = String(v as string | number | boolean | bigint | symbol);
   if (s && !SYS_ID_PATTERN.test(s)) return s;
   return s;
 }
@@ -434,6 +417,91 @@ export async function fetchRecordFieldValuesForEdit(
   return { values: vals, access: result.length ? 'ok' : access };
 }
 
+type ParseMode = 'neutral' | 'two_col' | 'full_only';
+
+interface ParseState {
+  rows: FormLayoutRow[];
+  mode: ParseMode;
+  pendingFields: RawUiElement[];
+  leftCol: RawUiElement[];
+  rightCol: RawUiElement[];
+  pastSplit: boolean;
+  sawSplitMarker: boolean;
+}
+
+function _toField(e: RawUiElement): ViewField { return { element: e.element, label: e.element }; }
+
+function _flushTwoCol(s: ParseState): void {
+  if (!s.leftCol.length && !s.rightCol.length) return;
+  s.rows.push({ kind: 'columns', left: s.leftCol.map(_toField), right: s.rightCol.map(_toField) });
+  s.leftCol = [];
+  s.rightCol = [];
+  s.pastSplit = false;
+}
+
+function _emitPendingAsFull(s: ParseState): void {
+  for (const f of s.pendingFields) s.rows.push({ kind: 'full', field: _toField(f) });
+  s.pendingFields = [];
+}
+
+function _startTwoColBlock(s: ParseState): void {
+  s.mode = 'two_col';
+  s.leftCol = [];
+  s.rightCol = [];
+  s.pastSplit = false;
+}
+
+function _placeField(el: RawUiElement, s: ParseState): void {
+  if (s.mode === 'neutral') s.pendingFields.push(el);
+  else if (s.mode === 'full_only') s.rows.push({ kind: 'full', field: _toField(el) });
+  else if (s.pastSplit) s.rightCol.push(el);
+  else s.leftCol.push(el);
+}
+
+function _processElement(el: RawUiElement, s: ParseState): void {
+  const kind = markerKind(el);
+  if (kind === 'begin_split') {
+    s.sawSplitMarker = true;
+    if (s.mode === 'neutral') _emitPendingAsFull(s);
+    else if (s.mode === 'two_col') _flushTwoCol(s);
+    _startTwoColBlock(s);
+    return;
+  }
+  if (kind === 'split') {
+    s.sawSplitMarker = true;
+    if (s.mode === 'neutral') { s.leftCol = [...s.pendingFields]; s.pendingFields = []; s.mode = 'two_col'; }
+    else if (s.mode === 'full_only') { _startTwoColBlock(s); }
+    s.pastSplit = true;
+    return;
+  }
+  if (kind === 'end_split') {
+    s.sawSplitMarker = true;
+    if (s.mode === 'neutral') _emitPendingAsFull(s);
+    else if (s.mode === 'two_col') _flushTwoCol(s);
+    s.mode = 'full_only';
+    return;
+  }
+  if (kind === 'field') _placeField(el, s);
+}
+
+function _finalizeRows(s: ParseState, fallbackColumns: 1 | 2): void {
+  if (s.mode === 'neutral' && s.pendingFields.length) {
+    if (!s.sawSplitMarker && fallbackColumns === 2) {
+      for (let i = 0; i < s.pendingFields.length; i += 2) {
+        if (i + 1 < s.pendingFields.length) {
+          s.rows.push({ kind: 'columns', left: [_toField(s.pendingFields[i])], right: [_toField(s.pendingFields[i + 1])] });
+        } else {
+          s.rows.push({ kind: 'full', field: _toField(s.pendingFields[i]) });
+        }
+      }
+    } else {
+      _emitPendingAsFull(s);
+    }
+  } else if (s.mode === 'two_col') {
+    _flushTwoCol(s);
+  }
+}
+
 /**
  * Parse sys_ui_element stream into layout rows (ServiceNow form semantics).
  *
@@ -446,112 +514,21 @@ export function parseElementRows(
   elems: RawUiElement[],
   fallbackColumns: 1 | 2 = 1,
 ): FormLayoutRow[] {
-  const rows: FormLayoutRow[] = [];
-  type Mode = 'neutral' | 'two_col' | 'full_only';
-
-  let mode: Mode = 'neutral';
-  let pendingFields: RawUiElement[] = [];
-  let leftCol: RawUiElement[] = [];
-  let rightCol: RawUiElement[] = [];
-  let pastSplit = false;
-  let sawSplitMarker = false;
-
-  const toField = (e: RawUiElement): ViewField => ({ element: e.element, label: e.element });
-
-  const flushTwoCol = () => {
-    if (!leftCol.length && !rightCol.length) return;
-    rows.push({
-      kind: 'columns',
-      left: leftCol.map(toField),
-      right: rightCol.map(toField),
-    });
-    leftCol = [];
-    rightCol = [];
-    pastSplit = false;
+  const s: ParseState = {
+    rows: [], mode: 'neutral', pendingFields: [], leftCol: [], rightCol: [], pastSplit: false, sawSplitMarker: false,
   };
 
-  const emitPendingAsFull = () => {
-    for (const f of pendingFields) {
-      rows.push({ kind: 'full', field: toField(f) });
-    }
-    pendingFields = [];
-  };
+  for (const el of elems) _processElement(el, s);
+  _finalizeRows(s, fallbackColumns);
 
-  const startTwoColBlock = () => {
-    mode = 'two_col';
-    leftCol = [];
-    rightCol = [];
-    pastSplit = false;
-  };
-
-  for (const el of elems) {
-    switch (markerKind(el)) {
-      case 'begin_split':
-        sawSplitMarker = true;
-        if (mode === 'neutral') emitPendingAsFull();
-        else if (mode === 'two_col') flushTwoCol();
-        startTwoColBlock();
-        break;
-
-      case 'split':
-        sawSplitMarker = true;
-        if (mode === 'neutral') {
-          leftCol = [...pendingFields];
-          pendingFields = [];
-          mode = 'two_col';
-        } else if (mode === 'full_only') {
-          startTwoColBlock();
-        }
-        pastSplit = true;
-        break;
-
-      case 'end_split':
-        sawSplitMarker = true;
-        if (mode === 'neutral') emitPendingAsFull();
-        else if (mode === 'two_col') flushTwoCol();
-        mode = 'full_only';
-        break;
-
-      case 'field':
-        if (mode === 'neutral') pendingFields.push(el);
-        else if (mode === 'full_only') rows.push({ kind: 'full', field: toField(el) });
-        else if (pastSplit) rightCol.push(el);
-        else leftCol.push(el);
-        break;
-
-      default:
-        break;
-    }
-  }
-
-  if (mode === 'neutral' && pendingFields.length) {
-    if (!sawSplitMarker && fallbackColumns === 2) {
-      for (let i = 0; i < pendingFields.length; i += 2) {
-        if (i + 1 < pendingFields.length) {
-          rows.push({
-            kind: 'columns',
-            left: [toField(pendingFields[i])],
-            right: [toField(pendingFields[i + 1])],
-          });
-        } else {
-          rows.push({ kind: 'full', field: toField(pendingFields[i]) });
-        }
-      }
-    } else {
-      emitPendingAsFull();
-    }
-  } else if (mode === 'two_col') {
-    flushTwoCol();
-  }
-
-  return rows;
+  return s.rows;
 }
 
 function formatElementLabel(element: string): string {
   return element
-    .replace(/_/g, ' ')
-    .replace(/\./g, ' › ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+    .replaceAll('_', ' ')
+    .replaceAll('.', ' › ')
+    .replaceAll(/\b\w/g, c => c.toUpperCase());
 }
 
 function labelForElement(element: string, labelMap: Map<string, string>): string {
@@ -587,7 +564,7 @@ function collectFieldNames(rows: FormLayoutRow[]): string[] {
 }
 
 function parseColumns(v: unknown): 1 | 2 {
-  const n = parseInt(str(v), 10);
+  const n = Number.parseInt(str(v), 10);
   return n >= 2 ? 2 : 1;
 }
 
@@ -687,7 +664,6 @@ async function resolveFormLayoutFromTable(
   }
 
   const sections: FormSectionLayout[] = [];
-  const allFieldNames: string[] = [];
 
   for (const row of formSectionRows) {
     const sectionId = raw(row.sys_ui_section);
@@ -711,7 +687,6 @@ async function resolveFormLayoutFromTable(
     const fieldNames = collectFieldNames(rows);
     if (!fieldNames.length && !captionRaw) continue;
 
-    allFieldNames.push(...fieldNames);
     sections.push({ caption: captionRaw || null, rows });
   }
 

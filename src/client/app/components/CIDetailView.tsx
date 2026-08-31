@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
-  Edit2, ExternalLink, MapPin,
-  AlertCircle, Calendar, Activity, Server, Database,
-  Network, Shield, User,
-  ArrowUpDown, Loader2, RefreshCw,
+  ChevronRight, ChevronDown, ChevronUp,
+  Edit2, ExternalLink,
+  AlertCircle, Calendar, Activity, Server, Shield, User, Loader2, RefreshCw,
 } from 'lucide-react';
 import TaskTrendChart from './TaskTrendChart';
 import { fetchCITaskTrend, getLast6MonthBuckets, type TrendMonthPoint } from '../utils/taskTrend';
@@ -45,27 +43,30 @@ export interface CIItem {
 }
 
 interface CIDetailViewProps {
-  ci: CIItem;
-  onBack: () => void;
-  onSelectApp?: (app: AppItem) => void;
-  onViewCI?: (ci: CIItem) => void;
-  fromApp?: AppItem | null;
-  hierarchyMode?: boolean;
-  sidebarCollapsed?: boolean;
+  readonly ci: CIItem;
+  readonly onBack: () => void;
+  readonly onSelectApp?: (app: AppItem) => void;
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly fromApp?: AppItem | null;
+  readonly hierarchyMode?: boolean;
+  readonly sidebarCollapsed?: boolean;
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
+const getServerType = (ci: CIItem): string => {
+  if (ci.type === 'Server') return ci.class.includes('Windows') ? 'Windows Server' : 'Linux Server';
+  if (ci.type === 'Database') return ci.class;
+  if (ci.type === 'Switch') return 'Network Switch';
+  if (ci.type === 'Network Link') return 'Network Link';
+  return 'Business Service';
+};
+
 const getDetail = (ci: CIItem) => ({
-  serverType:
-    ci.type === 'Server'   ? (ci.class.includes('Windows') ? 'Windows Server' : 'Linux Server')
-    : ci.type === 'Database' ? ci.class
-    : ci.type === 'Switch'   ? 'Network Switch'
-    : ci.type === 'Network Link' ? 'Network Link'
-    : 'Business Service',
+  serverType: getServerType(ci),
   serverOS:  ci.class.split(' ').slice(0, 2).join(' '),
-  osVersion: ci.class.match(/[\d.]+/)?.[0] ?? 'N/A',
+  osVersion: (/[\d.]+/.exec(ci.class))?.[0] ?? 'N/A',
   status:    'In Use',
-  ip:        `10.120.${45 + (ci.name.charCodeAt(0) % 100)}.${19 + (ci.name.charCodeAt(1) % 200)}`,
+  ip:        `10.120.${45 + ((ci.name.codePointAt(0) ?? 0) % 100)}.${19 + ((ci.name.codePointAt(1) ?? 0) % 200)}`,
   cpu:  '32 vCPU',
   ram:  '128 GB',
   disk: '2 TB',
@@ -76,7 +77,7 @@ const getDetail = (ci: CIItem) => ({
 // Related Applications loaded live via RelatedApplicationsPanel.
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function ReadonlyField({ label, value }: { label: string; value: string }) {
+function ReadonlyField({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="rf-field-row min-w-0 mb-0">
       <span className="rf-field-row__label">{label}</span>
@@ -91,7 +92,7 @@ function grafanaPropertyName(table: string): string {
 
 /** Substitute `{0}` in a Grafana URL template with the CI name (uppercase). */
 function buildGrafanaUrl(template: string, ciName: string): string {
-  return template.replace(/\{0\}/g, encodeURIComponent(ciName.toUpperCase()));
+  return template.replaceAll('{0}', encodeURIComponent(ciName.toUpperCase()));
 }
 
 function initialClassLabel(ci: CIItem): string {
@@ -150,12 +151,12 @@ function FormOverviewBlock({
   emptyMessage = 'No overview fields configured.',
   loadingMessage = 'Loading overview…',
 }: {
-  sections: FormSectionLayout[];
-  values: Record<string, string>;
-  loading: boolean;
-  embedded?: boolean;
-  emptyMessage?: string;
-  loadingMessage?: string;
+  readonly sections: FormSectionLayout[];
+  readonly values: Record<string, string>;
+  readonly loading: boolean;
+  readonly embedded?: boolean;
+  readonly emptyMessage?: string;
+  readonly loadingMessage?: string;
 }) {
   const renderRow = (row: FormLayoutRow, key: string) => {
     if (row.kind === 'full') {
@@ -204,7 +205,7 @@ function FormOverviewBlock({
   return (
     <div className={`${embedded ? '' : 'mt-4 pt-4 border-t border-gray-100'} space-y-0`}>
       {visibleSections.map((sec, idx) => (
-        <CollapsibleFormSection key={idx} caption={sec.caption} isFirst={idx === 0}>
+        <CollapsibleFormSection key={sec.caption} caption={sec.caption} isFirst={idx === 0}>
           <div className="grid grid-cols-2 gap-y-4">
             {sec.rows.map((row, rowIdx) => renderRow(row, `${idx}-${rowIdx}`))}
           </div>
@@ -216,7 +217,7 @@ function FormOverviewBlock({
 
 // ─── Collapsible Section ──────────────────────────────────────────────────────
 function Section({ title, icon, defaultOpen = true, children }: {
-  title: string; icon: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode;
+  readonly title: string; readonly icon: React.ReactNode; readonly defaultOpen?: boolean; readonly children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -474,6 +475,96 @@ export default function CIDetailView({
   const showOpsSection =
     !isAccessDenied(trendAccess) || showTaskSection;
 
+  const renderOperationalContent = () => {
+    if (opsTab === 'trend' && !isAccessDenied(trendAccess)) {
+      if (trendLoading) {
+        return (
+          <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
+            <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
+          </div>
+        );
+      }
+      if (trendData.length === 0) {
+        return <p className="typo-body text-gray-400 italic text-center py-16">No trend data available.</p>;
+      }
+      return (
+        <>
+          <TaskTrendChart data={trendData} />
+          <p className="typo-caption text-center mt-3">
+            Click a data point to open the filtered list in ServiceNow.
+          </p>
+        </>
+      );
+    }
+    if (showTaskSection) {
+      return (
+        <>
+          <div className="flex gap-2 mb-4 flex-wrap">
+            {!isAccessDenied(incidentAccess) && (
+              <button
+                type="button"
+                onClick={() => setTaskTab('incidents')}
+                className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              >
+                <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
+                Incidents ({incidentCount})
+              </button>
+            )}
+            {!isAccessDenied(changeAccess) && (
+              <button
+                type="button"
+                onClick={() => setTaskTab('changes')}
+                className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              >
+                <Calendar className="w-3.5 h-3.5 inline mr-1" />
+                Changes ({changeCount})
+              </button>
+            )}
+          </div>
+
+          {taskTab === 'incidents' && !isAccessDenied(incidentAccess) ? (
+            <RelatedListSection
+              embedded
+              config={INCIDENT_TASK_CONFIG}
+              recordSysId={ci.id}
+              refreshKey={pageRefreshKey}
+              variant="cards"
+              isOpen
+              onToggle={() => {}}
+              title="Active Incidents"
+              Icon={AlertCircle}
+              iconBg="bg-red-100"
+              iconColor="text-red-600"
+              badgeBg="bg-red-50"
+              badgeText="text-red-700"
+              badgeBorder="border-red-200"
+              recordContext="ci"
+            />
+          ) : (
+            <RelatedListSection
+              embedded
+              config={CHANGE_TASK_CONFIG}
+              recordSysId={ci.id}
+              refreshKey={pageRefreshKey}
+              variant="cards"
+              isOpen
+              onToggle={() => {}}
+              title="Change Requests"
+              Icon={Calendar}
+              iconBg="bg-amber-100"
+              iconColor="text-amber-600"
+              badgeBg="bg-amber-50"
+              badgeText="text-amber-700"
+              badgeBorder="border-amber-200"
+              recordContext="ci"
+            />
+          )}
+        </>
+      );
+    }
+    return null;
+  };
+
   const operationalSection = showOpsSection && (
     <Section title="Operational Activity" icon={<Activity className="w-4 h-4 text-blue-500" />}>
       <div className="p-5">
@@ -500,85 +591,7 @@ export default function CIDetailView({
           )}
         </div>
 
-        {opsTab === 'trend' && !isAccessDenied(trendAccess) ? (
-          trendLoading ? (
-            <div className="flex items-center justify-center py-16 text-gray-400 gap-2 typo-body">
-              <Loader2 className="w-5 h-5 animate-spin" /> Loading trend…
-            </div>
-          ) : trendData.length === 0 ? (
-            <p className="typo-body text-gray-400 italic text-center py-16">No trend data available.</p>
-          ) : (
-            <>
-              <TaskTrendChart data={trendData} />
-              <p className="typo-caption text-center mt-3">
-                Click a data point to open the filtered list in ServiceNow.
-              </p>
-            </>
-          )
-        ) : showTaskSection ? (
-          <>
-            <div className="flex gap-2 mb-4 flex-wrap">
-              {!isAccessDenied(incidentAccess) && (
-                <button
-                  type="button"
-                  onClick={() => setTaskTab('incidents')}
-                  className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'incidents' ? 'bg-red-100 text-red-700' : 'text-gray-500 hover:bg-gray-100'}`}
-                >
-                  <AlertCircle className="w-3.5 h-3.5 inline mr-1" />
-                  Incidents ({incidentCount})
-                </button>
-              )}
-              {!isAccessDenied(changeAccess) && (
-                <button
-                  type="button"
-                  onClick={() => setTaskTab('changes')}
-                  className={`px-4 py-1.5 rounded-full typo-body font-medium transition-colors ${taskTab === 'changes' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-500 hover:bg-gray-100'}`}
-                >
-                  <Calendar className="w-3.5 h-3.5 inline mr-1" />
-                  Changes ({changeCount})
-                </button>
-              )}
-            </div>
-
-            {taskTab === 'incidents' && !isAccessDenied(incidentAccess) ? (
-              <RelatedListSection
-                embedded
-                config={INCIDENT_TASK_CONFIG}
-                recordSysId={ci.id}
-                refreshKey={pageRefreshKey}
-                variant="cards"
-                isOpen
-                onToggle={() => {}}
-                title="Active Incidents"
-                Icon={AlertCircle}
-                iconBg="bg-red-100"
-                iconColor="text-red-600"
-                badgeBg="bg-red-50"
-                badgeText="text-red-700"
-                badgeBorder="border-red-200"
-                recordContext="ci"
-              />
-            ) : (
-              <RelatedListSection
-                embedded
-                config={CHANGE_TASK_CONFIG}
-                recordSysId={ci.id}
-                refreshKey={pageRefreshKey}
-                variant="cards"
-                isOpen
-                onToggle={() => {}}
-                title="Change Requests"
-                Icon={Calendar}
-                iconBg="bg-amber-100"
-                iconColor="text-amber-600"
-                badgeBg="bg-amber-50"
-                badgeText="text-amber-700"
-                badgeBorder="border-amber-200"
-                recordContext="ci"
-              />
-            )}
-          </>
-        ) : null}
+        {renderOperationalContent()}
       </div>
     </Section>
   );
@@ -608,21 +621,16 @@ export default function CIDetailView({
   );
 
   const hasLeftColumn = showOverviewSection || showContactSection;
-  const bodyLayoutClass = !hasLeftColumn
-    ? ''
-    : sidebarCollapsed
-      ? 'lg:flex-row lg:items-start'
-      : 'xl:flex-row xl:items-start';
-  const bodyGapClass = !hasLeftColumn
-    ? ''
-    : sidebarCollapsed
-      ? 'lg:gap-6'
-      : 'xl:gap-6';
-  const leftColClass = !hasLeftColumn
-    ? ''
-    : sidebarCollapsed
-      ? 'lg:w-[38%] lg:max-w-xl lg:shrink-0 lg:sticky lg:top-4 lg:self-start'
-      : 'xl:w-[38%] xl:max-w-xl xl:shrink-0 xl:sticky xl:top-4 xl:self-start';
+  const pickLayoutClass = (collapsedClass: string, expandedClass: string) => {
+    if (!hasLeftColumn) return '';
+    return sidebarCollapsed ? collapsedClass : expandedClass;
+  };
+  const bodyLayoutClass = pickLayoutClass('lg:flex-row lg:items-start', 'xl:flex-row xl:items-start');
+  const bodyGapClass = pickLayoutClass('lg:gap-6', 'xl:gap-6');
+  const leftColClass = pickLayoutClass(
+    'lg:w-[38%] lg:max-w-xl lg:shrink-0 lg:sticky lg:top-4 lg:self-start',
+    'xl:w-[38%] xl:max-w-xl xl:shrink-0 xl:sticky xl:top-4 xl:self-start',
+  );
   const headerCountChipClass = sidebarCollapsed ? 'hidden lg:inline-flex' : 'hidden xl:inline-flex';
 
   return (

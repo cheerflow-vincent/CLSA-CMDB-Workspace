@@ -37,18 +37,18 @@ export interface InfraDiagramFilters {
 }
 
 interface Props {
-  filters: InfraDiagramFilters;
-  nodeSearch?: string;
-  selectedApp?: AppItem | null;
+  readonly filters: InfraDiagramFilters;
+  readonly nodeSearch?: string;
+  readonly selectedApp?: AppItem | null;
   /** CI-centric mode: current CI at center, sibling infra as peers. */
-  centerCi?: CIItem | null;
+  readonly centerCi?: CIItem | null;
   /** Pre-fetched peers for CI mode (optional — avoids duplicate fetch). */
-  ciPeers?: InfraCIPeer[];
-  onViewCI?: (ci: CIItem) => void;
-  canEditCenterRecord?: boolean;
-  refreshKey?: number;
-  onEditRelationships?: (app: { sysId: string; name: string }) => void;
-  onEditCiDetails: (ci: { sysId: string; name: string; table: string }) => void;
+  readonly ciPeers?: InfraCIPeer[];
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly canEditCenterRecord?: boolean;
+  readonly refreshKey?: number;
+  readonly onEditRelationships?: (app: { sysId: string; name: string }) => void;
+  readonly onEditCiDetails: (ci: { sysId: string; name: string; table: string }) => void;
 }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -138,16 +138,47 @@ function computeColumnLayout(
 
 type InfoMap = Map<string, { name: string; sysClass: string; ciType: InfraCIType; relTypes?: string[] }>;
 
+interface BuildHubCtx {
+  nodes: Node[];
+  edges: Edge[];
+  infoMap: InfoMap;
+  openMenu: NodeData['onOpenMenu'];
+  filters: InfraDiagramFilters;
+}
+
+function applySearchHighlight(node: Node, q: string, infoMap: InfoMap): Node {
+  const data = node.data as NodeData;
+  if (node.id === 'center') {
+    if (!q) {
+      if (data.searchHighlight === 'none') return node;
+      return { ...node, data: { ...data, searchHighlight: 'none' as SearchHighlight } };
+    }
+    const centerLabel = (data.label as string).toLowerCase();
+    const sh: SearchHighlight = centerLabel.includes(q) ? 'match' : 'dim';
+    if (data.searchHighlight === sh) return node;
+    return { ...node, data: { ...data, searchHighlight: sh } };
+  }
+  if (isGroupNodeId(node.id)) {
+    const label = (data.label as string).toLowerCase();
+    const sh: SearchHighlight = searchHighlightFor(q, label.includes(q));
+    if (data.searchHighlight === sh) return node;
+    return { ...node, data: { ...data, searchHighlight: sh } };
+  }
+  const label = (data.label as string).toLowerCase();
+  const info = infoMap.get(node.id);
+  const relMatch = info?.relTypes?.some(rt => rt.toLowerCase().includes(q)) ?? false;
+  const sh: SearchHighlight = searchHighlightFor(q, label.includes(q) || relMatch);
+  if (data.searchHighlight === sh) return node;
+  return { ...node, data: { ...data, searchHighlight: sh } };
+}
+
 function buildHubColumns(
-  nodes: Node[],
-  edges: Edge[],
-  infoMap: InfoMap,
+  ctx: BuildHubCtx,
   byType: Map<InfraCIType, InfraCIPeer[]>,
   columnX: Map<InfraCIType, number>,
-  openMenu: NodeData['onOpenMenu'],
-  filters: InfraDiagramFilters,
   relTypesFor?: (peer: InfraCIPeer) => string[],
 ): void {
+  const { nodes, edges, infoMap, openMenu, filters } = ctx;
   for (const ciType of INFRA_COLUMN_ORDER) {
     const list = [...(byType.get(ciType) ?? [])];
     if (!list.length) continue;
@@ -248,7 +279,7 @@ function buildDiagram(
     } satisfies NodeData,
   });
 
-  buildHubColumns(nodes, edges, infoMap, byType, columnX, openMenu, filters);
+  buildHubColumns({ nodes, edges, infoMap, openMenu, filters }, byType, columnX);
 
   return { nodes, edges, infoMap };
 }
@@ -298,17 +329,10 @@ function buildCiDiagram(
   });
 
   buildHubColumns(
-    nodes,
-    edges,
-    infoMap,
+    { nodes, edges, infoMap, openMenu, filters },
     byType,
     columnX,
-    openMenu,
-    filters,
-    peer => peers
-      .filter(p => p.sysId === peer.sysId && p.sysId !== centerCi.id)
-      .map(p => p.relType)
-      .filter(Boolean),
+    peer => peers.filter(p => p.sysId === peer.sysId && p.sysId !== centerCi.id).map(p => p.relType).filter(Boolean),
   );
 
   return { nodes, edges, infoMap };
@@ -322,13 +346,25 @@ const SEARCH_EXTRA: Record<SearchHighlight, React.CSSProperties> = {
   dim: { opacity: 0.22, filter: 'grayscale(40%)' },
 };
 
+function pickByRole<T>(isCenter: boolean, isGroup: boolean, centerVal: T, groupVal: T, nodeVal: T): T {
+  if (isCenter) return centerVal;
+  if (isGroup) return groupVal;
+  return nodeVal;
+}
+
+function searchHighlightFor(active: string, isMatch: boolean): SearchHighlight {
+  if (active && isMatch) return 'match';
+  if (active) return 'dim';
+  return 'none';
+}
+
 const InfraNode = memo(({ id, data }: NodeProps) => {
   const d = data as NodeData;
   const isCenter = d.isCenter;
   const isGroup = d.isGroup === true;
   const style = d.ciType === 'center' ? null : INFRA_CI_STYLE[d.ciType as InfraCIType];
-  const w = isCenter ? CW : (isGroup ? GW : NW);
-  const h = isCenter ? CH : (isGroup ? GH : NH);
+  const w = pickByRole(isCenter, isGroup, CW, GW, NW);
+  const h = pickByRole(isCenter, isGroup, CH, GH, NH);
   const borderClr = isCenter && !style ? '#374151' : (style?.border ?? '#374151');
   const searchSty = SEARCH_EXTRA[d.searchHighlight ?? 'none'];
 
@@ -342,7 +378,7 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
       display: 'flex',
       alignItems: 'center',
       gap: 2,
-      padding: isCenter ? '8px 10px' : (isGroup ? '6px 8px' : '5px 4px 5px 8px'),
+      padding: pickByRole(isCenter, isGroup, '8px 10px', '6px 8px', '5px 4px 5px 8px'),
       cursor: isGroup ? 'default' : 'grab',
       userSelect: 'none',
       overflow: 'hidden',
@@ -354,7 +390,7 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
 
       <span style={{
         flex: 1,
-        fontSize: isCenter ? 12 : (isGroup ? 11 : 11),
+        fontSize: isCenter ? 12 : 11,
         fontWeight: isCenter || isGroup ? 600 : 400,
         color: isCenter && !style ? '#111827' : (style?.text ?? '#111827'),
         fontFamily: 'var(--font-sans)',
@@ -382,8 +418,8 @@ const InfraNode = memo(({ id, data }: NodeProps) => {
 
 const NODE_TYPES = { infraNode: InfraNode };
 
-function MI({ icon, label, onClick, cls = 'text-gray-700 hover:bg-gray-50' }: {
-  icon: React.ReactNode; label: string; onClick: () => void; cls?: string;
+function MenuItem({ icon, label, onClick, cls = 'text-gray-700 hover:bg-gray-50' }: {
+  readonly icon: React.ReactNode; readonly label: string; readonly onClick: () => void; readonly cls?: string;
 }) {
   return (
     <button type="button" onClick={onClick}
@@ -557,32 +593,7 @@ function InfrastructureDiagramInner({
 
   useEffect(() => {
     const q = nodeSearch.trim().toLowerCase();
-    setNodes(prev => prev.map(node => {
-      if (node.id === 'center') {
-        if (!q) {
-          if ((node.data as NodeData).searchHighlight === 'none') return node;
-          return { ...node, data: { ...node.data, searchHighlight: 'none' as SearchHighlight } };
-        }
-        const centerLabel = ((node.data as NodeData).label as string).toLowerCase();
-        const sh: SearchHighlight = centerLabel.includes(q) ? 'match' : 'dim';
-        if ((node.data as NodeData).searchHighlight === sh) return node;
-        return { ...node, data: { ...node.data, searchHighlight: sh } };
-      }
-
-      if (isGroupNodeId(node.id)) {
-        const label = ((node.data as NodeData).label as string).toLowerCase();
-        const sh: SearchHighlight = q && label.includes(q) ? 'match' : q ? 'dim' : 'none';
-        if ((node.data as NodeData).searchHighlight === sh) return node;
-        return { ...node, data: { ...node.data, searchHighlight: sh } };
-      }
-
-      const label = ((node.data as NodeData).label as string).toLowerCase();
-      const info = infoMapRef.current.get(node.id);
-      const relMatch = info?.relTypes?.some(rt => rt.toLowerCase().includes(q)) ?? false;
-      const sh: SearchHighlight = q && (label.includes(q) || relMatch) ? 'match' : q ? 'dim' : 'none';
-      if ((node.data as NodeData).searchHighlight === sh) return node;
-      return { ...node, data: { ...node.data, searchHighlight: sh } };
-    }));
+    setNodes(prev => prev.map(node => applySearchHighlight(node, q, infoMapRef.current)));
   }, [nodeSearch, setNodes]);
 
   return (
@@ -621,15 +632,15 @@ function InfrastructureDiagramInner({
           ref={nodeMenuRef}
           className="clsa-portal fixed w-60 bg-white rounded-xl shadow-2xl border border-gray-200 py-1 overflow-hidden"
           style={{ left: nodeMenu.x, top: nodeMenu.y, zIndex: Z_INDEX.diagramNodeMenu }}
-          onClick={e => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b border-gray-100 flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="typo-panel-title truncate">{nodeMenu.label}</p>
               <p className="typo-caption mt-0.5">
-                {nodeMenu.isCenter
-                  ? (centerCi?.id ? 'Current CI' : 'Current Application')
-                  : 'Infrastructure CI'}
+                {(() => {
+                  if (!nodeMenu.isCenter) return 'Infrastructure CI';
+                  return centerCi?.id ? 'Current CI' : 'Current Application';
+                })()}
               </p>
             </div>
             <button
@@ -647,7 +658,7 @@ function InfrastructureDiagramInner({
               const info = infoMapRef.current.get(nodeMenu.nodeId);
               if (!info) return null;
               return (
-                <MI
+                <MenuItem
                   icon={<Eye size={14} className="text-gray-400" />}
                   label="View CI Details"
                   onClick={() => {
@@ -672,11 +683,14 @@ function InfrastructureDiagramInner({
               const sysId = nodeMenu.isCenter
                 ? (centerCi?.id ?? selectedApp?.sysId)
                 : nodeMenu.nodeId;
-              const table = nodeMenu.isCenter
-                ? (centerCi?.id
-                    ? (centerCi.table || centerCi.class || 'cmdb_ci')
-                    : (selectedApp?.table ?? 'cmdb_ci_service'))
-                : (info?.sysClass ?? 'cmdb_ci');
+              let table: string;
+              if (!nodeMenu.isCenter) {
+                table = info?.sysClass ?? 'cmdb_ci';
+              } else if (centerCi?.id) {
+                table = centerCi.table || centerCi.class || 'cmdb_ci';
+              } else {
+                table = selectedApp?.table ?? 'cmdb_ci_service';
+              }
               if (!sysId) return null;
               return (
                 <a
@@ -695,7 +709,7 @@ function InfrastructureDiagramInner({
             {nodeMenu.isCenter && !centerCi?.id && menuPermissions?.canEdit && selectedApp?.sysId && onEditRelationships && (
               <>
                 <div className="border-t border-gray-100 my-1" />
-                <MI
+                <MenuItem
                   icon={<Network size={14} className="text-blue-500" />}
                   label="Edit Relationships"
                   onClick={() => {
@@ -703,7 +717,7 @@ function InfrastructureDiagramInner({
                     closeMenu();
                   }}
                 />
-                <MI
+                <MenuItem
                   icon={<Edit2 size={14} className="text-gray-400" />}
                   label="Edit CI Details"
                   onClick={() => {
@@ -721,7 +735,7 @@ function InfrastructureDiagramInner({
             {nodeMenu.isCenter && centerCi?.id && menuPermissions?.canEdit && (
               <>
                 <div className="border-t border-gray-100 my-1" />
-                <MI
+                <MenuItem
                   icon={<Edit2 size={14} className="text-gray-400" />}
                   label="Edit CI Details"
                   onClick={() => {
@@ -749,7 +763,7 @@ function InfrastructureDiagramInner({
                   return (
                     <>
                       <div className="border-t border-gray-100 my-1" />
-                      <MI
+                      <MenuItem
                         icon={<Edit2 size={14} className="text-gray-400" />}
                         label="Edit CI Details"
                         onClick={() => {

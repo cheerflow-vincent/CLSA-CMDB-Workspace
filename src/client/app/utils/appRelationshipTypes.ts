@@ -94,16 +94,14 @@ async function loadAppRelationshipTypesUncached(): Promise<AppRelationshipTypeCo
 /** Cached configured app-to-app relationship types from system property. */
 export function getAppRelationshipTypes(): Promise<AppRelationshipTypeConfig> {
   if (cached) return Promise.resolve(cached);
-  if (!loading) {
-    loading = loadAppRelationshipTypesUncached()
-      .then(config => {
-        cached = config;
-        return config;
-      })
-      .finally(() => {
-        loading = null;
-      });
-  }
+  loading ??= loadAppRelationshipTypesUncached()
+    .then(config => {
+      cached = config;
+      return config;
+    })
+    .finally(() => {
+      loading = null;
+    });
   return loading;
 }
 

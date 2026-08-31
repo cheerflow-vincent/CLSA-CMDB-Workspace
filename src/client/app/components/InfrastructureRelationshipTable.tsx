@@ -14,11 +14,11 @@ import {
 import { INFRA_CI_STYLE, type InfraCIType } from '../utils/infraCiStyles';
 
 interface Props {
-  recordSysId?: string;
-  ciSysId?: string;
-  refreshKey?: number;
-  onViewCI?: (ci: CIItem) => void;
-  nodeSearch?: string;
+  readonly recordSysId?: string;
+  readonly ciSysId?: string;
+  readonly refreshKey?: number;
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly nodeSearch?: string;
 }
 
 const APP_SECTIONS: Array<{
@@ -102,12 +102,12 @@ function InfraTableSection({
   onViewCI,
   nodeSearch = '',
 }: {
-  section: typeof APP_SECTIONS[number];
-  recordSysId?: string;
-  ciSysId?: string;
-  refreshKey: number;
-  onViewCI?: (ci: CIItem) => void;
-  nodeSearch?: string;
+  readonly section: typeof APP_SECTIONS[number];
+  readonly recordSysId?: string;
+  readonly ciSysId?: string;
+  readonly refreshKey: number;
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly nodeSearch?: string;
 }) {
   const { config, Icon } = section;
   const ciType = config.ciType as InfraCIType;

@@ -155,12 +155,12 @@ export async function fetchCITaskTrend(ciSysId: string): Promise<CITaskTrendResu
     fetchOpenedTasksForCi(ciSysId, CHANGE_TREND_CONFIG, rangeStart),
   ]);
 
-  const access =
-    incidentResult.access === 'denied' || changeResult.access === 'denied'
-      ? 'denied'
-      : incidentResult.access === 'error' || changeResult.access === 'error'
-        ? 'error'
-        : 'ok';
+  let access: 'denied' | 'error' | 'ok' = 'ok';
+  if (incidentResult.access === 'denied' || changeResult.access === 'denied') {
+    access = 'denied';
+  } else if (incidentResult.access === 'error' || changeResult.access === 'error') {
+    access = 'error';
+  }
 
   const points = buckets.map(bucket => {
     const incIds = incidentResult.byMonth.get(bucket.monthKey) ?? [];

@@ -14,14 +14,13 @@ import { relTypeLabel } from '../utils/appRelationshipTypes';
 import { RELATED_CI_PAGE_SIZE } from '../utils/relatedCIs';
 
 interface Props {
-  appSysId: string | undefined;
-  appName?: string;
-  isOpen: boolean;
-  onToggle: () => void;
-  refreshKey?: number;
-  processingChangeIds?: string[];
-  onProcessingStart?: (changeSysId: string) => void;
-  onChanged?: (options?: { refreshDiagram?: boolean }) => void;
+  readonly appSysId: string | undefined;
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+  readonly refreshKey?: number;
+  readonly processingChangeIds?: string[];
+  readonly onProcessingStart?: (changeSysId: string) => void;
+  readonly onChanged?: (options?: { refreshDiagram?: boolean }) => void;
 }
 
 function peerName(row: RelationshipChangeRequest, appSysId: string): string {
@@ -38,13 +37,13 @@ function PaginationBar({
   onPrev,
   onNext,
 }: {
-  start: number;
-  end: number;
-  totalCount: number;
-  page: number;
-  pageSize: number;
-  onPrev: () => void;
-  onNext: () => void;
+  readonly start: number;
+  readonly end: number;
+  readonly totalCount: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly onPrev: () => void;
+  readonly onNext: () => void;
 }) {
   return (
     <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
@@ -219,13 +218,18 @@ export default function RelationshipChangesList({
 
       {isOpen && (
         <div className="border-t border-gray-100">
-          {loading ? (
+          {(() => {
+            if (loading) {
+              return (
             <div className="flex items-center justify-center py-6 text-gray-400 gap-2 typo-caption">
               <Loader2 className="w-4 h-4 animate-spin" /> Loading…
             </div>
-          ) : totalCount === 0 ? (
-            <p className="px-3 py-4 typo-caption italic">No relationship changes for this application.</p>
-          ) : (
+              );
+            }
+            if (totalCount === 0) {
+              return <p className="px-3 py-4 typo-caption italic">No relationship changes for this application.</p>;
+            }
+            return (
             <>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -337,7 +341,8 @@ export default function RelationshipChangesList({
               />
             )}
             </>
-          )}
+            );
+          })()}
         </div>
       )}
     </div>

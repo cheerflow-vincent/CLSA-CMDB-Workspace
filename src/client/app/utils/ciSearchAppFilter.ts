@@ -126,9 +126,8 @@ export async function searchAppFamilyInstanceOptions(
     });
   }
 
-  return options
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-    .slice(0, limit);
+  options.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return options.slice(0, limit);
 }
 
 export async function resolveInstanceIdsForAppSelection(
@@ -288,17 +287,22 @@ export function buildSnQueriesByTab(
   };
 }
 
+export interface FetchOptions {
+  keyword: string;
+  ciFilter: string;
+  searchFields: string[];
+  fields: string[];
+  columnFilterPart?: string;
+  sort?: typeof DEFAULT_COLUMN_SORT;
+}
+
 /** Fetch all CIs matching scoped query when related ID count exceeds single IN chunk. */
 export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
   table: string,
   relatedIds: string[],
-  keyword: string,
-  ciFilter: string,
-  searchFields: string[],
-  fields: string[],
-  columnFilterPart = '',
-  sort = DEFAULT_COLUMN_SORT,
+  options: FetchOptions,
 ): Promise<{ rows: T[]; access: TableAccess }> {
+  const { keyword, ciFilter, searchFields, fields, columnFilterPart = '', sort = DEFAULT_COLUMN_SORT } = options;
   if (!relatedIds.length) return { rows: [], access: 'ok' };
 
   if (relatedIds.length <= CHUNK_SIZE) {
@@ -332,9 +336,11 @@ export async function fetchAllScopedCiRows<T extends Record<string, unknown>>(
 
   const sortField = sort.field || 'name';
   const dir = sort.direction === 'desc' ? -1 : 1;
+  const sortStr = (x: unknown): string =>
+    typeof x === 'object' && x !== null ? JSON.stringify(x) : String((x ?? '') as string | number | boolean);
   all.sort((a, b) => {
-    const cmp = String(a[sortField] ?? '').localeCompare(
-      String(b[sortField] ?? ''),
+    const cmp = sortStr(a[sortField]).localeCompare(
+      sortStr(b[sortField]),
       undefined,
       { sensitivity: 'base', numeric: true },
     );

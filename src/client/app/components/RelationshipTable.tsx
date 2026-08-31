@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ArrowUp, ArrowDown, ArrowLeftRight, ExternalLink, Loader2 } from 'lucide-react';
 import { queryTable } from '../../api/servicenow';
 import { loadAppRelationshipPeers } from '../utils/appRelationships';
-import { type ViewField, str, loadViewFields as loadViewFieldsUtil, raw } from '../utils/viewFields';
+import { type ViewField, str, loadViewFields as loadViewFieldsUtil } from '../utils/viewFields';
 import type { AppItem } from '../data/appData';
 import type { DiagramFilters } from './RelationshipDiagram';
 import { useNarrowContainer } from '../utils/useNarrowLayout';
@@ -27,11 +27,11 @@ interface CIDetail {
 }
 
 interface Props {
-  selectedApp?:  AppItem | null;
-  nodeSearch?:   string;
-  filters?:      DiagramFilters;
-  onSelectApp?:  (app: AppItem) => void;
-  refreshKey?:   number;
+  readonly selectedApp?:  AppItem | null;
+  readonly nodeSearch?:   string;
+  readonly filters?:      DiagramFilters;
+  readonly onSelectApp?:  (app: AppItem) => void;
+  readonly refreshKey?:   number;
 }
 
 // ─── CMDB fetch — L1 relationships ───────────────────────────────────────────
@@ -84,7 +84,7 @@ const TABLE_LABEL: Record<string, string> = {
   cmdb_ci:                'Configuration Item',
 };
 function tableLabel(cls: string) {
-  return TABLE_LABEL[cls] ?? cls.replace(/^cmdb_ci_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return TABLE_LABEL[cls] ?? cls.replace(/^cmdb_ci_/, '').replaceAll('_', ' ').replaceAll(/\b\w/g, c => c.toUpperCase());
 }
 
 function rowServiceType(row: Pick<RelRow, 'departmentDescription'>): ServiceType {
@@ -101,9 +101,11 @@ const SVC_LABEL: Record<ServiceType, string> = {
 const sn = (v: unknown): string => {
   if (!v) return '';
   if (typeof v === 'string') return v;
-  if (typeof v === 'object' && v !== null && 'value' in v)
-    return String((v as Record<string, unknown>).value ?? '');
-  return String(v);
+  if (typeof v === 'object' && v !== null && 'value' in v) {
+    const val = (v as Record<string, unknown>).value;
+    return typeof val === 'object' && val !== null ? JSON.stringify(val) : String((val ?? '') as string | number | boolean);
+  }
+  return typeof v === 'object' ? JSON.stringify(v) : String(v as number | boolean);
 };
 
 // ─── CMDB fetch — CI details (view fields) per table ─────────────────────────
@@ -150,7 +152,7 @@ async function fetchCIDetails(rows: RelRow[]): Promise<Map<string, CIDetail>> {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-function InstanceInfoCell({ detail }: { detail: CIDetail | undefined }) {
+function InstanceInfoCell({ detail }: { readonly detail: CIDetail | undefined }) {
   if (!detail) return <span className="typo-caption italic">—</span>;
 
   const badge = opStatusBadge(detail.operational_status);
@@ -184,9 +186,9 @@ function RelRowCard({
   detail,
   onViewDetails,
 }: {
-  row: RelRow;
-  detail?: CIDetail;
-  onViewDetails: (row: RelRow) => void;
+  readonly row: RelRow;
+  readonly detail?: CIDetail;
+  readonly onViewDetails: (row: RelRow) => void;
 }) {
   const meta = DIR_META[row.direction];
   const svcType = rowServiceType(row);

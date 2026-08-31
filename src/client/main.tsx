@@ -15,10 +15,9 @@ function Root() {
 
 // Fetch the ServiceNow user token and wait for Tailwind CSS before rendering
 // so the first paint is styled (avoids FOUC on instances that load CSS async).
-Promise.all([initUserToken(), waitForStylesheets()]).then(() => {
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <Root />
-    </StrictMode>,
-  )
-})
+await Promise.all([initUserToken(), waitForStylesheets()]);
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <Root />
+  </StrictMode>,
+)

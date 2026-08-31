@@ -5,11 +5,11 @@ import {
 import type { TrendMonthPoint } from '../utils/taskTrend';
 
 type DotRenderProps = {
-  cx?: number;
-  cy?: number;
-  stroke?: string;
-  payload?: TrendMonthPoint;
-  dataKey?: string | number;
+  readonly cx?: number;
+  readonly cy?: number;
+  readonly stroke?: string;
+  readonly payload?: TrendMonthPoint;
+  readonly dataKey?: string | number;
 };
 
 function ClickableDot({
@@ -19,7 +19,7 @@ function ClickableDot({
   payload,
   dataKey,
   urlKey,
-}: DotRenderProps & { urlKey: 'incidentListUrl' | 'changeListUrl' }) {
+}: DotRenderProps & { readonly urlKey: 'incidentListUrl' | 'changeListUrl' }) {
   if (cx == null || cy == null || !payload || dataKey == null) return null;
 
   const key = String(dataKey) as 'incidents' | 'changes';
@@ -44,8 +44,15 @@ function ClickableDot({
   );
 }
 
+const renderIncidentDot = (props: unknown) => (
+  <ClickableDot {...(props as DotRenderProps)} urlKey="incidentListUrl" />
+);
+const renderChangeDot = (props: unknown) => (
+  <ClickableDot {...(props as DotRenderProps)} urlKey="changeListUrl" />
+);
+
 interface TaskTrendChartProps {
-  data: TrendMonthPoint[];
+  readonly data: TrendMonthPoint[];
 }
 
 export default function TaskTrendChart({ data }: TaskTrendChartProps) {
@@ -63,8 +70,8 @@ export default function TaskTrendChart({ data }: TaskTrendChartProps) {
           stroke="#ef4444"
           strokeWidth={2}
           name="Incidents"
-          dot={props => <ClickableDot {...(props as DotRenderProps)} urlKey="incidentListUrl" />}
-          activeDot={props => <ClickableDot {...(props as DotRenderProps)} urlKey="incidentListUrl" />}
+          dot={renderIncidentDot}
+          activeDot={renderIncidentDot}
         />
         <Line
           type="monotone"
@@ -72,8 +79,8 @@ export default function TaskTrendChart({ data }: TaskTrendChartProps) {
           stroke="#f59e0b"
           strokeWidth={2}
           name="Changes"
-          dot={props => <ClickableDot {...(props as DotRenderProps)} urlKey="changeListUrl" />}
-          activeDot={props => <ClickableDot {...(props as DotRenderProps)} urlKey="changeListUrl" />}
+          dot={renderChangeDot}
+          activeDot={renderChangeDot}
         />
       </LineChart>
     </ResponsiveContainer>

@@ -21,15 +21,15 @@ const DEFAULT_INFRA_FILTERS: InfraDiagramFilters = {
 };
 
 interface Props {
-  ci: CIItem;
-  hierarchyMode?: boolean;
-  onSelectApp?: (app: AppItem) => void;
-  onViewCI?: (ci: CIItem) => void;
-  refreshKey?: number;
-  canEditCenterRecord?: boolean;
-  onEditCiDetails?: (ci: { sysId: string; name: string; table: string }) => void;
-  onAppsAccessResolved?: (access: TableAccess) => void;
-  onInfraAccessResolved?: (access: TableAccess) => void;
+  readonly ci: CIItem;
+  readonly hierarchyMode?: boolean;
+  readonly onSelectApp?: (app: AppItem) => void;
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly refreshKey?: number;
+  readonly canEditCenterRecord?: boolean;
+  readonly onEditCiDetails?: (ci: { sysId: string; name: string; table: string }) => void;
+  readonly onAppsAccessResolved?: (access: TableAccess) => void;
+  readonly onInfraAccessResolved?: (access: TableAccess) => void;
 }
 
 export default function CiRelatedComponentsSection({
@@ -166,36 +166,44 @@ export default function CiRelatedComponentsSection({
       </div>
 
       {/* Content */}
-      {componentTab === 'application' ? (
-        <RelatedApplicationsPanel
-          ciSysId={ci.id}
-          hierarchyMode={hierarchyMode}
-          onSelectApp={onSelectApp}
-          onAccessResolved={onAppsAccessResolved}
-          refreshKey={refreshKey}
-        />
-      ) : viewMode === 'map' ? (
-        <div className="min-h-[400px] h-[420px]">
-          <InfrastructureDiagram
-            filters={infraFilters}
-            nodeSearch={nodeSearch}
-            centerCi={ci}
-            onViewCI={onViewCI}
-            canEditCenterRecord={canEditCenterRecord}
-            refreshKey={refreshKey}
-            onEditCiDetails={handleEditCiDetails}
-          />
-        </div>
-      ) : (
-        <div className="p-5">
-          <InfrastructureRelationshipTable
-            ciSysId={ci.id}
-            refreshKey={refreshKey}
-            onViewCI={onViewCI}
-            nodeSearch={nodeSearch}
-          />
-        </div>
-      )}
+      {(() => {
+        if (componentTab === 'application') {
+          return (
+            <RelatedApplicationsPanel
+              ciSysId={ci.id}
+              hierarchyMode={hierarchyMode}
+              onSelectApp={onSelectApp}
+              onAccessResolved={onAppsAccessResolved}
+              refreshKey={refreshKey}
+            />
+          );
+        }
+        if (viewMode === 'map') {
+          return (
+            <div className="min-h-[400px] h-[420px]">
+              <InfrastructureDiagram
+                filters={infraFilters}
+                nodeSearch={nodeSearch}
+                centerCi={ci}
+                onViewCI={onViewCI}
+                canEditCenterRecord={canEditCenterRecord}
+                refreshKey={refreshKey}
+                onEditCiDetails={handleEditCiDetails}
+              />
+            </div>
+          );
+        }
+        return (
+          <div className="p-5">
+            <InfrastructureRelationshipTable
+              ciSysId={ci.id}
+              refreshKey={refreshKey}
+              onViewCI={onViewCI}
+              nodeSearch={nodeSearch}
+            />
+          </div>
+        );
+      })()}
     </div>
   );
 }

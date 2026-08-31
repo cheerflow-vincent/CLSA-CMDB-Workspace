@@ -5,10 +5,10 @@ import CollapsibleFormSection from './formLayout/CollapsibleFormSection';
 import FormEditField from './FormEditField';
 
 export interface FormEditBlockProps {
-  sections: FormSectionLayout[];
-  accessMap: Record<string, FieldAccessEntry>;
-  values: Record<string, EditFieldValue>;
-  onChange: (element: string, value: EditFieldValue) => void;
+  readonly sections: FormSectionLayout[];
+  readonly accessMap: Record<string, FieldAccessEntry>;
+  readonly values: Record<string, EditFieldValue>;
+  readonly onChange: (element: string, value: EditFieldValue) => void;
 }
 
 export default function FormEditBlock({
@@ -86,7 +86,7 @@ export default function FormEditBlock({
     <div className="detail-pane record-edit-form min-w-0">
       <div className="space-y-0">
         {visibleSections.map((sec, idx) => (
-          <CollapsibleFormSection key={idx} caption={sec.caption} isFirst={idx === 0}>
+          <CollapsibleFormSection key={sec.caption} caption={sec.caption} isFirst={idx === 0}>
             <div className="grid grid-cols-2 gap-y-4">
               {sec.rows.map((row, rowIdx) => renderRow(row, `${idx}-${rowIdx}`))}
             </div>

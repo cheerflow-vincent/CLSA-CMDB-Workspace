@@ -1,6 +1,4 @@
-import { queryTable } from '../../api/servicenow';
-import type { FieldAccessEntry } from '../../api/servicenow';
-import { resolveReferenceList } from '../../api/servicenow';
+import { queryTable, resolveReferenceList, type FieldAccessEntry } from '../../api/servicenow';
 import type { EditFieldValue } from './viewFields';
 import { raw, str } from './viewFields';
 import { editDisplayValue, editRawValue } from './editValues';
@@ -107,7 +105,7 @@ export async function fetchDictionaryFieldMeta(
           write: false,
           internal_type: internalType,
           reference: raw(row.reference) || undefined,
-          max_length: parseInt(str(row.max_length), 10) || undefined,
+          max_length: Number.parseInt(str(row.max_length), 10) || undefined,
           mandatory: parseMandatoryValue(row.mandatory),
         };
         remaining.delete(el);

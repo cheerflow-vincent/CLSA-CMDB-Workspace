@@ -18,10 +18,10 @@ import {
 } from './applicationInstanceViews';
 
 function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick }: {
-  svc: LiveService;
-  viewMode: 'grid' | 'list';
-  onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  readonly svc: LiveService;
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -68,10 +68,10 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick }: {
 }
 
 function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick }: {
-  app: LiveCoreApp;
-  viewMode: 'grid' | 'list';
-  onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  readonly app: LiveCoreApp;
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -102,10 +102,10 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick }: {
 }
 
 function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick }: {
-  appSvc: LiveAppSvc;
-  viewMode: 'grid' | 'list';
-  onSelectApp: (app: AppItem) => void;
-  onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
+  readonly appSvc: LiveAppSvc;
+  readonly viewMode: 'grid' | 'list';
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly onFlagClick: (title: string, ft: FlagType, recordSysId: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -163,11 +163,11 @@ export default function RelatedApplicationsPanel({
   onAccessResolved,
   refreshKey = 0,
 }: {
-  ciSysId: string;
-  hierarchyMode: boolean;
-  onSelectApp?: (app: AppItem) => void;
-  onAccessResolved?: (access: TableAccess) => void;
-  refreshKey?: number;
+  readonly ciSysId: string;
+  readonly hierarchyMode: boolean;
+  readonly onSelectApp?: (app: AppItem) => void;
+  readonly onAccessResolved?: (access: TableAccess) => void;
+  readonly refreshKey?: number;
 }) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const { ref: narrowRef, narrow } = useNarrowContainer();

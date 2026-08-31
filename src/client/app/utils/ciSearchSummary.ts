@@ -234,17 +234,23 @@ export function buildSidebarEncodedQuery(
   return joinOrEncodedQueries(buildSidebarQueryBranches(context, flagType));
 }
 
-export function buildSummaryContext(
-  activeTab: CISearchTab,
-  applied: { keyword: string; appFilter: AppFilterSelection | null },
-  snQueriesByTab: Record<CISearchInventoryTab, string>,
-  columnFilterPartByTab: Record<CISearchInventoryTab, string>,
-  appRelatedIdsByTab: AppRelatedIdsByTab | null,
-  tabCounts: Record<CISearchInventoryTab, number>,
-  allTotalCount: number,
-  ciFilter: string,
-  searchFields: string[],
-): CiSearchSummaryContext {
+export interface BuildSummaryInput {
+  activeTab: CISearchTab;
+  applied: { keyword: string; appFilter: AppFilterSelection | null };
+  snQueriesByTab: Record<CISearchInventoryTab, string>;
+  columnFilterPartByTab: Record<CISearchInventoryTab, string>;
+  appRelatedIdsByTab: AppRelatedIdsByTab | null;
+  tabCounts: Record<CISearchInventoryTab, number>;
+  allTotalCount: number;
+  ciFilter: string;
+  searchFields: string[];
+}
+
+export function buildSummaryContext(input: BuildSummaryInput): CiSearchSummaryContext {
+  const {
+    activeTab, applied, snQueriesByTab, columnFilterPartByTab,
+    appRelatedIdsByTab, tabCounts, allTotalCount, ciFilter, searchFields,
+  } = input;
   const appFilterActive = !!applied.appFilter;
   const tabs: CISearchInventoryTab[] = activeTab === 'all'
     ? CI_INVENTORY_TABS.map(t => t.tab)

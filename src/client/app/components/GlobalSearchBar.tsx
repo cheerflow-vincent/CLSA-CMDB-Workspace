@@ -31,7 +31,7 @@ const DOT_WALK: Record<string, string> = {
 };
 
 // Fields always fetched regardless of result.field property
-const BASE_API_FIELDS = ['sys_id', 'name', 'sys_class_name', 'environment', 'install_status'];
+const BASE_API_FIELDS = new Set(['sys_id', 'name', 'sys_class_name', 'environment', 'install_status']);
 
 // ── ServiceNow field type returned when sysparm_display_value=all ─────────────
 // Choice/reference/glide-class fields become objects; plain strings stay strings.
@@ -83,7 +83,7 @@ type ApiCI = Record<string, SnField> & {
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 interface GlobalSearchBarProps {
-  onSelectCI: (ci: CIItem) => void;
+  readonly onSelectCI: (ci: CIItem) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ function parseConfig(props: Record<string, string>): SearchConfig {
   // Build the set of API fields: base + dot-walked references from result.field
   const apiFields = [...BASE_API_FIELDS];
   for (const f of resultFields) {
-    if (BASE_API_FIELDS.includes(f)) continue;
+    if (BASE_API_FIELDS.has(f)) continue;
     const api = DOT_WALK[f] ?? f;
     if (!apiFields.includes(api)) apiFields.push(api);
   }
@@ -146,51 +146,65 @@ function parseConfig(props: Record<string, string>): SearchConfig {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function Highlight({ text, query }: { text: string; query: string }) {
+type Segment = { text: string; highlight: boolean };
+
+function splitByHighlight(text: string, token: string): Segment[] {
+  const lower = token.toLowerCase();
+  const result: Segment[] = [];
+  let rest = text;
+  let restLower = rest.toLowerCase();
+  while (rest.length) {
+    const idx = restLower.indexOf(lower);
+    if (idx === -1) {
+      result.push({ text: rest, highlight: false });
+      break;
+    }
+    if (idx > 0) result.push({ text: rest.slice(0, idx), highlight: false });
+    result.push({ text: rest.slice(idx, idx + token.length), highlight: true });
+    rest = rest.slice(idx + token.length);
+    restLower = rest.toLowerCase();
+  }
+  return result;
+}
+
+function Highlight({ text, query }: { readonly text: string; readonly query: string }) {
   if (!query || !text) return <>{text}</>;
   const tokens = tokenizeSearchTerms(query);
   if (!tokens.length) return <>{text}</>;
 
-  type Segment = { text: string; highlight: boolean };
   let segments: Segment[] = [{ text, highlight: false }];
 
   for (const token of tokens) {
-    const lower = token.toLowerCase();
     const next: Segment[] = [];
     for (const seg of segments) {
       if (seg.highlight) {
         next.push(seg);
         continue;
       }
-      let rest = seg.text;
-      let restLower = rest.toLowerCase();
-      while (rest.length) {
-        const idx = restLower.indexOf(lower);
-        if (idx === -1) {
-          next.push({ text: rest, highlight: false });
-          break;
-        }
-        if (idx > 0) next.push({ text: rest.slice(0, idx), highlight: false });
-        next.push({ text: rest.slice(idx, idx + token.length), highlight: true });
-        rest = rest.slice(idx + token.length);
-        restLower = rest.toLowerCase();
-      }
+      next.push(...splitByHighlight(seg.text, token));
     }
     segments = next;
   }
 
+  let offset = 0;
+  const keyed = segments.map(seg => {
+    const key = `${offset}:${seg.text}`;
+    offset += seg.text.length;
+    return { seg, key };
+  });
+
   return (
     <>
-      {segments.map((seg, i) => seg.highlight ? (
-        <mark key={i} className="bg-yellow-100 text-yellow-800 rounded px-0.5">{seg.text}</mark>
+      {keyed.map(({ seg, key }) => seg.highlight ? (
+        <mark key={key} className="bg-yellow-100 text-yellow-800 rounded px-0.5">{seg.text}</mark>
       ) : (
-        <span key={i}>{seg.text}</span>
+        <span key={key}>{seg.text}</span>
       ))}
     </>
   );
 }
 
-function EnvBadge({ env }: { env: SnField }) {
+function EnvBadge({ env }: { readonly env: SnField }) {
   const envStr = dv(env);
   if (!envStr) return null;
   const isProd = /prod/i.test(envStr);
@@ -205,32 +219,36 @@ function EnvBadge({ env }: { env: SnField }) {
   );
 }
 
-function StatusDot({ value }: { value: SnField }) {
+function StatusDot({ value }: { readonly value: SnField }) {
   const s = INSTALL_STATUS[rv(value)];
   if (!s) return null;
   return <span className={`typo-badge ${s.color}`}>{s.label}</span>;
 }
 
-function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
-  const items: React.ReactNode[] = [];
+function KeyInfo({ r, cfg }: { readonly r: ApiCI; readonly cfg: SearchConfig }) {
+  const items: { key: string; node: React.ReactNode }[] = [];
 
   for (const f of cfg.resultFields) {
     if (f === 'name') continue; // shown as header
 
     if (f === 'install_status') {
       const s = INSTALL_STATUS[rv(r.install_status)];
-      if (s) items.push(
-        <span key="status" className={`typo-badge ${s.color}`}>{s.label}</span>
-      );
+      if (s) items.push({
+        key: 'status',
+        node: <span className={`typo-badge ${s.color}`}>{s.label}</span>,
+      });
       continue;
     }
 
     if (f === 'sys_class_name') {
-      items.push(
-        <span key="class" className="typo-badge px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-          {formatCmdbTableLabel(dv(r.sys_class_name))}
-        </span>
-      );
+      items.push({
+        key: 'class',
+        node: (
+          <span className="typo-badge px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+            {formatCmdbTableLabel(dv(r.sys_class_name))}
+          </span>
+        ),
+      });
       continue;
     }
 
@@ -241,21 +259,22 @@ function KeyInfo({ r, cfg }: { r: ApiCI; cfg: SearchConfig }) {
     if (!display) continue;
 
     // Human-readable label for the field
-    const label = f === 'managed_by' ? 'Owner'
-                : f === 'assigned_to' ? 'Owner'
-                : f.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    items.push(
-      <span key={f} className="typo-caption text-gray-500">{label}: <span className="text-gray-700">{display}</span></span>
-    );
+    const label = (f === 'managed_by' || f === 'assigned_to')
+      ? 'Owner'
+      : f.replaceAll('_', ' ').replaceAll(/\b\w/g, l => l.toUpperCase());
+    items.push({
+      key: f,
+      node: <span className="typo-caption text-gray-500">{label}: <span className="text-gray-700">{display}</span></span>,
+    });
   }
 
   if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
       {items.map((item, i) => (
-        <span key={i} className="flex items-center gap-1">
+        <span key={item.key} className="flex items-center gap-1">
           {i > 0 && <span className="text-gray-300 select-none">·</span>}
-          {item}
+          {item.node}
         </span>
       ))}
     </div>

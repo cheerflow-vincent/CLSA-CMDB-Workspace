@@ -1,6 +1,6 @@
 /** True when the string looks like a standard ServiceNow CMDB base table name. */
 export function isCmdbTableName(value: string | null | undefined): value is string {
-  return !!value && /^cmdb_ci[\w]*$/.test(value);
+  return !!value && /^cmdb_ci\w*$/.test(value);
 }
 
 /** True for any ServiceNow table name, including custom CI subclasses (e.g. u_cmdb_ci_mariadb). */

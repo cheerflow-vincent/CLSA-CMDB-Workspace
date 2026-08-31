@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Server, Database, Link, Network, Search,
   ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight,
@@ -55,9 +55,9 @@ const DEFAULT_PAGE_SIZE = 10;
 const ALL_CI_TABLE = 'cmdb_ci';
 
 interface CISearchViewProps {
-  onViewDetails: (ci: CIItem) => void;
+  readonly onViewDetails: (ci: CIItem) => void;
   /** Pre-select a CI type card/tab (e.g. from sidebar inventory). */
-  initialTab?: Tab;
+  readonly initialTab?: Tab;
 }
 
 type Tab = 'all' | 'servers' | 'switches' | 'databases' | 'network_links';
@@ -310,6 +310,20 @@ async function fetchTabAll(
 
 type PillCounts = { servers: number | null; switches: number | null; databases: number | null; network_links: number | null };
 type PillAccess = Record<keyof PillCounts, TableAccess>;
+
+async function fetchPillCount(
+  table: string,
+  key: keyof PillCounts,
+  ciFilter: string,
+  setPillCounts: React.Dispatch<React.SetStateAction<PillCounts>>,
+  setPillAccess: React.Dispatch<React.SetStateAction<PillAccess>>,
+): Promise<void> {
+  try {
+    const { totalCount, access } = await queryTableWithAccess<object>({ table, query: ciFilter, limit: 1 });
+    setPillCounts(p => ({ ...p, [key]: access === 'denied' ? null : totalCount }));
+    setPillAccess(p => ({ ...p, [key]: access }));
+  } catch { /* ignore pill count errors */ }
+}
 const EMPTY_COUNTS: PillCounts = { servers: null, switches: null, databases: null, network_links: null };
 const EMPTY_PILL_ACCESS: PillAccess = { servers: 'ok', switches: 'ok', databases: 'ok', network_links: 'ok' };
 
@@ -329,11 +343,11 @@ function ExportButton({
   csvExportLimit,
   onFetchRows,
 }: {
-  columns: ViewField[];
-  disabled: boolean;
-  truncated?: boolean;
-  csvExportLimit: number;
-  onFetchRows: () => Promise<SearchRow[]>;
+  readonly columns: ViewField[];
+  readonly disabled: boolean;
+  readonly truncated?: boolean;
+  readonly csvExportLimit: number;
+  readonly onFetchRows: () => Promise<SearchRow[]>;
 }) {
   const [exporting, setExporting] = useState(false);
 
@@ -347,7 +361,7 @@ function ExportButton({
       const csv = [
         headers.join(','),
         ...rows.map(row =>
-          columns.map(c => `"${(row.values[c.element] || '').replace(/"/g, '""')}"`).join(','),
+          columns.map(c => `"${(row.values[c.element] || '').replaceAll('"', '""')}"`).join(','),
         ),
       ].join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -465,10 +479,10 @@ function SearchResultCard({
   onViewDetails,
   onFlagClick,
 }: {
-  row: SearchRow;
-  columns: ViewField[];
-  onViewDetails: (ci: CIItem) => void;
-  onFlagClick?: (type: FlagType) => void;
+  readonly row: SearchRow;
+  readonly columns: ViewField[];
+  readonly onViewDetails: (ci: CIItem) => void;
+  readonly onFlagClick?: (type: FlagType) => void;
 }) {
   if (!columns.length) return null;
 
@@ -737,7 +751,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         const rawVal = props[PROP_CI_SEARCH_FIELDS] ?? DEFAULT_SEARCH_FIELDS.join(',');
         const fields = rawVal.split(',').map(s => s.trim()).filter(Boolean);
         setSearchFields(fields.length ? fields : DEFAULT_SEARCH_FIELDS);
-        const parsedLimit = parseInt(props[PROP_CSV_EXPORT_LIMIT] ?? '', 10);
+        const parsedLimit = Number.parseInt(props[PROP_CSV_EXPORT_LIMIT] ?? '', 10);
         setCsvExportLimit(Number.isFinite(parsedLimit) && parsedLimit > 0
           ? parsedLimit
           : DEFAULT_CSV_EXPORT_LIMIT);
@@ -783,6 +797,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         setAppRelatedIdsByTab(idsByTab);
       } catch (e) {
         if (!cancelled) {
+          console.error('Failed to load application relationships', e);
           setAppFilterError('Failed to load application relationships. Please try again.');
           setAppRelatedIdsByTab({ ...EMPTY_RELATED });
         }
@@ -803,14 +818,9 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       ['cmdb_ci_db_instance', 'databases'],
       ['cmdb_ci_network_link', 'network_links'],
     ];
-    entries.forEach(([table, key]) =>
-      queryTableWithAccess<object>({ table, query: ciFilter, limit: 1 })
-        .then(({ totalCount, access }) => {
-          setPillCounts(p => ({ ...p, [key]: access === 'denied' ? null : totalCount }));
-          setPillAccess(p => ({ ...p, [key]: access }));
-        })
-        .catch(() => {}),
-    );
+    void Promise.all(entries.map(([table, key]) =>
+      fetchPillCount(table, key, ciFilter, setPillCounts, setPillAccess),
+    ));
   }, [ciFilter]);
 
   // Reset page when query, tab, or active tab column filters change
@@ -937,12 +947,14 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         const { rows: records, access } = await fetchAllScopedCiRows<Record<string, unknown>>(
           cfg.table,
           relatedIds,
-          applied.keyword,
-          ciFilter ?? '',
-          searchFields,
-          apiFieldsForColumns(cols),
-          columnFilterPart,
-          sortByTab[activeTab],
+          {
+            keyword: applied.keyword,
+            ciFilter: ciFilter ?? '',
+            searchFields,
+            fields: apiFieldsForColumns(cols),
+            columnFilterPart,
+            sort: sortByTab[activeTab],
+          },
         );
         if (cancelled) return null;
         if (access === 'denied') {
@@ -1125,11 +1137,11 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
     && Object.values(colFiltersByTab).every(m => !hasAppliedColFilters(m))
     && activeTab === 'all';
 
-  const columns = activeTab === 'all'
-    ? (allColumns.length ? allColumns : ALL_DEFAULT_COLUMNS)
-    : (tabData[activeTab].columns.length
-      ? tabData[activeTab].columns
-      : (V2_TABS.find(t => t.tab === activeTab)?.defaultColumns ?? []));
+  const columns = (() => {
+    if (activeTab === 'all') return allColumns.length ? allColumns : ALL_DEFAULT_COLUMNS;
+    if (tabData[activeTab].columns.length) return tabData[activeTab].columns;
+    return V2_TABS.find(t => t.tab === activeTab)?.defaultColumns ?? [];
+  })();
   const loading = appFilterLoading || (activeTab === 'all' ? allTabData.loading : tabData[activeTab].loading);
   const totalCount = activeTab === 'all'
     ? allTabData.totalCount
@@ -1165,7 +1177,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
   const setColFilter = (element: string, val: string) =>
     setColFiltersByTab(prev => ({
       ...prev,
-      [activeTab]: { ...(prev[activeTab] ?? {}), [element]: val },
+      [activeTab]: { ...prev[activeTab], [element]: val },
     }));
 
   const markTabResultsLoading = () => {
@@ -1196,12 +1208,12 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
 
   const clearColFilter = (element: string) => {
     setColFiltersByTab(prev => {
-      const next = { ...(prev[activeTab] ?? {}) };
+      const next = { ...prev[activeTab] };
       delete next[element];
       return { ...prev, [activeTab]: next };
     });
     setAppliedColFiltersByTab(prev => {
-      const next = { ...(prev[activeTab] ?? {}) };
+      const next = { ...prev[activeTab] };
       delete next[element];
       return { ...prev, [activeTab]: next };
     });
@@ -1231,17 +1243,17 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
 
   const summaryContext = useMemo((): CiSearchSummaryContext | null => {
     if (ciFilter === null) return null;
-    return buildSummaryContext(
+    return buildSummaryContext({
       activeTab,
       applied,
-      summaryQueriesByTab,
+      snQueriesByTab: summaryQueriesByTab,
       columnFilterPartByTab,
       appRelatedIdsByTab,
       tabCounts,
-      allTabData.totalCount,
+      allTotalCount: allTabData.totalCount,
       ciFilter,
       searchFields,
-    );
+    });
   }, [
     activeTab,
     applied,
@@ -1429,10 +1441,11 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {buildPills(pillCounts, pillAccess).map(({ tab, label, count, icon, accent, iconBg }) => {
           const isActive = activeTab === tab;
+          const stateCls = isActive ? `${accent} shadow-sm` : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50';
           return (
             <button key={tab} onClick={() => setActiveTab(tab)}
               type="button"
-              className={`rounded-lg border-2 p-5 transition-all text-left ${isActive ? `${accent} shadow-sm` : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
+              className={`rounded-lg border-2 p-5 transition-all text-left ${stateCls}`}>
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded shrink-0 ${iconBg}`}>{icon}</div>
                 <div>
@@ -1452,8 +1465,9 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
         <div className="flex flex-col xl:flex-row xl:items-end gap-3">
           <div className="flex-1 min-w-0 xl:min-w-[220px]">
-            <label className="block typo-label mb-1.5">Application</label>
+            <label htmlFor="app-filter-input" className="block typo-label mb-1.5">Application</label>
             <AppFamilyInstanceAutocomplete
+              inputId="app-filter-input"
               value={pending.appFilter}
               onChange={v => setPending(p => ({ ...p, appFilter: v }))}
               hierarchyMode={hierarchyMode}
@@ -1464,9 +1478,10 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           </div>
 
           <div className="w-full xl:w-44 shrink-0">
-            <label className="block typo-label mb-1.5">CI Type</label>
+            <label htmlFor="ci-type-select" className="block typo-label mb-1.5">CI Type</label>
             <div className="relative">
               <select
+                id="ci-type-select"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg appearance-none bg-white pr-10 typo-body"
                 value={pending.ciType}
                 onChange={e => setPending(p => ({ ...p, ciType: e.target.value }))}
@@ -1482,10 +1497,11 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           </div>
 
           <div className="flex-[1.5] min-w-0">
-            <label className="block typo-label mb-1.5">Keywords</label>
+            <label htmlFor="ci-keywords" className="block typo-label mb-1.5">Keywords</label>
             <div className="relative">
               <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
+                id="ci-keywords"
                 type="text"
                 placeholder="Search keywords…"
                 className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg typo-body"
@@ -1609,17 +1625,23 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
         {/* Results */}
         {narrow ? (
           <div className="px-6 pb-4 cards-grid-responsive">
-            {loading ? (
-              <div className="col-span-full flex items-center justify-center gap-2 py-12 text-gray-400 typo-body">
-                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                Loading records…
-              </div>
-            ) : displayRows.length === 0 ? (
-              <p className="col-span-full text-center text-gray-400 typo-body py-12">
-                No records found. Try adjusting your filters and click Search.
-              </p>
-            ) : (
-              displayRows.map(row => (
+            {(() => {
+              if (loading) {
+                return (
+                  <div className="col-span-full flex items-center justify-center gap-2 py-12 text-gray-400 typo-body">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                    Loading records…
+                  </div>
+                );
+              }
+              if (displayRows.length === 0) {
+                return (
+                  <p className="col-span-full text-center text-gray-400 typo-body py-12">
+                    No records found. Try adjusting your filters and click Search.
+                  </p>
+                );
+              }
+              return displayRows.map(row => (
                 <SearchResultCard
                   key={row.sysId}
                   row={row}
@@ -1632,8 +1654,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
                     flagType: type as 'incident' | 'change',
                   })}
                 />
-              ))
-            )}
+              ));
+            })()}
           </div>
         ) : (
         <div className="overflow-x-auto">
@@ -1642,9 +1664,8 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               <tr>
                 {columns.map(col => {
                   const isActive = activeSort.field === col.element;
-                  const SortIcon = isActive
-                    ? (activeSort.direction === 'asc' ? ArrowUp : ArrowDown)
-                    : ArrowUpDown;
+                  let SortIcon = ArrowUpDown;
+                  if (isActive) SortIcon = activeSort.direction === 'asc' ? ArrowUp : ArrowDown;
                   return (
                   <th key={col.element} className="px-6 py-3 text-left">
                     <button
@@ -1709,28 +1730,34 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
               )}
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {loading ? (
-                <tr>
-                  <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 typo-body">
-                    <div className="flex items-center justify-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                      Loading records…
-                    </div>
-                  </td>
-                </tr>
-              ) : displayRows.length === 0 ? (
-                <tr>
-                  <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 typo-body">
-                    No records found. Try adjusting your filters and click Search.
-                  </td>
-                </tr>
-              ) : (
-                displayRows.map(row => (
+              {(() => {
+                if (loading) {
+                  return (
+                    <tr>
+                      <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 typo-body">
+                        <div className="flex items-center justify-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                          Loading records…
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                if (displayRows.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={Math.max(columns.length, 1)} className="px-6 py-12 text-center text-gray-400 typo-body">
+                        No records found. Try adjusting your filters and click Search.
+                      </td>
+                    </tr>
+                  );
+                }
+                return displayRows.map(row => (
                   <tr key={row.sysId} className="hover:bg-gray-50">
                     {columns.map((col, colIdx) => renderCell(row, col, colIdx))}
                   </tr>
-                ))
-              )}
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -1779,7 +1806,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
       </div>
 
       {/* Right slide-out panel */}
-      {panel && panel.kind === 'ci' && (
+      {panel?.kind === 'ci' && (
         <FlagDetailPanel
           title={panel.ciName}
           flagType={panel.flagType}
@@ -1787,7 +1814,7 @@ export default function CISearchView({ onViewDetails, initialTab = 'all' }: CISe
           onClose={() => setPanel(null)}
         />
       )}
-      {panel && panel.kind === 'summary' && (
+      {panel?.kind === 'summary' && (
         <FlagDetailPanel
           title={panel.title}
           subtitle={panel.subtitle}

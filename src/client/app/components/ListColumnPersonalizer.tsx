@@ -164,8 +164,7 @@ export default function ListColumnPersonalizer({
       for (let i = indices.length - 1; i >= 0; i--) {
         copy.splice(indices[i], 1);
       }
-      const insertAt = direction === -1 ? targetStart : targetStart;
-      copy.splice(insertAt, 0, ...block);
+      copy.splice(targetStart, 0, ...block);
       return copy;
     });
   }, [selectedSelectedKeys]);

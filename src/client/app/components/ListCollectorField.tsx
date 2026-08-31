@@ -15,12 +15,12 @@ import {
 import EditFieldLabel from './EditFieldLabel';
 
 export interface ListCollectorFieldProps {
-  label: string;
-  required?: boolean;
-  referenceTable: string;
-  value: EditFieldValue;
-  disabled?: boolean;
-  onChange: (value: EditFieldValue) => void;
+  readonly label: string;
+  readonly required?: boolean;
+  readonly referenceTable: string;
+  readonly value: EditFieldValue;
+  readonly disabled?: boolean;
+  readonly onChange: (value: EditFieldValue) => void;
 }
 
 export default function ListCollectorField({

@@ -7,7 +7,11 @@
     "build:css": "tailwindcss -i ./src/client/index.css -o ./src/client/tailwind.css --minify",
     "build": "npm run build:css && npx now-sdk build",
     "deploy": "npm run build && npx now-sdk install",
-    "auth": "npx now-sdk auth --add https://cheerflowtechnologydemo1.service-now.com --type basic"
+    "auth": "npx now-sdk auth --add https://cheerflowtechnologydemo1.service-now.com --type basic",
+    "lint": "eslint \"src/**/*.{js,ts,tsx}\"",
+    "lint:fix": "eslint \"src/**/*.{js,ts,tsx}\" --fix",
+    "sonar-scanner": "JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-23.jre/Contents/Home node_modules/sonar-scanner/bin/sonar-scanner",
+    "sonar": "npm run sonar-scanner -- -D\"sonar.projectKey=temp\" -D\"sonar.sources=.\" -D\"sonar.host.url=http://10.126.39.110:9000\" -D\"sonar.scanner.skipJreProvisioning=true\""
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
@@ -20,12 +24,20 @@
     "rollup": "^4.60.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@servicenow/sdk": "^4.6.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "^18.3.5",
     "@xmldom/xmldom": "^0.9.10",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-unicorn": "^56.0.1",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "globals": "^17.11.0",
+    "sonar-scanner": "^3.1.0",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.68.0"
   }
 }

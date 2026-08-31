@@ -2,12 +2,29 @@ import { ExternalLink } from 'lucide-react';
 import type { ViewField } from '../utils/viewFields';
 import type { RelatedTaskConfig, RelatedTaskRow } from '../utils/relatedTasks';
 
-export function PriorityBadge({ priority }: { priority: string }) {
-  const cls =
-    priority.startsWith('P1') || priority.includes('Critical') ? 'bg-red-100 text-red-700' :
-    priority.startsWith('P2') || priority.includes('High')     ? 'bg-orange-100 text-orange-700' :
-    priority.startsWith('P3') || priority.includes('Medium')   ? 'bg-yellow-100 text-yellow-700' :
-                                                                 'bg-gray-100 text-gray-600';
+function priorityBadgeClass(priority: string): string {
+  if (priority.startsWith('P1') || priority.includes('Critical')) return 'bg-red-100 text-red-700';
+  if (priority.startsWith('P2') || priority.includes('High')) return 'bg-orange-100 text-orange-700';
+  if (priority.startsWith('P3') || priority.includes('Medium')) return 'bg-yellow-100 text-yellow-700';
+  return 'bg-gray-100 text-gray-600';
+}
+
+const STATE_BADGE_CLASS: Record<string, string> = {
+  'In Progress': 'bg-blue-100 text-blue-700',
+  Resolved: 'bg-green-100 text-green-700',
+  New: 'bg-violet-100 text-violet-700',
+  Approved: 'bg-green-100 text-green-700',
+  Scheduled: 'bg-blue-100 text-blue-700',
+  Pending: 'bg-yellow-100 text-yellow-700',
+};
+
+const CHANGE_TYPE_BADGE_CLASS: Record<string, string> = {
+  Emergency: 'bg-red-100 text-red-700',
+  Normal: 'bg-blue-100 text-blue-700',
+};
+
+export function PriorityBadge({ priority }: { readonly priority: string }) {
+  const cls = priorityBadgeClass(priority);
   return (
     <span className={`inline-flex typo-badge font-semibold px-1.5 py-0.5 rounded ${cls}`}>
       {priority}
@@ -15,15 +32,8 @@ export function PriorityBadge({ priority }: { priority: string }) {
   );
 }
 
-export function StateBadge({ state }: { state: string }) {
-  const cls =
-    state === 'In Progress' ? 'bg-blue-100 text-blue-700' :
-    state === 'Resolved'    ? 'bg-green-100 text-green-700' :
-    state === 'New'         ? 'bg-violet-100 text-violet-700' :
-    state === 'Approved'    ? 'bg-green-100 text-green-700' :
-    state === 'Scheduled'   ? 'bg-blue-100 text-blue-700' :
-    state === 'Pending'     ? 'bg-yellow-100 text-yellow-700' :
-                              'bg-gray-100 text-gray-600';
+export function StateBadge({ state }: { readonly state: string }) {
+  const cls = STATE_BADGE_CLASS[state] ?? 'bg-gray-100 text-gray-600';
   return (
     <span className={`inline-flex typo-badge px-1.5 py-0.5 rounded ${cls}`}>
       {state}
@@ -31,11 +41,8 @@ export function StateBadge({ state }: { state: string }) {
   );
 }
 
-export function ChangeTypeBadge({ type }: { type: string }) {
-  const cls =
-    type === 'Emergency' ? 'bg-red-100 text-red-700' :
-    type === 'Normal'    ? 'bg-blue-100 text-blue-700' :
-                           'bg-gray-100 text-gray-600';
+export function ChangeTypeBadge({ type }: { readonly type: string }) {
+  const cls = CHANGE_TYPE_BADGE_CLASS[type] ?? 'bg-gray-100 text-gray-600';
   return (
     <span className={`inline-flex typo-badge px-1.5 py-0.5 rounded ${cls}`}>
       {type}
@@ -56,8 +63,8 @@ function TaskCardBodyField({
   col,
   row,
 }: {
-  col: ViewField;
-  row: RelatedTaskRow;
+  readonly col: ViewField;
+  readonly row: RelatedTaskRow;
 }) {
   if (!(col.element in row.values)) return null;
   const value = val(row, col.element);
@@ -109,9 +116,9 @@ export function TaskCard({
   config,
   columns,
 }: {
-  row: RelatedTaskRow;
-  config: RelatedTaskConfig;
-  columns: ViewField[];
+  readonly row: RelatedTaskRow;
+  readonly config: RelatedTaskConfig;
+  readonly columns: ViewField[];
 }) {
   if (!columns.length) return null;
 

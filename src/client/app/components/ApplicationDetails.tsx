@@ -33,10 +33,53 @@ import { queryTableWithAccess, fetchFieldAccess, type TableAccess } from '../../
 import { filterFieldsByReadableKeys, isAccessDenied, canEditRecord } from '../utils/acl';
 import { pollChangeUntilState } from '../utils/pollRelationshipChange';
 import { fetchServiceType } from '../utils/appHomeLoader';
-import { raw } from '../utils/viewFields';
 
 const OVERVIEW_VIEW = 'CLSA CMDB Workspace Overview';
 const OVERVIEW_DEFAULT_LIMIT = 10;
+
+function useOverviewLoader(
+  sysId: string | undefined,
+  table: string,
+  refreshKey: number,
+) {
+  const [overviewFields, setOverviewFields] = useState<ViewField[]>([]);
+  const [overviewValues, setOverviewValues] = useState<Record<string, string>>({});
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewAccess, setOverviewAccess] = useState<TableAccess>('ok');
+  const [canWriteRecord, setCanWriteRecord] = useState(false);
+
+  useEffect(() => {
+    if (!sysId) return;
+    setOverviewLoading(true);
+    setOverviewFields([]);
+    setOverviewValues({});
+    setCanWriteRecord(false);
+    loadOverviewPanel(sysId, table)
+      .then(({ fields, values, access }) => {
+        setOverviewAccess(access);
+        setOverviewFields(fields);
+        setOverviewValues(values);
+      })
+      .catch(() => {})
+      .finally(() => setOverviewLoading(false));
+    fetchFieldAccess(table, sysId, ['name'])
+      .then(access => setCanWriteRecord(canEditRecord(access)))
+      .catch(() => setCanWriteRecord(false));
+  }, [sysId, table, refreshKey]);
+
+  return { overviewFields, overviewValues, overviewLoading, overviewAccess, canWriteRecord };
+}
+
+function useInfraFilters() {
+  const [infraFilters, setInfraFilters] = useState<InfraDiagramFilters>({
+    server: true, netgear: true, network_link: true, database: true,
+  });
+  const toggleInfraFilter = useCallback(
+    (key: InfraCIType) => setInfraFilters(f => ({ ...f, [key]: !f[key] })),
+    [],
+  );
+  return { infraFilters, setInfraFilters, toggleInfraFilter };
+}
 
 async function loadOverviewPanel(
   sysId: string,
@@ -68,11 +111,11 @@ async function loadOverviewPanel(
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ApplicationDetailsProps {
-  onBack: () => void;
-  onSelectApp: (app: AppItem) => void;
-  onViewCI?: (ci: CIItem) => void;
-  selectedApp?: AppItem | null;
-  hierarchyMode?: boolean;
+  readonly onBack: () => void;
+  readonly onSelectApp: (app: AppItem) => void;
+  readonly onViewCI?: (ci: CIItem) => void;
+  readonly selectedApp?: AppItem | null;
+  readonly hierarchyMode?: boolean;
 }
 
 type ViewMode = 'map' | 'table';
@@ -103,7 +146,119 @@ function visibleRelationshipTabs(kind: AppRecordKind): RelationshipTab[] {
   return ['family', 'infra'];
 }
 
+function relationshipTabTitle(tab: RelationshipTab): string {
+  if (tab === 'app') return 'Upstream / Downstream Relationships';
+  if (tab === 'family') return 'App Family';
+  return 'Infrastructure Relationships';
+}
+
+function hierarchyLevelColor(level: 'business' | 'service' | 'instance'): string {
+  if (level === 'business') return '#4F46E5';
+  if (level === 'service') return '#3B82F6';
+  return '#16A34A';
+}
+
 type ExpandKey = 'servers' | 'databases' | 'netgear' | 'network_links' | 'incidents' | 'changes' | 'relChanges';
+
+// ── Filter bar sub-component ──────────────────────────────────────────────────
+interface RelFilterBarProps {
+  readonly relationshipTab: 'app' | 'family' | 'infra';
+  readonly filters: DiagramFilters;
+  readonly toggleFilter: (key: keyof DiagramFilters) => void;
+  readonly viewMode: ViewMode;
+  readonly hierarchyMode: boolean;
+  readonly infraFilters: InfraDiagramFilters;
+  readonly toggleInfraFilter: (key: InfraCIType) => void;
+}
+
+function AppFilterBar({ filters, toggleFilter, viewMode }: { readonly filters: DiagramFilters; readonly toggleFilter: (k: keyof DiagramFilters) => void; readonly viewMode: ViewMode }) {
+  return (
+    <>
+      <span className="typo-label">Direction</span>
+      <button onClick={() => toggleFilter('upstream')} className={`typo-chip ${filters.upstream ? 'bg-orange-50 border-orange-300 text-orange-800' : 'bg-white border-gray-200 text-gray-400'}`}>
+        <svg width="18" height="8" viewBox="0 0 22 10"><line x1="0" y1="5" x2="16" y2="5" stroke={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'} strokeWidth="2"/><polygon points="16,2 22,5 16,8" fill={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'}/></svg>
+        Upstream
+      </button>
+      <button onClick={() => toggleFilter('downstream')} className={`typo-chip ${filters.downstream ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-gray-200 text-gray-400'}`}>
+        <svg width="18" height="8" viewBox="0 0 22 10"><line x1="0" y1="5" x2="16" y2="5" stroke={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'} strokeWidth="2"/><polygon points="16,2 22,5 16,8" fill={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'}/></svg>
+        Downstream
+      </button>
+      <button onClick={() => toggleFilter('bidirectional')} className={`typo-chip ${filters.bidirectional ? 'bg-violet-50 border-violet-300 text-violet-800' : 'bg-white border-gray-200 text-gray-400'}`}>
+        <svg width="22" height="8" viewBox="0 0 26 10"><polygon points="0,5 6,2 6,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/><line x1="6" y1="5" x2="20" y2="5" stroke={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'} strokeWidth="2"/><polygon points="20,2 26,5 20,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/></svg>
+        Bi-directional
+      </button>
+      {viewMode === 'map' && (
+        <>
+          <div className="h-5 w-px bg-gray-200 mx-1" />
+          <span className="typo-label">Legend</span>
+          <span className="typo-chip border-gray-200 bg-white text-gray-600">
+            <svg width="22" height="8" viewBox="0 0 26 10" aria-hidden><line x1="0" y1="5" x2="26" y2="5" stroke="#6B7280" strokeWidth="2" strokeDasharray={PENDING_EDGE_DASH}/></svg>
+            Pending approval
+          </span>
+        </>
+      )}
+      <div className="h-5 w-px bg-gray-200 mx-1" />
+      <span className="typo-label">Services</span>
+      {([
+        { key: 'platform'       as const, label: 'Platform',       svc: SVC_STYLE.platform,       active: filters.platform,       activeCls: 'border-blue-300 text-blue-800'  },
+        { key: 'infrastructure' as const, label: 'Infrastructure', svc: SVC_STYLE.infrastructure, active: filters.infrastructure, activeCls: 'border-slate-300 text-slate-700' },
+        { key: 'business'       as const, label: 'Business',       svc: SVC_STYLE.business,       active: filters.business,       activeCls: 'border-green-300 text-green-800' },
+      ]).map(({ key, label, svc, active, activeCls }) => (
+        <button key={key} onClick={() => toggleFilter(key)} className={`typo-chip ${active ? activeCls : 'bg-white border-gray-200 text-gray-400'}`} style={active ? { backgroundColor: svc.bg } : {}}>
+          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: active ? svc.border : '#E5E7EB' }} />
+          {label}
+        </button>
+      ))}
+    </>
+  );
+}
+
+function FamilyLegendBar({ hierarchyMode }: { readonly hierarchyMode: boolean }) {
+  const levels = hierarchyMode
+    ? [{ level: 'business' as const, label: 'Business App', color: '#4F46E5' }, { level: 'service' as const, label: 'Service', color: '#3B82F6' }, { level: 'instance' as const, label: 'Instance', color: '#16A34A' }]
+    : [{ level: 'business' as const, label: 'App Family', color: '#4F46E5' }, { level: 'instance' as const, label: 'Instance', color: '#16A34A' }];
+  return (
+    <>
+      <span className="typo-label">Legend</span>
+      {levels.map(({ level, label, color }) => (
+        <span key={level} className="typo-chip border-gray-200 bg-white text-gray-600">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: color }} />
+          {label}
+        </span>
+      ))}
+      <span className="typo-chip border-amber-200 bg-amber-50 text-amber-800">
+        <span className="inline-block w-2.5 h-2.5 rounded-sm border border-amber-400 bg-amber-100" />
+        {' '}Current record
+      </span>
+    </>
+  );
+}
+
+function InfraFilterBar({ infraFilters, toggleInfraFilter }: { readonly infraFilters: InfraDiagramFilters; readonly toggleInfraFilter: (k: InfraCIType) => void }) {
+  return (
+    <>
+      <span className="typo-label">CI Type</span>
+      {(Object.keys(INFRA_CI_STYLE) as InfraCIType[]).map(ciType => {
+        const style = INFRA_CI_STYLE[ciType];
+        const active = infraFilters[ciType];
+        return (
+          <button key={ciType} type="button" onClick={() => toggleInfraFilter(ciType)}
+            className={`typo-chip ${active ? 'text-gray-800' : 'bg-white border-gray-200 text-gray-400'}`}
+            style={active ? { backgroundColor: style.bg, borderColor: style.border } : {}}>
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: active ? style.border : '#E5E7EB' }} />
+            {style.label}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function RelFilterBar({ relationshipTab, filters, toggleFilter, viewMode, hierarchyMode, infraFilters, toggleInfraFilter }: RelFilterBarProps) {
+  if (relationshipTab === 'app') return <AppFilterBar filters={filters} toggleFilter={toggleFilter} viewMode={viewMode} />;
+  if (relationshipTab === 'family') return <FamilyLegendBar hierarchyMode={hierarchyMode} />;
+  return <InfraFilterBar infraFilters={infraFilters} toggleInfraFilter={toggleInfraFilter} />;
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, selectedApp, hierarchyMode = true }: ApplicationDetailsProps) {
@@ -118,7 +273,6 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
   const [relRefreshKey, setRelRefreshKey] = useState(0);
   const [diagramRefreshKey, setDiagramRefreshKey] = useState(0);
   const [processingChangeIds, setProcessingChangeIds] = useState<string[]>([]);
-  const [canWriteRecord, setCanWriteRecord] = useState(false);
   const [pageRefreshKey, setPageRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [nodeSearch, setNodeSearch] = useState('');
@@ -126,19 +280,10 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     upstream: true, downstream: true, bidirectional: true,
     platform: true, infrastructure: true, business: true,
   });
-  const [infraFilters, setInfraFilters] = useState<InfraDiagramFilters>({
-    server: true, netgear: true, network_link: true, database: true,
-  });
   const [expanded, setExpanded] = useState<Record<ExpandKey, boolean>>({
     servers: false, databases: false, netgear: false, network_links: false,
     incidents: false, changes: false, relChanges: false,
   });
-
-  // ── Overview panel: dynamic view fields ──────────────────────────────────
-  const [overviewFields, setOverviewFields] = useState<ViewField[]>([]);
-  const [overviewValues, setOverviewValues] = useState<Record<string, string>>({});
-  const [overviewLoading, setOverviewLoading] = useState(false);
-  const [overviewAccess, setOverviewAccess] = useState<TableAccess>('ok');
 
   const recordKind = useMemo(
     () => resolveAppRecordKind(
@@ -172,29 +317,13 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     }
   }, [relationshipTabs, relationshipTab]);
 
-  useEffect(() => {
-    const sysId = selectedApp?.sysId;
-    const table  = selectedApp?.table ?? 'cmdb_ci_service';
-    if (!sysId) return;
+  const { overviewFields, overviewValues, overviewLoading, overviewAccess, canWriteRecord } = useOverviewLoader(
+    selectedApp?.sysId,
+    selectedApp?.table ?? 'cmdb_ci_service',
+    pageRefreshKey,
+  );
 
-    setOverviewLoading(true);
-    setOverviewFields([]);
-    setOverviewValues({});
-    setCanWriteRecord(false);
-
-    loadOverviewPanel(sysId, table)
-      .then(({ fields, values, access }) => {
-        setOverviewAccess(access);
-        setOverviewFields(fields);
-        setOverviewValues(values);
-      })
-      .catch(() => {})
-      .finally(() => setOverviewLoading(false));
-
-    fetchFieldAccess(table, sysId, ['name'])
-      .then(access => setCanWriteRecord(canEditRecord(access)))
-      .catch(() => setCanWriteRecord(false));
-  }, [selectedApp?.sysId, selectedApp?.table, pageRefreshKey]);
+  const { infraFilters, toggleInfraFilter } = useInfraFilters();
 
   const refreshPage = useCallback(() => {
     setRefreshing(true);
@@ -206,9 +335,6 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
 
   const toggleFilter = (key: keyof DiagramFilters) =>
     setFilters(f => ({ ...f, [key]: !f[key] }));
-
-  const toggleInfraFilter = (key: InfraCIType) =>
-    setInfraFilters(f => ({ ...f, [key]: !f[key] }));
 
   const openEditRelationships = () => {
     if (!selectedApp?.sysId) return;
@@ -323,11 +449,7 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   )}
                 </div>
                 <h3 className="typo-section-title text-gray-900 truncate">
-                  {relationshipTab === 'app'
-                    ? 'Upstream / Downstream Relationships'
-                    : relationshipTab === 'family'
-                      ? 'App Family'
-                      : 'Infrastructure Relationships'}
+                  {relationshipTabTitle(relationshipTab)}
                 </h3>
               </div>
               <div className="relative flex-shrink-0">
@@ -345,152 +467,15 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
             {/* Filters + View Toggle */}
             <div className="flex items-center flex-wrap gap-2">
 
-              {relationshipTab === 'app' ? (
-                <>
-              {/* Direction filters */}
-              <span className="typo-label">Direction</span>
-
-              <button onClick={() => toggleFilter('upstream')}
-                className={`typo-chip ${
-                  filters.upstream ? 'bg-orange-50 border-orange-300 text-orange-800' : 'bg-white border-gray-200 text-gray-400'
-                }`}>
-                <svg width="18" height="8" viewBox="0 0 22 10">
-                  <line x1="0" y1="5" x2="16" y2="5" stroke={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'} strokeWidth="2"/>
-                  <polygon points="16,2 22,5 16,8" fill={filters.upstream ? DIR_COLOR.upstream : '#D1D5DB'}/>
-                </svg>
-                Upstream
-              </button>
-
-              <button onClick={() => toggleFilter('downstream')}
-                className={`typo-chip ${
-                  filters.downstream ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white border-gray-200 text-gray-400'
-                }`}>
-                <svg width="18" height="8" viewBox="0 0 22 10">
-                  <line x1="0" y1="5" x2="16" y2="5" stroke={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'} strokeWidth="2"/>
-                  <polygon points="16,2 22,5 16,8" fill={filters.downstream ? DIR_COLOR.downstream : '#D1D5DB'}/>
-                </svg>
-                Downstream
-              </button>
-
-              <button onClick={() => toggleFilter('bidirectional')}
-                className={`typo-chip ${
-                  filters.bidirectional ? 'bg-violet-50 border-violet-300 text-violet-800' : 'bg-white border-gray-200 text-gray-400'
-                }`}>
-                <svg width="22" height="8" viewBox="0 0 26 10">
-                  <polygon points="0,5 6,2 6,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
-                  <line x1="6" y1="5" x2="20" y2="5" stroke={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'} strokeWidth="2"/>
-                  <polygon points="20,2 26,5 20,8" fill={filters.bidirectional ? DIR_COLOR.bidirectional : '#D1D5DB'}/>
-                </svg>
-                Bi-directional
-              </button>
-
-              {viewMode === 'map' && (
-                <>
-                  <div className="h-5 w-px bg-gray-200 mx-1" />
-                  <span className="typo-label">Legend</span>
-                  <span className="typo-chip border-gray-200 bg-white text-gray-600">
-                    <svg width="22" height="8" viewBox="0 0 26 10" aria-hidden>
-                      <line
-                        x1="0" y1="5" x2="26" y2="5"
-                        stroke="#6B7280"
-                        strokeWidth="2"
-                        strokeDasharray={PENDING_EDGE_DASH}
-                      />
-                    </svg>
-                    Pending approval
-                  </span>
-                </>
-              )}
-
-              <div className="h-5 w-px bg-gray-200 mx-1" />
-
-              {/* Service type filters */}
-              <span className="typo-label">Services</span>
-
-              {[
-                { key: 'platform'       as const, label: 'Platform',       svc: SVC_STYLE.platform,       active: filters.platform,       activeCls: 'border-blue-300 text-blue-800'  },
-                { key: 'infrastructure' as const, label: 'Infrastructure', svc: SVC_STYLE.infrastructure, active: filters.infrastructure, activeCls: 'border-slate-300 text-slate-700' },
-                { key: 'business'       as const, label: 'Business',       svc: SVC_STYLE.business,       active: filters.business,       activeCls: 'border-green-300 text-green-800' },
-              ].map(({ key, label, svc, active, activeCls }) => (
-                <button key={key} onClick={() => toggleFilter(key)}
-                  className={`typo-chip ${
-                    active ? activeCls : 'bg-white border-gray-200 text-gray-400'
-                  }`}
-                  style={active ? { backgroundColor: svc.bg } : {}}>
-                  <span className="inline-block w-2.5 h-2.5 rounded-sm"
-                    style={{ backgroundColor: active ? svc.border : '#E5E7EB' }} />
-                  {label}
-                </button>
-              ))}
-
-                </>
-              ) : relationshipTab === 'family' ? (
-                <>
-                  <span className="typo-label">Legend</span>
-                  {hierarchyMode ? (
-                    ([
-                      { level: 'business' as const, label: 'Business App' },
-                      { level: 'service' as const, label: 'Service' },
-                      { level: 'instance' as const, label: 'Instance' },
-                    ]).map(({ level, label }) => (
-                      <span key={level} className="typo-chip border-gray-200 bg-white text-gray-600">
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-sm"
-                          style={{
-                            backgroundColor: level === 'business' ? '#4F46E5'
-                              : level === 'service' ? '#3B82F6' : '#16A34A',
-                          }}
-                        />
-                        {label}
-                      </span>
-                    ))
-                  ) : (
-                    ([
-                      { level: 'business' as const, label: 'App Family' },
-                      { level: 'instance' as const, label: 'Instance' },
-                    ]).map(({ level, label }) => (
-                      <span key={level} className="typo-chip border-gray-200 bg-white text-gray-600">
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-sm"
-                          style={{
-                            backgroundColor: level === 'business' ? '#4F46E5' : '#16A34A',
-                          }}
-                        />
-                        {label}
-                      </span>
-                    ))
-                  )}
-                  <span className="typo-chip border-amber-200 bg-amber-50 text-amber-800">
-                    <span className="inline-block w-2.5 h-2.5 rounded-sm border border-amber-400 bg-amber-100" />
-                    Current record
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="typo-label">CI Type</span>
-                  {(Object.keys(INFRA_CI_STYLE) as InfraCIType[]).map(ciType => {
-                    const style = INFRA_CI_STYLE[ciType];
-                    const active = infraFilters[ciType];
-                    return (
-                      <button
-                        key={ciType}
-                        type="button"
-                        onClick={() => toggleInfraFilter(ciType)}
-                        className={`typo-chip ${
-                          active ? 'text-gray-800' : 'bg-white border-gray-200 text-gray-400'
-                        }`}
-                        style={active ? { backgroundColor: style.bg, borderColor: style.border } : {}}
-                      >
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-sm"
-                          style={{ backgroundColor: active ? style.border : '#E5E7EB' }}
-                        />
-                        {style.label}
-                      </button>
-                    );
-                  })}
-                </>
-              )}
+              <RelFilterBar
+                relationshipTab={relationshipTab}
+                filters={filters}
+                toggleFilter={toggleFilter}
+                viewMode={viewMode}
+                hierarchyMode={hierarchyMode}
+                infraFilters={infraFilters}
+                toggleInfraFilter={toggleInfraFilter}
+              />
 
               {/* View toggle — pushed to the right */}
               <div className="flex items-center gap-2 ml-auto">
@@ -522,70 +507,86 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
           {/* ── Canvas / table — fills all remaining height ── */}
           {viewMode === 'map' ? (
             <div className="flex-1 min-h-0">
-              {relationshipTab === 'app' ? (
-                <RelationshipDiagram
-                  key={diagramRefreshKey}
-                  filters={filters}
-                  nodeSearch={nodeSearch}
-                  selectedApp={selectedApp}
-                  onSelectApp={onSelectApp}
-                  pendingRefreshKey={relRefreshKey}
-                  canEditCenterRecord={canWriteRecord}
-                  onEditRelationships={app => {
-                    setRelationshipEditTarget(app);
-                    setShowEditModal(true);
-                  }}
-                  onEditCiDetails={app => setRecordEditTarget(app)}
-                  onRelationshipMutations={handleRelationshipMutations}
-                />
-              ) : relationshipTab === 'family' ? (
-                <AppHierarchyDiagram
-                  key={`family-${diagramRefreshKey}`}
-                  selectedApp={selectedApp!}
-                  hierarchyMode={hierarchyMode}
-                  serviceType={serviceType}
-                  nodeSearch={nodeSearch}
-                  refreshKey={pageRefreshKey}
-                  onSelectApp={onSelectApp}
-                />
-              ) : (
-                <InfrastructureDiagram
-                  key={`infra-${diagramRefreshKey}`}
-                  filters={infraFilters}
-                  nodeSearch={nodeSearch}
-                  selectedApp={selectedApp}
-                  onViewCI={onViewCI}
-                  refreshKey={pageRefreshKey}
-                  canEditCenterRecord={canWriteRecord}
-                  onEditRelationships={app => {
-                    setRelationshipEditTarget(app);
-                    setShowInfraEditModal(true);
-                  }}
-                  onEditCiDetails={app => setRecordEditTarget(app)}
-                />
-              )}
+              {(() => {
+                if (relationshipTab === 'app') {
+                  return (
+                    <RelationshipDiagram
+                      key={diagramRefreshKey}
+                      filters={filters}
+                      nodeSearch={nodeSearch}
+                      selectedApp={selectedApp}
+                      onSelectApp={onSelectApp}
+                      pendingRefreshKey={relRefreshKey}
+                      canEditCenterRecord={canWriteRecord}
+                      onEditRelationships={app => {
+                        setRelationshipEditTarget(app);
+                        setShowEditModal(true);
+                      }}
+                      onEditCiDetails={app => setRecordEditTarget(app)}
+                      onRelationshipMutations={handleRelationshipMutations}
+                    />
+                  );
+                }
+                if (relationshipTab === 'family') {
+                  return (
+                    <AppHierarchyDiagram
+                      key={`family-${diagramRefreshKey}`}
+                      selectedApp={selectedApp!}
+                      hierarchyMode={hierarchyMode}
+                      serviceType={serviceType}
+                      nodeSearch={nodeSearch}
+                      refreshKey={pageRefreshKey}
+                      onSelectApp={onSelectApp}
+                    />
+                  );
+                }
+                return (
+                  <InfrastructureDiagram
+                    key={`infra-${diagramRefreshKey}`}
+                    filters={infraFilters}
+                    nodeSearch={nodeSearch}
+                    selectedApp={selectedApp}
+                    onViewCI={onViewCI}
+                    refreshKey={pageRefreshKey}
+                    canEditCenterRecord={canWriteRecord}
+                    onEditRelationships={app => {
+                      setRelationshipEditTarget(app);
+                      setShowInfraEditModal(true);
+                    }}
+                    onEditCiDetails={app => setRecordEditTarget(app)}
+                  />
+                );
+              })()}
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-5">
-              {relationshipTab === 'app' ? (
-                <RelationshipTable
-                  selectedApp={selectedApp}
-                  nodeSearch={nodeSearch}
-                  filters={filters}
-                  onSelectApp={onSelectApp}
-                  refreshKey={pageRefreshKey}
-                />
-              ) : relationshipTab === 'family' ? (
-                <p className="typo-body text-gray-500 italic">
-                  Table view is not available for App Family. Switch to Map view to explore the hierarchy.
-                </p>
-              ) : (
-                <InfrastructureRelationshipTable
-                  recordSysId={selectedApp?.sysId}
-                  refreshKey={pageRefreshKey}
-                  onViewCI={onViewCI}
-                />
-              )}
+              {(() => {
+                if (relationshipTab === 'app') {
+                  return (
+                    <RelationshipTable
+                      selectedApp={selectedApp}
+                      nodeSearch={nodeSearch}
+                      filters={filters}
+                      onSelectApp={onSelectApp}
+                      refreshKey={pageRefreshKey}
+                    />
+                  );
+                }
+                if (relationshipTab === 'family') {
+                  return (
+                    <p className="typo-body text-gray-500 italic">
+                      Table view is not available for App Family. Switch to Map view to explore the hierarchy.
+                    </p>
+                  );
+                }
+                return (
+                  <InfrastructureRelationshipTable
+                    recordSysId={selectedApp?.sysId}
+                    refreshKey={pageRefreshKey}
+                    onViewCI={onViewCI}
+                  />
+                );
+              })()}
             </div>
           )}
         </div>
@@ -612,24 +613,30 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                   {!isAccessDenied(overviewAccess) && (
                   <section>
                     <p className="typo-label mb-2">Overview</p>
-                    {overviewLoading ? (
-                      <div className="flex items-center justify-center py-6 text-gray-400 gap-2 typo-caption">
-                        <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-                      </div>
-                    ) : overviewFields.length === 0 ? (
-                      <p className="typo-caption italic px-1">No overview fields configured.</p>
-                    ) : (
-                      <div className="detail-sidebar-fields bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
-                        {overviewFields.map(({ element, label }) => (
-                          <div key={element} className="rf-field-row rf-field-row--inline px-3 py-2 mb-0">
-                            <span className="rf-field-row__label">{label}</span>
-                            <span className="rf-field-row__value font-medium text-gray-900">
-                              {overviewValues[element] || '—'}
-                            </span>
+                    {(() => {
+                      if (overviewLoading) {
+                        return (
+                          <div className="flex items-center justify-center py-6 text-gray-400 gap-2 typo-caption">
+                            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        );
+                      }
+                      if (overviewFields.length === 0) {
+                        return <p className="typo-caption italic px-1">No overview fields configured.</p>;
+                      }
+                      return (
+                        <div className="detail-sidebar-fields bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+                          {overviewFields.map(({ element, label }) => (
+                            <div key={element} className="rf-field-row rf-field-row--inline px-3 py-2 mb-0">
+                              <span className="rf-field-row__label">{label}</span>
+                              <span className="rf-field-row__value font-medium text-gray-900">
+                                {overviewValues[element] || '—'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </section>
                   )}
 
@@ -721,7 +728,6 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
                     <p className="typo-label mb-2">Relationships</p>
                     <RelationshipChangesList
                       appSysId={selectedApp?.sysId}
-                      appName={selectedApp?.name}
                       isOpen={expanded.relChanges}
                       onToggle={() => toggleExpand('relChanges')}
                       refreshKey={relRefreshKey}

@@ -47,7 +47,7 @@ export function instanceToAppItem(inst: LiveInstance, appName: string): AppItem 
 }
 
 /** Label/value row — stacks vertically in narrow cards, horizontal when card is wide. */
-export function InstanceFieldRow({ label, value }: { label: string; value: string | undefined }) {
+export function InstanceFieldRow({ label, value }: { readonly label: string; readonly value: string | undefined }) {
   if (!value) return null;
   return (
     <div className="rf-field-row rf-field-row--inline">
@@ -63,10 +63,10 @@ export function LiveInstanceCard({
   onViewDetails,
   onFlagClick,
 }: {
-  inst: LiveInstance;
-  svcName: string;
-  onViewDetails: () => void;
-  onFlagClick: (ft: FlagType) => void;
+  readonly inst: LiveInstance;
+  readonly svcName: string;
+  readonly onViewDetails: () => void;
+  readonly onFlagClick: (ft: FlagType) => void;
 }) {
   const badge = opStatusBadge(inst.operational_status);
   const topCls = envAccent[inst.environment] ?? 'border-t-gray-300';
@@ -123,23 +123,26 @@ export function LiveInstanceCard({
   );
 }
 
+function instanceEnvBarClass(environment: string | undefined): string {
+  if (environment === 'Production') return 'bg-green-500';
+  if (environment?.includes('UAT')) return 'bg-amber-400';
+  return 'bg-blue-400';
+}
+
 export function LiveInstanceRow({
   inst,
   onViewDetails,
   onFlagClick,
 }: {
-  inst: LiveInstance;
-  onViewDetails: () => void;
-  onFlagClick: (ft: FlagType) => void;
+  readonly inst: LiveInstance;
+  readonly onViewDetails: () => void;
+  readonly onFlagClick: (ft: FlagType) => void;
 }) {
   const badge = opStatusBadge(inst.operational_status);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 hover:shadow-sm transition-all px-5 py-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-5">
-      <div className={`w-1 h-12 rounded-full shrink-0 self-stretch sm:self-auto ${
-        inst.environment === 'Production' ? 'bg-green-500' :
-        inst.environment?.includes('UAT') ? 'bg-amber-400' : 'bg-blue-400'
-      }`} />
+      <div className={`w-1 h-12 rounded-full shrink-0 self-stretch sm:self-auto ${instanceEnvBarClass(inst.environment)}`} />
       <div className="flex-1 min-w-0">
         <p className="typo-panel-title break-words mb-2">{inst.name}</p>
         <div className="flex flex-wrap gap-x-6 gap-y-2">
