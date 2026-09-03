@@ -17,6 +17,8 @@ ApplicationHomeHandler.prototype = {
   APP_SCOPE: 'x_citi4_clsa_cmd_0',
   FILTER_CONFIG_PROP_2: 'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.2',
   FILTER_CONFIG_PROP_3: 'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.3',
+  SERVICE_TO_INSTANCE_REL_TYPES_PROP: 'x_citi4_clsa_cmd_0.service.to.instance.relationship.types',
+  DEFAULT_SERVICE_TO_INSTANCE_REL_TYPE: 'Contains::Contained by',
 
   TIER_FALLBACK: [
     { label: 'Tier 0', value: '0' },
@@ -261,7 +263,7 @@ ApplicationHomeHandler.prototype = {
     const parts = [
       twoLevel
         ? 'type.name=Connects to::Connected by'
-        : 'type.name=Contains::Contained by',
+        : this.getServiceToInstanceTypeQuery(),
     ];
     const child = 'child.';
     const childRef = twoLevel ? 'child.ref_cmdb_ci_service.' : 'child.ref_cmdb_ci_service_auto.';
@@ -280,6 +282,51 @@ ApplicationHomeHandler.prototype = {
     }
 
     return parts.join('^');
+  },
+
+  getRelTypeSysIdByName: function (relTypeName) {
+    if (!relTypeName) return '';
+    const gr = new GlideRecord('cmdb_rel_type');
+    gr.addQuery('name', relTypeName);
+    gr.setLimit(1);
+    gr.query();
+    if (gr.next()) return String(gr.getUniqueValue());
+    return '';
+  },
+
+  getServiceToInstanceTypeSysIds: function () {
+    const raw = String(gs.getProperty(this.SERVICE_TO_INSTANCE_REL_TYPES_PROP, '') || '').trim();
+    const sysIds = raw
+      ? raw.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return !!s; })
+      : [];
+
+    if (!sysIds.length) {
+      const fallbackId = this.getRelTypeSysIdByName(this.DEFAULT_SERVICE_TO_INSTANCE_REL_TYPE);
+      return fallbackId ? [fallbackId] : [];
+    }
+
+    const typeGr = new GlideRecord('cmdb_rel_type');
+    typeGr.addQuery('sys_id', 'IN', sysIds.join(','));
+    typeGr.query();
+    const byId = {};
+    while (typeGr.next()) {
+      byId[String(typeGr.getUniqueValue())] = true;
+    }
+
+    const ordered = [];
+    for (const sysId of sysIds) {
+      if (byId[sysId]) ordered.push(sysId);
+    }
+    if (ordered.length) return ordered;
+
+    const fallbackId = this.getRelTypeSysIdByName(this.DEFAULT_SERVICE_TO_INSTANCE_REL_TYPE);
+    return fallbackId ? [fallbackId] : [];
+  },
+
+  getServiceToInstanceTypeQuery: function () {
+    const sysIds = this.getServiceToInstanceTypeSysIds();
+    if (!sysIds.length) return 'sys_id=-1';
+    return 'type.sys_idIN' + sysIds.join(',');
   },
 
   relCiRow: function (gr) {
@@ -976,7 +1023,7 @@ ApplicationHomeHandler.prototype = {
       this.queryRelCiInChunks(
         'parent.sys_id',
         serviceIds,
-        'type.name=Contains::Contained by',
+        this.getServiceToInstanceTypeQuery(),
         function (row) { containsRows.push(row); },
         'mapping_3level_contains'
       );

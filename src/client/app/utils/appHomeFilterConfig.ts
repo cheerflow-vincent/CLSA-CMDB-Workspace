@@ -1,4 +1,5 @@
 import type { FilterOptionDto } from '../../api/servicenow';
+import { DEFAULT_REL_TYPE_NAME } from './serviceToInstanceRelationshipTypes';
 
 export type FilterOrderDirection = 'asc' | 'desc';
 
@@ -108,11 +109,12 @@ export function buildRelCiInstanceEdgeQuery(
   criteria: LiveFilterCriteria,
   filterDefs: ResolvedAppHomeFilter[],
   twoLevel: boolean,
+  serviceToInstanceTypeQuery?: string,
 ): string {
   const parts = [
     twoLevel
       ? 'type.name=Connects to::Connected by'
-      : 'type.name=Contains::Contained by',
+      : (serviceToInstanceTypeQuery ?? `type.name=${DEFAULT_REL_TYPE_NAME}`),
   ];
 
   const child = 'child.';

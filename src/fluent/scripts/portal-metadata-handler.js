@@ -21,6 +21,7 @@ PortalMetadataHandler.prototype = {
     'x_citi4_clsa_cmd_0.global.search.result.field',
     'x_citi4_clsa_cmd_0.app.relationship.depth',
     'x_citi4_clsa_cmd_0.app.to.app.relationship.types',
+    'x_citi4_clsa_cmd_0.service.to.instance.relationship.types',
     'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.2',
     'x_citi4_clsa_cmd_0.app.home.filter.config.hierarchy.3',
     'glide.csv.export.limit',

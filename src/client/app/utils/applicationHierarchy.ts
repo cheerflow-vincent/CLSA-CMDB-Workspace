@@ -3,6 +3,7 @@ import { filterColumnsByProbe } from './acl';
 import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG } from './relatedTasks';
 import { INFRA_REL_CONFIGS } from './relatedCIs';
 import { loadViewFields, str, raw, type ViewField } from './viewFields';
+import { getServiceToInstanceRelationshipTypes } from './serviceToInstanceRelationshipTypes';
 import type { IncidentRecord, ChangeRecord } from '../components/FlagDetailPanel';
 
 const VIEW_TITLE = 'CLSA CMDB Workspace';
@@ -302,9 +303,10 @@ async function buildThreeLevelHierarchy(
 ): Promise<LiveCoreApp[]> {
   if (!instanceIds.length) return [];
 
+  const { typeQuery } = await getServiceToInstanceRelationshipTypes();
   const containsRows = (await chunkedIN<Record<string, unknown>>(
     'cmdb_rel_ci', 'child.sys_id', instanceIds,
-    'type.name=Contains::Contained by',
+    typeQuery,
     ['parent', 'child', 'parent.name', 'parent.short_description'],
     5000,
   )).rows;

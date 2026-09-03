@@ -24,6 +24,7 @@ import {
   hasActiveLiveFilters,
   buildRelCiInstanceEdgeQuery,
 } from './appHomeFilterConfig';
+import { getServiceToInstanceRelationshipTypes } from './serviceToInstanceRelationshipTypes';
 
 export const CHUNK_SIZE = 150;
 /** cmdb_rel_ci IN lists hit URL/query length limits on some instances (use smaller slices). */
@@ -321,7 +322,8 @@ export async function resolveFilteredThreeLevelFromRelCi(
   criteria: LiveFilterCriteria,
   filterDefs: ResolvedAppHomeFilter[],
 ): Promise<FilterResolveResult> {
-  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, filterDefs, false);
+  const { typeQuery } = await getServiceToInstanceRelationshipTypes();
+  const edgeQuery = buildRelCiInstanceEdgeQuery(criteria, filterDefs, false, typeQuery);
 
   const edgeRes = await queryTableWithAccess<{ parent: unknown; child: unknown }>({
     table: 'cmdb_rel_ci',
@@ -892,6 +894,7 @@ async function buildThreeLevelMappingForApps(
   if (!bApps.length) return null;
 
   const bAppIds = bApps.map(a => a.sys_id);
+  const { typeQuery } = await getServiceToInstanceRelationshipTypes();
 
   const consumesRes = await chunkedINParallel<{ parent: unknown; child: unknown }>(
     'cmdb_rel_ci', 'parent.sys_id', bAppIds,
@@ -921,7 +924,7 @@ async function buildThreeLevelMappingForApps(
 
   const containsRes = await chunkedINParallel<{ parent: unknown; child: unknown }>(
     'cmdb_rel_ci', 'parent.sys_id', serviceIds,
-    'type.name=Contains::Contained by', ['parent', 'child'], 5000,
+    typeQuery, ['parent', 'child'], 5000,
   );
   if (containsRes.access === 'denied') return null;
 
@@ -947,9 +950,10 @@ export async function resolveThreeLevelMatchingFamilies(
   const ids = [...filteredInstIds];
   if (!ids.length) return { families: [], access: 'ok' };
 
+  const { typeQuery } = await getServiceToInstanceRelationshipTypes();
   const containsRes = await chunkedINParallel<{ parent: unknown; child: unknown }>(
     'cmdb_rel_ci', 'child.sys_id', ids,
-    'type.name=Contains::Contained by', ['parent', 'child'], 5000,
+    typeQuery, ['parent', 'child'], 5000,
   );
   if (containsRes.access === 'denied') return { families: [], access: 'denied' };
 
@@ -1071,13 +1075,14 @@ async function resolveBusinessAppForService(serviceId: string): Promise<FamilyMe
 }
 
 async function resolveServiceForInstance(instanceId: string): Promise<FamilyMeta | null> {
+  const { typeQuery } = await getServiceToInstanceRelationshipTypes();
   const res = await chunkedINParallel<{
     parent: unknown;
     'parent.name': unknown;
     'parent.short_description': unknown;
   }>(
     'cmdb_rel_ci', 'child.sys_id', [instanceId],
-    'type.name=Contains::Contained by',
+    typeQuery,
     ['parent', 'parent.name', 'parent.short_description'], 5000,
   );
   if (res.access === 'denied' || !res.rows.length) return null;
