@@ -635,6 +635,64 @@ export async function fetchCiTaskFlagCountsBatch(
   }
 }
 
+export interface CiTaskScopeFlagCountsRequest {
+  scopes: Array<{ scope_id: string; ci_sys_ids: string[] }>
+}
+
+export interface CiTaskScopeFlagCountsBatchResponse {
+  counts: Record<string, { incidents: number; changes: number }>
+  access: { incidents: TableAccess; changes: TableAccess }
+}
+
+const EMPTY_CI_TASK_SCOPE_FLAG_COUNTS_BATCH: CiTaskScopeFlagCountsBatchResponse = {
+  counts: {},
+  access: { incidents: 'denied', changes: 'denied' },
+}
+
+/** Distinct task counts per CI scope (instance + related infra) via Scripted REST. */
+export async function fetchCiTaskScopeFlagCountsBatch(
+  scopes: CiTaskScopeFlagCountsRequest['scopes'],
+): Promise<CiTaskScopeFlagCountsBatchResponse> {
+  if (!scopes.length) {
+    return { counts: {}, access: { incidents: 'ok', changes: 'ok' } }
+  }
+
+  try {
+    const r = await axios.post(`/api/${APP_SCOPE}/portal/ci_task_scope_flag_counts`, {
+      scopes,
+    })
+    const result = unwrapRestBody(unwrapRestBody(r.data)) as Record<string, unknown>
+    if (!result || typeof result !== 'object') return EMPTY_CI_TASK_SCOPE_FLAG_COUNTS_BATCH
+
+    const accessRaw = result.access as Record<string, unknown> | undefined
+    const countsRaw = result.counts as Record<string, unknown> | undefined
+    const counts: Record<string, { incidents: number; changes: number }> = {}
+    if (countsRaw && typeof countsRaw === 'object') {
+      for (const [id, entry] of Object.entries(countsRaw)) {
+        const row = entry as Record<string, unknown>
+        counts[id] = {
+          incidents: Number(row?.incidents) || 0,
+          changes: Number(row?.changes) || 0,
+        }
+      }
+    }
+
+    return {
+      counts,
+      access: {
+        incidents: toTableAccess(accessRaw?.incidents),
+        changes: toTableAccess(accessRaw?.changes),
+      },
+    }
+  } catch (err) {
+    if (isAxiosForbidden(err)) return EMPTY_CI_TASK_SCOPE_FLAG_COUNTS_BATCH
+    return {
+      counts: {},
+      access: { incidents: 'error', changes: 'error' },
+    }
+  }
+}
+
 export interface CiSearchDistinctTasksRequest {
   query: string
   task_table: string

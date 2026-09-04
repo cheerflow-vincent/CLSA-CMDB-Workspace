@@ -1,6 +1,12 @@
 import { queryTableWithAccess, type TableAccess } from '../../api/servicenow';
 import { filterColumnsByProbe } from './acl';
 import { CHANGE_TASK_CONFIG, INCIDENT_TASK_CONFIG } from './relatedTasks';
+import {
+  buildScopeCiIds,
+  fetchInstanceScopeCounts,
+  resolveInfraPeersByInstance,
+  unionScopeCiIds,
+} from './relatedTaskScope';
 import { INFRA_REL_CONFIGS } from './relatedCIs';
 import { loadViewFields, str, raw, type ViewField } from './viewFields';
 import { getServiceToInstanceRelationshipTypes } from './serviceToInstanceRelationshipTypes';
@@ -153,33 +159,61 @@ export async function fetchRelatedAppInstanceIds(
   return { ids: [...seen], access };
 }
 
-function _applyIncidentCounts(rows: Record<string, unknown>[], instMap: Map<string, LiveInstance>): void {
-  for (const r of rows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
+function _applyIncidentCounts(
+  rows: Record<string, unknown>[],
+  instMap: Map<string, LiveInstance>,
+  instanceIds: string[],
+  infraMap: Map<string, Set<string>>,
+): void {
+  for (const instId of instanceIds) {
+    const inst = instMap.get(instId);
     if (!inst) continue;
-    inst.incidentRecords.push({
-      number: str(r['task.number']),
-      short: str(r['task.short_description']),
-      priority: str(r['task.priority']),
-      state: str(r['task.state']),
-      opened: str(r['task.opened_at']),
-      assignee: str(r['task.assigned_to']),
-    });
+    const scope = new Set(buildScopeCiIds(instId, infraMap));
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const ciId = str(r['ci_item.sys_id']);
+      if (!scope.has(ciId)) continue;
+      const taskKey = raw(r['task.sys_id']) || str(r['task.number']);
+      if (!taskKey || seen.has(taskKey)) continue;
+      seen.add(taskKey);
+      inst.incidentRecords.push({
+        number: str(r['task.number']),
+        short: str(r['task.short_description']),
+        priority: str(r['task.priority']),
+        state: str(r['task.state']),
+        opened: str(r['task.opened_at']),
+        assignee: str(r['task.assigned_to']),
+      });
+    }
   }
 }
 
-function _applyChangeCounts(rows: Record<string, unknown>[], instMap: Map<string, LiveInstance>): void {
-  for (const r of rows) {
-    const inst = instMap.get(str(r['ci_item.sys_id']));
+function _applyChangeCounts(
+  rows: Record<string, unknown>[],
+  instMap: Map<string, LiveInstance>,
+  instanceIds: string[],
+  infraMap: Map<string, Set<string>>,
+): void {
+  for (const instId of instanceIds) {
+    const inst = instMap.get(instId);
     if (!inst) continue;
-    inst.changeRecords.push({
-      number: str(r['task.number']),
-      short: str(r['task.short_description']),
-      type: str(r['task.type']),
-      state: str(r['task.state']),
-      scheduled: str(r['task.start_date']),
-      implementer: str(r['task.assigned_to']),
-    });
+    const scope = new Set(buildScopeCiIds(instId, infraMap));
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const ciId = str(r['ci_item.sys_id']);
+      if (!scope.has(ciId)) continue;
+      const taskKey = raw(r['task.sys_id']) || str(r['task.number']);
+      if (!taskKey || seen.has(taskKey)) continue;
+      seen.add(taskKey);
+      inst.changeRecords.push({
+        number: str(r['task.number']),
+        short: str(r['task.short_description']),
+        type: str(r['task.type']),
+        state: str(r['task.state']),
+        scheduled: str(r['task.start_date']),
+        implementer: str(r['task.assigned_to']),
+      });
+    }
   }
 }
 
@@ -194,21 +228,37 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
     'cmdb_ci', 'sys_id', instanceIds, '', CORE, 500, { displayValue: 'all' },
   )).rows;
   const tableNames = [...new Set(coreInsts.map(i => raw(i.sys_class_name)).filter(Boolean))];
+  const infraMap = await resolveInfraPeersByInstance(instanceIds);
+  const scopeCiIds = unionScopeCiIds(instanceIds, infraMap);
 
-  const [viewFieldsByTable, incResult, chgResult] = await Promise.all([
-    Promise.all(tableNames.map(t => loadViewFields(t, VIEW_TITLE, 5, DEFAULT_VIEW_FIELDS).then(vf => ({ table: t, vf })))),
-    chunkedIN<Record<string, unknown>>(
-      'task_ci', 'ci_item', instanceIds,
-      INCIDENT_TASK_CONFIG.extraQuery,
-      ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.priority', 'task.state', 'task.opened_at', 'task.assigned_to'],
-      500, { displayValue: true },
-    ),
-    chunkedIN<Record<string, unknown>>(
-      'task_ci', 'ci_item', instanceIds,
-      CHANGE_TASK_CONFIG.extraQuery,
-      ['ci_item.sys_id', 'task.number', 'task.short_description', 'task.type', 'task.state', 'task.start_date', 'task.assigned_to'],
-      500, { displayValue: true },
-    ),
+  const taskFields = [
+    'ci_item.sys_id', 'task.sys_id', 'task.number', 'task.short_description',
+    'task.priority', 'task.state', 'task.opened_at', 'task.assigned_to',
+    'task.type', 'task.start_date',
+  ];
+
+  const viewFieldsByTable = await Promise.all(
+    tableNames.map(t => loadViewFields(t, VIEW_TITLE, 5, DEFAULT_VIEW_FIELDS).then(vf => ({ table: t, vf }))),
+  );
+
+  const [incResult, chgResult, scopeCounts] = await Promise.all([
+    scopeCiIds.length
+      ? chunkedIN<Record<string, unknown>>(
+        'task_ci', 'ci_item', scopeCiIds,
+        INCIDENT_TASK_CONFIG.extraQuery,
+        taskFields,
+        500, { displayValue: true },
+      )
+      : Promise.resolve({ rows: [] as Record<string, unknown>[], access: 'ok' as const }),
+    scopeCiIds.length
+      ? chunkedIN<Record<string, unknown>>(
+        'task_ci', 'ci_item', scopeCiIds,
+        CHANGE_TASK_CONFIG.extraQuery,
+        taskFields,
+        500, { displayValue: true },
+      )
+      : Promise.resolve({ rows: [] as Record<string, unknown>[], access: 'ok' as const }),
+    fetchInstanceScopeCounts(instanceIds, infraMap),
   ]);
   const incRows = incResult.access === 'denied' ? [] : incResult.rows;
   const chgRows = chgResult.access === 'denied' ? [] : chgResult.rows;
@@ -244,12 +294,15 @@ async function loadLiveInstances(instanceIds: string[]): Promise<Map<string, Liv
     });
   }
 
-  _applyIncidentCounts(incRows, instMap);
-  _applyChangeCounts(chgRows, instMap);
+  _applyIncidentCounts(incRows, instMap, instanceIds, infraMap);
+  _applyChangeCounts(chgRows, instMap, instanceIds, infraMap);
 
-  for (const inst of instMap.values()) {
-    inst.incidents = inst.incidentRecords.length;
-    inst.changes = inst.changeRecords.length;
+  for (const instId of instanceIds) {
+    const inst = instMap.get(instId);
+    const counts = scopeCounts.get(instId);
+    if (!inst || !counts) continue;
+    inst.incidents = counts.incidents;
+    inst.changes = counts.changes;
   }
 
   return instMap;

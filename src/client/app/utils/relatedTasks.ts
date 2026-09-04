@@ -3,6 +3,11 @@ import { filterColumnsByRecords } from './acl';
 import { loadListFields, raw, str, type ViewField } from './viewFields';
 import { LIST_VIEW_TITLE, RELATED_CI_PAGE_SIZE } from './relatedCIs';
 import { joinOrEncodedQueries } from './searchQuery';
+import {
+  countTasksInScope,
+  fetchTaskPageInScope,
+  resolveApplicationTaskScope,
+} from './relatedTaskScope';
 
 export { RELATED_CI_PAGE_SIZE as RELATED_TASK_PAGE_SIZE };
 
@@ -46,7 +51,7 @@ export const INCIDENT_TASK_CONFIG: RelatedTaskConfig = {
     { element: 'opened_at',         label: 'Opened'            },
   ],
   emptyMessages: {
-    application: 'No active incidents linked to this application.',
+    application: 'No active incidents linked to this application or related infrastructure.',
     ci: 'No active incidents linked to this CI.',
   },
 };
@@ -96,7 +101,7 @@ export const CHANGE_TASK_CONFIG: RelatedTaskConfig = {
     { element: 'start_date',        label: 'Scheduled'         },
   ],
   emptyMessages: {
-    application: 'No upcoming change requests linked to this application.',
+    application: 'No upcoming change requests linked to this application or related infrastructure.',
     ci: 'No upcoming change requests linked to this CI.',
   },
 };
@@ -275,15 +280,54 @@ export async function fetchRelatedTaskCount(
   return { totalCount, access };
 }
 
+export async function fetchRelatedTaskCountForRecord(
+  recordSysId: string,
+  config: RelatedTaskConfig,
+  options?: { includeInfra?: boolean },
+): Promise<{ totalCount: number; access: TableAccess }> {
+  if (!recordSysId) return { totalCount: 0, access: 'ok' };
+  if (options?.includeInfra) {
+    const ciIds = await resolveApplicationTaskScope(recordSysId);
+    return countTasksInScope(ciIds, config);
+  }
+  return fetchRelatedTaskCount(recordSysId, config);
+}
+
+export async function fetchRelatedTaskPageForRecord(
+  recordSysId: string,
+  config: RelatedTaskConfig,
+  page: number,
+  pageSize = RELATED_CI_PAGE_SIZE,
+  options?: { includeInfra?: boolean },
+): Promise<RelatedTaskPage> {
+  const layoutColumns = await loadListFields(
+    config.taskTable,
+    config.listTitle,
+    config.defaultColumns,
+  );
+
+  if (!recordSysId) {
+    return { rows: [], columns: layoutColumns, totalCount: 0, access: 'ok' };
+  }
+
+  if (options?.includeInfra) {
+    const ciIds = await resolveApplicationTaskScope(recordSysId);
+    return fetchTaskPageInScope(ciIds, config, page, pageSize);
+  }
+
+  return fetchRelatedTaskPage(recordSysId, config, page, pageSize);
+}
+
 export async function fetchRelatedTasksForRecord(
   recordSysId: string,
   config: RelatedTaskConfig,
+  options?: { includeInfra?: boolean },
 ): Promise<RelatedTaskPage> {
-  const { totalCount, access } = await fetchRelatedTaskCount(recordSysId, config);
+  const { totalCount, access } = await fetchRelatedTaskCountForRecord(recordSysId, config, options);
   if (access === 'denied' || !totalCount) {
     return { rows: [], columns: [], totalCount: 0, access };
   }
-  return fetchRelatedTaskPage(recordSysId, config, 0, Math.min(totalCount, 100));
+  return fetchRelatedTaskPageForRecord(recordSysId, config, 0, Math.min(totalCount, 100), options);
 }
 
 export async function fetchRelatedTaskPage(

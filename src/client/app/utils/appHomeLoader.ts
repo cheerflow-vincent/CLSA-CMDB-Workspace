@@ -10,6 +10,20 @@ import {
 import { filterColumnsByProbe } from './acl';
 import { fetchCITaskFlagCounts, type CITaskFlagCounts } from './relatedCIFlags';
 import {
+  buildTaskScopeBranches,
+  buildTaskScopeDefinitions,
+  buildScopeCiIds,
+  fetchInstanceScopeCounts,
+  fetchTaskScopeCountsBatch,
+  resolveInfraPeersByInstance,
+  scopeIdFam,
+  scopeIdInst,
+  scopeIdSvc,
+  unionScopeCiIds,
+  type TaskScopeCounts,
+  type TaskScopeDefinition,
+} from './relatedTaskScope';
+import {
   CHANGE_TASK_CONFIG,
   INCIDENT_TASK_CONFIG,
   countDistinctRelatedTasksFromBranches,
@@ -78,12 +92,25 @@ export type { SidebarFilterState as SidebarFilterCriteria } from './appHomeFilte
 export {
   hasActiveLiveFilters,
   buildRelCiInstanceEdgeQuery,
-};
-export {
   mergeFilterCriteria,
   sidebarFiltersEqual,
   buildInstanceFilterQuery,
 } from './appHomeFilterConfig';
+export type { TaskScopeCounts, TaskScopeDefinition };
+export {
+  resolveInfraPeersByInstance,
+  buildScopeCiIds,
+  buildTaskScopeBranches,
+  buildTaskScopeEncodedQueries,
+  buildTaskScopeDefinitions,
+  fetchTaskScopeCountsBatch,
+  fetchInstanceScopeCounts,
+  scopeIdFam,
+  scopeIdInst,
+  scopeIdSvc,
+  unionScopeCiIds,
+  TASK_SCOPE_INCLUDE_INFRA_TOOLTIP,
+} from './relatedTaskScope';
 
 export interface FamilyMeta {
   sys_id: string;
@@ -193,7 +220,7 @@ export async function fetchFlagCountsForIds(
 function recordToLiveInstance(
   rec: Record<string, unknown>,
   layoutViewFields: ViewField[],
-  flagCounts: Map<string, CITaskFlagCounts>,
+  flagCounts: Map<string, CITaskFlagCounts | TaskScopeCounts>,
 ): LiveInstance | null {
   const sysId = raw(rec.sys_id);
   if (!sysId) return null;
@@ -242,7 +269,7 @@ export async function loadInstanceCatalog(
       table, 'sys_id', uniqueIds, '', fetchFields, uniqueIds.length + 5,
       { displayValue: 'all' },
     ),
-    fetchFlagCountsForIds(uniqueIds),
+    fetchInstanceScopeCounts(uniqueIds),
   ]);
 
   if (catalogRes.access === 'denied') return result;
@@ -392,6 +419,17 @@ export function buildAppHomeHierarchyTaskPrefix(hierarchyMode: boolean): string 
     : 'ci_item.sys_class_name=cmdb_ci_service^ci_item.ref_cmdb_ci_service.u_service_type=instance';
 }
 
+/** Encoded task_ci query branches including related infra CIs for instance sets. */
+export async function buildAppHomeTaskScopeBranches(
+  instanceIds: string[],
+  config: RelatedTaskConfig,
+  infraMap?: Map<string, Set<string>>,
+): Promise<string[]> {
+  if (!instanceIds.length) return [];
+  const map = infraMap ?? await resolveInfraPeersByInstance(instanceIds);
+  return buildTaskScopeBranches(unionScopeCiIds(instanceIds, map), config);
+}
+
 /** Encoded task_ci query branches for app-home summary stats / sidebar panel. */
 export function buildAppHomeTaskSummaryBranches(
   instanceIds: string[] | null,
@@ -461,10 +499,15 @@ async function _fetchFilteredStats(
     ? 'operational_status=1'
     : 'u_service_type=instance^operational_status=1';
 
-  const [operationalR, incidentsR, changesR] = await Promise.all([
+  const infraMap = ids.length ? await resolveInfraPeersByInstance(ids) : new Map<string, Set<string>>();
+  const [operationalR, incidentBranches, changeBranches] = await Promise.all([
     countInstancesBySysIds(instanceTable, operationalBase, ids),
-    countDistinctRelatedTasksFromBranches(buildAppHomeTaskSummaryBranches(ids, hierarchyMode, INCIDENT_TASK_CONFIG)),
-    countDistinctRelatedTasksFromBranches(buildAppHomeTaskSummaryBranches(ids, hierarchyMode, CHANGE_TASK_CONFIG)),
+    buildAppHomeTaskScopeBranches(ids, INCIDENT_TASK_CONFIG, infraMap),
+    buildAppHomeTaskScopeBranches(ids, CHANGE_TASK_CONFIG, infraMap),
+  ]);
+  const [incidentsR, changesR] = await Promise.all([
+    countDistinctRelatedTasksFromBranches(incidentBranches),
+    countDistinctRelatedTasksFromBranches(changeBranches),
   ]);
   return {
     total: ids.length,
@@ -478,11 +521,31 @@ async function _fetchFilteredStats(
 async function _fetchHierarchyStats(hierarchyMode: boolean): Promise<AppHomeStats> {
   const tableKey = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
   const opBase = hierarchyMode ? '' : 'u_service_type=instance^';
-  const [totalR, operationalR, incidentsR, changesR] = await Promise.all([
+  const allInstances = await fetchAllInstanceSysIds(hierarchyMode);
+  if (allInstances.access === 'denied') {
+    return {
+      total: 0,
+      operational: 0,
+      incidents: 0,
+      changes: 0,
+      access: { total: 'denied', operational: 'denied', incidents: 'denied', changes: 'denied' },
+    };
+  }
+
+  const instanceIds = [...allInstances.ids];
+  const infraMap = instanceIds.length
+    ? await resolveInfraPeersByInstance(instanceIds)
+    : new Map<string, Set<string>>();
+
+  const [totalR, operationalR, incidentBranches, changeBranches] = await Promise.all([
     countTableRows(tableKey, hierarchyMode ? '' : 'u_service_type=instance'),
     countTableRows(tableKey, `${opBase}operational_status=1`),
-    countTableRows('task_ci', taskCiQuery(buildAppHomeHierarchyTaskPrefix(hierarchyMode), INCIDENT_TASK_CONFIG)),
-    countTableRows('task_ci', taskCiQuery(buildAppHomeHierarchyTaskPrefix(hierarchyMode), CHANGE_TASK_CONFIG)),
+    buildAppHomeTaskScopeBranches(instanceIds, INCIDENT_TASK_CONFIG, infraMap),
+    buildAppHomeTaskScopeBranches(instanceIds, CHANGE_TASK_CONFIG, infraMap),
+  ]);
+  const [incidentsR, changesR] = await Promise.all([
+    countDistinctRelatedTasksFromBranches(incidentBranches),
+    countDistinctRelatedTasksFromBranches(changeBranches),
   ]);
   return {
     total: totalR.access === 'denied' ? 0 : totalR.totalCount,
@@ -529,6 +592,97 @@ export async function fetchFilteredInstanceIds(
     if (id) ids.add(id);
   }
   return { ids, access };
+}
+
+/** Build service/family scope groups for batch distinct task counts on app home. */
+export function buildHomeGroupScopes(
+  hierarchyMode: boolean,
+  threeLevel: ThreeLevelMapping | null,
+  twoLevel: TwoLevelMapping | null,
+  filteredInstIds: Set<string> | null,
+): Array<{ scopeId: string; instanceIds: string[] }> {
+  const groups: Array<{ scopeId: string; instanceIds: string[] }> = [];
+
+  function resolveIds(allIds: string[]): string[] {
+    const unique = [...new Set(allIds)];
+    if (!filteredInstIds) return unique;
+    return unique.filter(id => filteredInstIds.has(id));
+  }
+
+  if (hierarchyMode && threeLevel) {
+    for (const app of threeLevel.bApps) {
+      const svcIds = [...new Set(threeLevel.bAppToSvcs.get(app.sys_id) ?? [])];
+      const familyInstIds = svcIds.flatMap(sId => resolveIds(threeLevel.svcToInstIds.get(sId) ?? []));
+      if (familyInstIds.length) {
+        groups.push({ scopeId: scopeIdFam(app.sys_id), instanceIds: familyInstIds });
+      }
+      for (const sId of svcIds) {
+        const iIds = resolveIds(threeLevel.svcToInstIds.get(sId) ?? []);
+        if (iIds.length) groups.push({ scopeId: scopeIdSvc(sId), instanceIds: iIds });
+      }
+    }
+  } else if (twoLevel) {
+    const appIds = twoLevel.appFamilyMeta.size
+      ? [...twoLevel.appFamilyMeta.keys()]
+      : [...twoLevel.appToInstances.keys()];
+    for (const appId of appIds) {
+      const iIds = resolveIds([...(twoLevel.appToInstances.get(appId) ?? [])]);
+      if (iIds.length) groups.push({ scopeId: scopeIdFam(appId), instanceIds: iIds });
+    }
+  }
+
+  return groups;
+}
+
+export async function loadHomeScopeData(
+  instanceIds: string[],
+  hierarchyMode: boolean,
+  threeLevel: ThreeLevelMapping | null,
+  twoLevel: TwoLevelMapping | null,
+  filteredInstIds: Set<string> | null,
+): Promise<{
+  scopeCountCache: Map<string, TaskScopeCounts>;
+  scopeCiIdsCache: Map<string, string[]>;
+}> {
+  const unique = [...new Set(instanceIds.filter(Boolean))];
+  const scopeCountCache = new Map<string, TaskScopeCounts>();
+  const scopeCiIdsCache = new Map<string, string[]>();
+
+  if (!unique.length) return { scopeCountCache, scopeCiIdsCache };
+
+  const infraMap = await resolveInfraPeersByInstance(unique);
+  for (const id of unique) {
+    scopeCiIdsCache.set(id, buildScopeCiIds(id, infraMap));
+  }
+
+  const groupScopes = buildHomeGroupScopes(hierarchyMode, threeLevel, twoLevel, filteredInstIds);
+  const defs = buildTaskScopeDefinitions(unique, infraMap, groupScopes);
+  const batch = await fetchTaskScopeCountsBatch(defs);
+  for (const [scopeId, counts] of batch) {
+    scopeCountCache.set(scopeId, counts);
+  }
+
+  return { scopeCountCache, scopeCiIdsCache };
+}
+
+export async function fetchAppHomeSummaryTaskBranches(
+  hierarchyMode: boolean,
+  filtersActive: boolean,
+  filteredInstIds: Set<string> | null,
+  flagType: 'incident' | 'change',
+): Promise<string[]> {
+  const config = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
+
+  if (filtersActive) {
+    const ids = filteredInstIds ? [...filteredInstIds] : [];
+    return buildAppHomeTaskScopeBranches(ids, config);
+  }
+
+  const allInstances = await fetchAllInstanceSysIds(hierarchyMode);
+  if (!allInstances.ids.size) return [];
+  const instanceIds = [...allInstances.ids];
+  const infraMap = await resolveInfraPeersByInstance(instanceIds);
+  return buildAppHomeTaskScopeBranches(instanceIds, config, infraMap);
 }
 
 export function sumFlagCounts(

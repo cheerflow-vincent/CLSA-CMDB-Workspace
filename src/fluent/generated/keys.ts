@@ -110,6 +110,10 @@ declare global {
                         table: 'sys_ws_operation'
                         id: '1bc4f6e35c1e48618385f9b25abbd87e'
                     }
+                    'ci-task-scope-flag-counts-route': {
+                        table: 'sys_ws_operation'
+                        id: 'b086cb09c9244dc690a0bd16aaf72a73'
+                    }
                     'cmdb-rel-ci-portal-create-acl': {
                         table: 'sys_security_acl'
                         id: '4db0fe301f8a43b3a12fe5be5467a83f'

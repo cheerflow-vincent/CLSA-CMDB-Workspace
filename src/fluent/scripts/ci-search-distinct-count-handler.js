@@ -6,6 +6,8 @@ CiSearchDistinctCountHandler.prototype = {
 
   CI_IN_CHUNK: 150,
   MAX_CI_FLAG_IDS: 500,
+  MAX_SCOPE_FLAG_SCOPES: 100,
+  MAX_CI_IDS_PER_SCOPE: 500,
 
   INCIDENT_EXTRA: 'task.sys_class_name=incident^task.active=true',
   CHANGE_EXTRA:
@@ -91,6 +93,31 @@ CiSearchDistinctCountHandler.prototype = {
   normalizeFlagCountsBody: function (raw) {
     if (!raw || typeof raw !== 'object') return { ci_sys_ids: [] };
     return { ci_sys_ids: this.readSysIdArray(raw, 'ci_sys_ids') };
+  },
+
+  normalizeScopeFlagCountsBody: function (raw) {
+    if (!raw || typeof raw !== 'object') return { scopes: [] };
+    var scopesRaw = raw.scopes;
+    if (!scopesRaw && typeof raw.get === 'function') {
+      try { scopesRaw = raw.get('scopes'); } catch (error) { gs.debug('ci-search normalizeScopeFlagCountsBody scopes probe failed: ' + error); }
+    }
+    if (!Array.isArray(scopesRaw)) return { scopes: [] };
+
+    var scopes = [];
+    var seenScope = {};
+    for (var i = 0; i < scopesRaw.length; i++) {
+      var entry = scopesRaw[i];
+      if (!entry || typeof entry !== 'object') continue;
+      var scopeId = this.readField(entry, 'scope_id');
+      if (!scopeId || seenScope[scopeId]) continue;
+      var ciSysIds = this.readSysIdArray(entry, 'ci_sys_ids');
+      if (ciSysIds.length > this.MAX_CI_IDS_PER_SCOPE) {
+        ciSysIds = ciSysIds.slice(0, this.MAX_CI_IDS_PER_SCOPE);
+      }
+      seenScope[scopeId] = true;
+      scopes.push({ scope_id: scopeId, ci_sys_ids: ciSysIds });
+    }
+    return { scopes: scopes };
   },
 
   normalizeDistinctTasksBody: function (raw) {
@@ -187,6 +214,40 @@ CiSearchDistinctCountHandler.prototype = {
     }
   },
 
+  parseScopeFlagCountsBody: function (request) {
+    try {
+      const wrapper = request.body;
+      if (!wrapper) return { scopes: [] };
+
+      if (wrapper.data) {
+        let data = wrapper.data;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (error) {
+            gs.debug('ci-search parseScopeFlagCountsBody data JSON.parse failed: ' + error);
+            return { scopes: [] };
+          }
+        }
+        return this.normalizeScopeFlagCountsBody(data);
+      }
+
+      if (typeof wrapper === 'string') {
+        try {
+          return this.normalizeScopeFlagCountsBody(JSON.parse(wrapper));
+        } catch (error) {
+          gs.debug('ci-search parseScopeFlagCountsBody wrapper JSON.parse failed: ' + error);
+          return { scopes: [] };
+        }
+      }
+
+      return this.normalizeScopeFlagCountsBody(wrapper);
+    } catch (error) {
+      gs.debug('ci-search parseScopeFlagCountsBody failed: ' + error);
+      return { scopes: [] };
+    }
+  },
+
   parseDistinctTasksBody: function (request) {
     try {
       const wrapper = request.body;
@@ -251,6 +312,25 @@ CiSearchDistinctCountHandler.prototype = {
       this.logQuery('countDistinct_error', 'table=' + table + ' field=' + field + ' err=' + this.scriptError(error));
       return { totalCount: 0, access: 'error' };
     }
+  },
+
+  buildScopeEncodedQuery: function (ciSysIds, extraQuery) {
+    var parts = [];
+    var i;
+    if (!ciSysIds.length || !extraQuery) return '';
+    for (i = 0; i < ciSysIds.length; i += this.CI_IN_CHUNK) {
+      var chunk = ciSysIds.slice(i, i + this.CI_IN_CHUNK);
+      parts.push('ci_item.sys_idIN' + chunk.join(',') + '^' + extraQuery);
+    }
+    return parts.join('^NQ');
+  },
+
+  countDistinctTasksForScope: function (ciSysIds, extraQuery) {
+    if (!ciSysIds.length || !extraQuery) {
+      return { totalCount: 0, access: 'ok' };
+    }
+    var encodedQuery = this.buildScopeEncodedQuery(ciSysIds, extraQuery);
+    return this.countDistinct('task_ci', 'task', encodedQuery);
   },
 
   countDistinctTasksByCi: function (ciSysIds, extraQuery) {
@@ -449,6 +529,58 @@ CiSearchDistinctCountHandler.prototype = {
       access: {
         incidents: incidentRes.access,
         changes: changeRes.access,
+      },
+    });
+  },
+
+  handleScopeFlagCountsPost: function (request, response) {
+    var body = this.parseScopeFlagCountsBody(request);
+    var scopes = body.scopes || [];
+
+    if (scopes.length > this.MAX_SCOPE_FLAG_SCOPES) {
+      this.jsonError(response, 400, 'Too many scopes (max ' + this.MAX_SCOPE_FLAG_SCOPES + ')');
+      return;
+    }
+
+    this.logQuery('scope_flag_counts_request', 'scope_count=' + scopes.length);
+
+    if (!scopes.length) {
+      this.jsonOk(response, {
+        counts: {},
+        access: { incidents: 'ok', changes: 'ok' },
+      });
+      return;
+    }
+
+    var counts = {};
+    var incidentAccess = 'ok';
+    var changeAccess = 'ok';
+    var idx;
+
+    for (idx = 0; idx < scopes.length; idx++) {
+      var scope = scopes[idx];
+      var scopeId = scope.scope_id;
+      var ciSysIds = scope.ci_sys_ids || [];
+      var incidentRes = this.countDistinctTasksForScope(ciSysIds, this.INCIDENT_EXTRA);
+      var changeRes = this.countDistinctTasksForScope(ciSysIds, this.CHANGE_EXTRA);
+
+      if (incidentRes.access === 'denied') incidentAccess = 'denied';
+      else if (incidentRes.access === 'error' && incidentAccess !== 'denied') incidentAccess = 'error';
+
+      if (changeRes.access === 'denied') changeAccess = 'denied';
+      else if (changeRes.access === 'error' && changeAccess !== 'denied') changeAccess = 'error';
+
+      counts[scopeId] = {
+        incidents: incidentRes.totalCount || 0,
+        changes: changeRes.totalCount || 0,
+      };
+    }
+
+    this.jsonOk(response, {
+      counts: counts,
+      access: {
+        incidents: incidentAccess,
+        changes: changeAccess,
       },
     });
   },

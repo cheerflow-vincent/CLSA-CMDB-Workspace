@@ -5,6 +5,7 @@ import { type AppItem } from '../data/appData';
 import { str } from '../utils/viewFields';
 import type { LiveInstance } from '../utils/applicationHierarchy';
 import type { FlagType } from './FlagDetailPanel';
+import { TASK_SCOPE_INCLUDE_INFRA_TOOLTIP } from '../utils/relatedTaskScope';
 
 export const SVC_TABLE = 'cmdb_ci_service';
 
@@ -91,13 +92,13 @@ export function LiveInstanceCard({
         {(inst.incidents > 0 || inst.changes > 0) && (
           <div className="flex gap-2 flex-wrap">
             {inst.incidents > 0 && (
-              <button type="button" onClick={() => onFlagClick('incident')}
+              <button type="button" title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP} onClick={() => onFlagClick('incident')}
                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 rounded typo-badge border border-red-200 hover:bg-red-100 transition-colors">
                 <AlertCircle className="w-3.5 h-3.5" />{inst.incidents} Incident{inst.incidents > 1 ? 's' : ''}
               </button>
             )}
             {inst.changes > 0 && (
-              <button type="button" onClick={() => onFlagClick('change')}
+              <button type="button" title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP} onClick={() => onFlagClick('change')}
                 className="inline-flex items-center gap-1 px-2.5 py-1 bg-yellow-50 text-yellow-700 rounded typo-badge border border-yellow-200 hover:bg-yellow-100 transition-colors">
                 <Calendar className="w-3.5 h-3.5" />Upcoming Change
               </button>
@@ -162,13 +163,13 @@ export function LiveInstanceRow({
           {badge.icon}{inst.operational_status || 'Unknown'}
         </span>
         {inst.incidents > 0 && (
-          <button type="button" onClick={() => onFlagClick('incident')}
+          <button type="button" title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP} onClick={() => onFlagClick('incident')}
             className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-50 text-red-700 rounded typo-badge border border-red-200 hover:bg-red-100 transition-colors">
             <AlertCircle className="w-3 h-3" />{inst.incidents}
           </button>
         )}
         {inst.changes > 0 && (
-          <button type="button" onClick={() => onFlagClick('change')}
+          <button type="button" title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP} onClick={() => onFlagClick('change')}
             className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-50 text-yellow-700 rounded typo-badge border border-yellow-200 hover:bg-yellow-100 transition-colors">
             <Calendar className="w-3 h-3" />CHG
           </button>

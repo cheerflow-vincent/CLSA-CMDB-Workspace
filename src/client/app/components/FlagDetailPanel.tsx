@@ -14,6 +14,10 @@ import {
   type RelatedTaskRow,
 } from '../utils/relatedTasks';
 import {
+  buildTaskScopeEncodedQueries,
+  resolveApplicationTaskScope,
+} from '../utils/relatedTaskScope';
+import {
   fetchCmdbHealthFromBranches,
   fetchCmdbHealthResults,
   type HealthResultRow,
@@ -80,6 +84,8 @@ interface FlagDetailPanelProps {
   readonly encodedQuery?: string;
   /** Per-tab/chunk encoded queries — merged client-side for All Results sidebar. */
   readonly encodedQueries?: string[];
+  /** When true (default), recordSysId resolves related infra CIs for task scope. */
+  readonly includeInfraTasks?: boolean;
   /** Demo/mock fallback when recordSysId is absent */
   readonly records?: IncidentRecord[] | ChangeRecord[];
   readonly onClose: () => void;
@@ -169,12 +175,14 @@ function LiveFlagRecords({
   queryPrefix,
   encodedQuery,
   encodedQueries,
+  includeInfraTasks = true,
   flagType,
 }: {
   readonly recordSysId?: string;
   readonly queryPrefix?: string;
   readonly encodedQuery?: string;
   readonly encodedQueries?: string[];
+  readonly includeInfraTasks?: boolean;
   readonly flagType: 'incident' | 'change';
 }) {
   const [loading, setLoading] = useState(true);
@@ -182,10 +190,33 @@ function LiveFlagRecords({
   const [columns, setColumns] = useState<ViewField[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
+  const [resolvedScopeQueries, setResolvedScopeQueries] = useState<string[] | null>(null);
 
   const config: RelatedTaskConfig = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
   const pageSize = RELATED_TASK_PAGE_SIZE;
-  const scopeKey = encodedQueries?.join('|') ?? encodedQuery ?? queryPrefix ?? recordSysId ?? '';
+  const effectiveQueries = encodedQueries?.length
+    ? encodedQueries
+    : (resolvedScopeQueries ?? (encodedQuery ? [encodedQuery] : undefined));
+  const scopeKey = effectiveQueries?.join('|') ?? queryPrefix ?? recordSysId ?? '';
+
+  useEffect(() => {
+    if (encodedQueries?.length || encodedQuery || queryPrefix || !recordSysId || !includeInfraTasks) {
+      setResolvedScopeQueries(null);
+      return;
+    }
+
+    let cancelled = false;
+    resolveApplicationTaskScope(recordSysId)
+      .then(ciIds => {
+        if (cancelled) return;
+        setResolvedScopeQueries(buildTaskScopeEncodedQueries(ciIds, config));
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedScopeQueries(buildTaskScopeEncodedQueries([recordSysId], config));
+      });
+
+    return () => { cancelled = true; };
+  }, [recordSysId, encodedQueries, encodedQuery, queryPrefix, includeInfraTasks, config]);
 
   useEffect(() => {
     setPage(0);
@@ -196,9 +227,11 @@ function LiveFlagRecords({
     setLoading(true);
 
     const buildFetchPage = () => {
-      if (encodedQueries?.length) return fetchRelatedTasksFromBranches(encodedQueries, config, page, pageSize);
-      if (encodedQuery) return fetchRelatedTasksFromBranches([encodedQuery], config, page, pageSize);
+      if (effectiveQueries?.length) return fetchRelatedTasksFromBranches(effectiveQueries, config, page, pageSize);
       if (queryPrefix) return fetchRelatedTaskPageByQuery(taskCiQuery(queryPrefix, config), config, page, pageSize);
+      if (recordSysId && includeInfraTasks && resolvedScopeQueries === null) {
+        return Promise.resolve({ rows: [], columns: [], totalCount: 0, access: 'ok' as const });
+      }
       return fetchRelatedTaskPage(recordSysId!, config, page, pageSize);
     };
     const fetchPage = buildFetchPage();
@@ -227,7 +260,7 @@ function LiveFlagRecords({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [scopeKey, encodedQueries, encodedQuery, queryPrefix, recordSysId, flagType, page, pageSize, config]);
+  }, [scopeKey, effectiveQueries, encodedQuery, queryPrefix, recordSysId, includeInfraTasks, resolvedScopeQueries, flagType, page, pageSize, config]);
 
   useEffect(() => {
     const maxPage = Math.max(0, Math.ceil(totalCount / pageSize) - 1);
@@ -469,6 +502,7 @@ export default function FlagDetailPanel({
   queryPrefix,
   encodedQuery,
   encodedQueries,
+  includeInfraTasks = true,
   records = [],
   onClose,
 }: FlagDetailPanelProps) {
@@ -500,6 +534,7 @@ export default function FlagDetailPanel({
           queryPrefix={queryPrefix}
           encodedQuery={encodedQuery}
           encodedQueries={encodedQueries}
+          includeInfraTasks={includeInfraTasks}
           flagType={flagType}
         />
       );

@@ -133,6 +133,18 @@ export const portal_rest_api = RestApi({
       script: Now.include('../scripts/ci-task-flag-counts-post.js'),
     },
     {
+      $id: Now.ID['ci-task-scope-flag-counts-route'],
+      name: 'CI task scope flag counts',
+      method: 'POST',
+      path: '/ci_task_scope_flag_counts',
+      authentication: true,
+      authorization: true,
+      active: true,
+      consumes: 'application/json',
+      produces: 'application/json',
+      script: Now.include('../scripts/ci-task-scope-flag-counts-post.js'),
+    },
+    {
       $id: Now.ID['ci-search-distinct-tasks-route'],
       name: 'CI Search distinct tasks page',
       method: 'POST',

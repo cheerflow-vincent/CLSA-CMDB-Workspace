@@ -16,13 +16,16 @@ import {
 } from '../utils/relatedCIs';
 import {
   fetchRelatedTaskCount,
+  fetchRelatedTaskCountForRecord,
   fetchRelatedTaskPage,
+  fetchRelatedTaskPageForRecord,
   type RelatedTaskConfig,
   type RelatedTaskRecordContext,
   type RelatedTaskRow,
 } from '../utils/relatedTasks';
 import { type TableAccess, formatCmdbTableLabel } from '../../api/servicenow';
 import { isAccessDenied } from '../utils/acl';
+import { TASK_SCOPE_INCLUDE_INFRA_TOOLTIP } from '../utils/relatedTaskScope';
 import {
   PriorityBadge,
   StateBadge,
@@ -345,6 +348,7 @@ export default function RelatedListSection({
   const [access, setAccess] = useState<TableAccess>('ok');
   const taskMode = isTaskConfig(config);
   const taskConfig = taskMode ? config : null;
+  const includeInfraTasks = taskMode && recordContext === 'application';
   const resolvedEmptyMessage =
     emptyMessage ??
     (recordContext && taskConfig?.emptyMessages?.[recordContext]) ??
@@ -368,7 +372,9 @@ export default function RelatedListSection({
       return;
     }
     const buildLoadCount = () => {
-      if (taskMode) return fetchRelatedTaskCount(anchorId, config);
+      if (taskMode) {
+        return fetchRelatedTaskCountForRecord(anchorId, config, { includeInfra: includeInfraTasks });
+      }
       if (ciMode) return fetchRelatedCICountForCi(ciSysId!, config as RelatedCIConfig);
       return fetchRelatedCICount(anchorId, config as RelatedCIConfig);
     };
@@ -382,13 +388,15 @@ export default function RelatedListSection({
         setTotalCount(0);
         setAccess('error');
       });
-  }, [anchorId, ciSysId, ciMode, recordSysId, config, taskMode, refreshKey]);
+  }, [anchorId, ciSysId, ciMode, recordSysId, config, taskMode, includeInfraTasks, refreshKey]);
 
   useEffect(() => {
     if (!contentOpen || !anchorId) return;
     setLoading(true);
     const buildLoadPage = () => {
-      if (taskMode) return fetchRelatedTaskPage(anchorId, config, page);
+      if (taskMode) {
+        return fetchRelatedTaskPageForRecord(anchorId, config, page, undefined, { includeInfra: includeInfraTasks });
+      }
       if (ciMode) return fetchRelatedCIPageForCi(ciSysId!, config as RelatedCIConfig, page);
       return fetchRelatedCIPage(anchorId, config as RelatedCIConfig, page);
     };
@@ -406,7 +414,7 @@ export default function RelatedListSection({
         setAccess('error');
       })
       .finally(() => setLoading(false));
-  }, [contentOpen, anchorId, ciSysId, ciMode, recordSysId, page, config, taskMode, refreshKey]);
+  }, [contentOpen, anchorId, ciSysId, ciMode, recordSysId, page, config, taskMode, includeInfraTasks, refreshKey]);
 
   const searchQ = nodeSearch.trim().toLowerCase();
   const displayRows = !taskMode && searchQ
@@ -691,7 +699,10 @@ export default function RelatedListSection({
           <Icon className={`w-4 h-4 ${iconColor}`} />
         </div>
         <span className="flex-1 typo-panel-title text-gray-600">{title}</span>
-        <span className={`typo-badge font-semibold ${badgeBg} ${badgeText} border ${badgeBorder} px-2.5 py-0.5 rounded-full`}>
+        <span
+          title={includeInfraTasks ? TASK_SCOPE_INCLUDE_INFRA_TOOLTIP : undefined}
+          className={`typo-badge font-semibold ${badgeBg} ${badgeText} border ${badgeBorder} px-2.5 py-0.5 rounded-full`}
+        >
           {totalCount}
         </span>
         <ChevronDown className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />

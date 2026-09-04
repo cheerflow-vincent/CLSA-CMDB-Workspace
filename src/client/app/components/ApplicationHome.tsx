@@ -21,15 +21,20 @@ import {
   type TwoLevelMapping,
   type ThreeLevelMapping,
   type LiveFilterCriteria,
-  fetchFlagCountsForIds,
+  type TaskScopeCounts,
   loadInstanceCatalog,
   mergeFilterCriteria,
   hasActiveLiveFilters,
   sidebarFiltersEqual,
   fetchApplicationHomePageUnified,
   fetchAppHomeStats,
-  buildAppHomeTaskSummaryBranches,
-  sumFlagCounts,
+  fetchAppHomeSummaryTaskBranches,
+  loadHomeScopeData,
+  scopeIdFam,
+  scopeIdInst,
+  scopeIdSvc,
+  buildTaskScopeEncodedQueries,
+  TASK_SCOPE_INCLUDE_INFRA_TOOLTIP,
   FAMILY_PAGE_SIZE,
   SEARCH_DEBOUNCE_MS,
   isOthersFamilyId,
@@ -41,7 +46,6 @@ import {
   emptySidebarFromFilters,
   defaultsSidebarFromFilters,
 } from '../utils/appHomeFilterConfig';
-import type { CITaskFlagCounts } from '../utils/relatedCIFlags';
 import {
   envAccent,
   LiveInstanceCard,
@@ -50,12 +54,32 @@ import {
   SVC_TABLE,
 } from './applicationInstanceViews';
 
+function scopeCounts(
+  cache: Map<string, TaskScopeCounts>,
+  scopeId: string,
+): TaskScopeCounts {
+  return cache.get(scopeId) ?? { incidents: 0, changes: 0 };
+}
+
+function applyScopeCountsToInstances(
+  instCache: Map<string, LiveInstance>,
+  scopeCountCache: Map<string, TaskScopeCounts>,
+): void {
+  for (const [id, inst] of instCache) {
+    const counts = scopeCountCache.get(scopeIdInst(id));
+    if (counts) {
+      inst.incidents = counts.incidents;
+      inst.changes = counts.changes;
+    }
+  }
+}
+
 interface ApplicationHomeProps {
   readonly onSelectApp: (app: AppItem) => void;
 }
 
 type LivePanelState =
-  | { kind: 'instance'; title: string; flagType: FlagType; recordSysId: string }
+  | { kind: 'instance'; title: string; flagType: FlagType; encodedQueries: string[] }
   | { kind: 'summary'; title: string; subtitle: string; flagType: 'incident' | 'change'; encodedQueries: string[] };
 
 // ─── Style helpers ────────────────────────────────────────────────────────────
@@ -133,7 +157,7 @@ function resolveInstanceIds(
 function assembleThreeLevelHierarchy(
   mapping: ThreeLevelMapping,
   instCache: Map<string, LiveInstance>,
-  flagCounts: Map<string, CITaskFlagCounts>,
+  scopeCountCache: Map<string, TaskScopeCounts>,
   filteredInstIds: Set<string> | null,
   loadingKeys: Set<string>,
 ): LiveCoreApp[] {
@@ -144,7 +168,7 @@ function assembleThreeLevelHierarchy(
       const svc = svcMap.get(sId);
       const iIds = resolveInstanceIds(svcToInstIds.get(sId) ?? [], filteredInstIds);
       const instances = iIds.map(id => instCache.get(id)).filter((x): x is LiveInstance => !!x);
-      const totals = sumFlagCounts(iIds, flagCounts, instCache);
+      const totals = scopeCounts(scopeCountCache, scopeIdSvc(sId));
       return {
         sys_id: sId,
         name: svc?.name ?? sId,
@@ -158,7 +182,7 @@ function assembleThreeLevelHierarchy(
     }).filter(svc => svc.instanceIds.length > 0);
 
     const allInstIds = services.flatMap(s => s.instanceIds);
-    const appTotals = sumFlagCounts(allInstIds, flagCounts, instCache);
+    const appTotals = scopeCounts(scopeCountCache, scopeIdFam(app.sys_id));
 
     return {
       sys_id: app.sys_id,
@@ -194,7 +218,7 @@ async function readHierarchyMode(): Promise<boolean> {
 function assembleTwoLevelFamilies(
   mapping: TwoLevelMapping,
   instCache: Map<string, LiveInstance>,
-  flagCounts: Map<string, CITaskFlagCounts>,
+  scopeCountCache: Map<string, TaskScopeCounts>,
   filteredInstIds: Set<string> | null,
   loadingKeys: Set<string>,
 ): LiveAppSvc[] {
@@ -207,7 +231,7 @@ function assembleTwoLevelFamilies(
       const meta = mapping.appFamilyMeta.get(appId) ?? { name: appId, short_description: '' };
       const iIds = resolveInstanceIds([...(mapping.appToInstances.get(appId) ?? [])], filteredInstIds);
       const instances = iIds.map(id => instCache.get(id)).filter((x): x is LiveInstance => !!x);
-      const totals = sumFlagCounts(iIds, flagCounts, instCache);
+      const totals = scopeCounts(scopeCountCache, scopeIdFam(appId));
       return {
         sys_id: appId,
         name: meta.name,
@@ -265,12 +289,18 @@ function LiveServiceGroup({ svc, viewMode, onSelectApp, onFlagClick, onExpand }:
           {instanceCount} instance{instanceCount !== 1 ? 's' : ''}
         </span>
         {svc.totalIncidents > 0 && (
-          <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full shrink-0">
+          <span
+            title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP}
+            className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full shrink-0"
+          >
             <AlertCircle className="w-3 h-3" />{svc.totalIncidents}
           </span>
         )}
         {svc.totalChanges > 0 && (
-          <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full shrink-0">
+          <span
+            title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP}
+            className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full shrink-0"
+          >
             <Calendar className="w-3 h-3" />{svc.totalChanges}
           </span>
         )}
@@ -361,12 +391,18 @@ function LiveAppSvcSection({ appSvc, viewMode, onSelectApp, onFlagClick, onExpan
             {instanceCount} instance{instanceCount !== 1 ? 's' : ''}
           </span>
           {appSvc.totalIncidents > 0 && (
-            <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+            <span
+              title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP}
+              className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full"
+            >
               <AlertCircle className="w-3 h-3" />{appSvc.totalIncidents} inc
             </span>
           )}
           {appSvc.totalChanges > 0 && (
-            <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+            <span
+              title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP}
+              className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"
+            >
               <Calendar className="w-3 h-3" />{appSvc.totalChanges} chg
             </span>
           )}
@@ -457,12 +493,18 @@ function LiveCoreAppSection({ app, viewMode, onSelectApp, onFlagClick, onExpandS
             {app.totalInstances} instance{app.totalInstances !== 1 ? 's' : ''}
           </span>
           {app.totalIncidents > 0 && (
-            <span className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+            <span
+              title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP}
+              className="inline-flex items-center gap-1 typo-badge text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full"
+            >
               <AlertCircle className="w-3 h-3" />{app.totalIncidents} inc
             </span>
           )}
           {app.totalChanges > 0 && (
-            <span className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+            <span
+              title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP}
+              className="inline-flex items-center gap-1 typo-badge text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"
+            >
               <Calendar className="w-3 h-3" />{app.totalChanges} chg
             </span>
           )}
@@ -697,35 +739,42 @@ interface LoadAppHomeParams {
   setTwoLevelMapping: React.Dispatch<React.SetStateAction<TwoLevelMapping | null>>;
   setFilteredInstIds: React.Dispatch<React.SetStateAction<Set<string> | null>>;
   setTotalFamilies: React.Dispatch<React.SetStateAction<number>>;
-  setFlagCounts: React.Dispatch<React.SetStateAction<Map<string, CITaskFlagCounts>>>;
+  setScopeCountCache: React.Dispatch<React.SetStateAction<Map<string, TaskScopeCounts>>>;
+  setScopeCiIdsCache: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
+  instCacheRef: React.MutableRefObject<Map<string, LiveInstance>>;
+  setInstCacheVersion: React.Dispatch<React.SetStateAction<number>>;
 }
 
 function _applyMappingAndFlags(p: LoadAppHomeParams, result: Awaited<ReturnType<typeof fetchApplicationHomePageUnified>>): void {
   p.setFilteredInstIds(result.instanceIds);
   p.setTotalFamilies(result.totalFamilies);
+  const threeLevel = p.hierarchyMode ? result.threeLevelMapping : null;
+  const twoLevel = p.hierarchyMode ? null : result.twoLevelMapping;
   if (p.hierarchyMode) {
-    p.setThreeLevelMapping(result.threeLevelMapping);
+    p.setThreeLevelMapping(threeLevel);
     p.setTwoLevelMapping(null);
-    const ids = result.threeLevelMapping?.instanceIds ?? [];
-    if (ids.length) {
-      fetchFlagCountsForIds(ids).then(counts => {
-        if (p.requestId === p.loadRequestRef.current) p.setFlagCounts(counts);
-      });
-    } else {
-      p.setFlagCounts(new Map());
-    }
   } else {
-    p.setTwoLevelMapping(result.twoLevelMapping);
+    p.setTwoLevelMapping(twoLevel);
     p.setThreeLevelMapping(null);
-    const ids = result.twoLevelMapping?.instanceSvcIds ?? [];
-    if (ids.length) {
-      fetchFlagCountsForIds(ids).then(counts => {
-        if (p.requestId === p.loadRequestRef.current) p.setFlagCounts(counts);
-      });
-    } else {
-      p.setFlagCounts(new Map());
-    }
   }
+
+  const ids = p.hierarchyMode
+    ? (threeLevel?.instanceIds ?? [])
+    : (twoLevel?.instanceSvcIds ?? []);
+
+  if (!ids.length) {
+    p.setScopeCountCache(new Map());
+    p.setScopeCiIdsCache(new Map());
+    return;
+  }
+
+  void loadHomeScopeData(ids, p.hierarchyMode, threeLevel, twoLevel, result.instanceIds).then(({ scopeCountCache, scopeCiIdsCache }) => {
+    if (p.requestId !== p.loadRequestRef.current) return;
+    p.setScopeCountCache(scopeCountCache);
+    p.setScopeCiIdsCache(scopeCiIdsCache);
+    applyScopeCountsToInstances(p.instCacheRef.current, scopeCountCache);
+    p.setInstCacheVersion(v => v + 1);
+  });
 }
 
 async function loadApplicationHome(p: LoadAppHomeParams): Promise<void> {
@@ -749,7 +798,8 @@ async function loadApplicationHome(p: LoadAppHomeParams): Promise<void> {
       p.setTwoLevelMapping(null);
       p.setFilteredInstIds(p.filtersActive ? new Set() : null);
       p.setTotalFamilies(0);
-      p.setFlagCounts(new Map());
+      p.setScopeCountCache(new Map());
+      p.setScopeCiIdsCache(new Map());
       return;
     }
 
@@ -758,7 +808,8 @@ async function loadApplicationHome(p: LoadAppHomeParams): Promise<void> {
       p.setThreeLevelMapping(null);
       p.setTwoLevelMapping(null);
       p.setTotalFamilies(0);
-      p.setFlagCounts(new Map());
+      p.setScopeCountCache(new Map());
+      p.setScopeCiIdsCache(new Map());
       return;
     }
 
@@ -794,7 +845,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [twoLevelMapping, setTwoLevelMapping] = useState<TwoLevelMapping | null>(null);
   const instCacheRef = useRef<Map<string, LiveInstance>>(new Map());
   const [instCacheVersion, setInstCacheVersion] = useState(0);
-  const [flagCounts, setFlagCounts] = useState<Map<string, CITaskFlagCounts>>(new Map());
+  const [scopeCountCache, setScopeCountCache] = useState<Map<string, TaskScopeCounts>>(new Map());
+  const [scopeCiIdsCache, setScopeCiIdsCache] = useState<Map<string, string[]>>(new Map());
   const [filteredInstIds, setFilteredInstIds] = useState<Set<string> | null>(null);
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set());
   const [familyPage, setFamilyPage] = useState(0);
@@ -904,12 +956,14 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     return () => { cancelled = true; };
   }, [hierarchyMode, appliedFilterCriteria, filteredInstIds, filtersActive, liveLoading]);
 
-  const handleStatSummaryClick = useCallback((flagType: 'incident' | 'change') => {
+  const handleStatSummaryClick = useCallback(async (flagType: 'incident' | 'change') => {
     if (hierarchyMode === null) return;
-    const config = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
-    let instanceIds: string[] | null = null;
-    if (filtersActive) instanceIds = filteredInstIds ? [...filteredInstIds] : [];
-    const encodedQueries = buildAppHomeTaskSummaryBranches(instanceIds, hierarchyMode, config);
+    const encodedQueries = await fetchAppHomeSummaryTaskBranches(
+      hierarchyMode,
+      filtersActive,
+      filteredInstIds,
+      flagType,
+    );
     setLivePanel({
       kind: 'summary',
       title: filtersActive ? 'Filtered Application Instances' : 'All Application Instances',
@@ -918,6 +972,17 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       encodedQueries,
     });
   }, [hierarchyMode, filtersActive, filteredInstIds]);
+
+  const handleInstanceFlagClick = useCallback((title: string, flagType: FlagType, instId: string) => {
+    const ciIds = scopeCiIdsCache.get(instId) ?? [instId];
+    const config = flagType === 'incident' ? INCIDENT_TASK_CONFIG : CHANGE_TASK_CONFIG;
+    setLivePanel({
+      kind: 'instance',
+      title,
+      flagType,
+      encodedQueries: buildTaskScopeEncodedQueries(ciIds, config),
+    });
+  }, [scopeCiIdsCache]);
 
   useEffect(() => {
     readHierarchyMode().then(setHierarchyMode).catch(e => {
@@ -943,7 +1008,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
       tokenToSend, criteriaKey, filtersActive,
       loadRequestRef, filterTokenRef, criteriaKeyRef,
       setLiveError, setLiveLoading, setThreeLevelMapping, setTwoLevelMapping,
-      setFilteredInstIds, setTotalFamilies, setFlagCounts,
+      setFilteredInstIds, setTotalFamilies, setScopeCountCache, setScopeCiIdsCache,
+      instCacheRef, setInstCacheVersion,
     });
   }, [
     hierarchyMode,
@@ -986,22 +1052,22 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     return assembleThreeLevelHierarchy(
       threeLevelMapping,
       instCache,
-      flagCounts,
+      scopeCountCache,
       filteredInstIds,
       loadingKeys,
     );
-  }, [threeLevelMapping, instCacheVersion, flagCounts, filteredInstIds, loadingKeys, instCache]);
+  }, [threeLevelMapping, instCacheVersion, scopeCountCache, filteredInstIds, loadingKeys, instCache]);
 
   const liveTwoLevel = useMemo(() => {
     if (!twoLevelMapping) return [];
     return assembleTwoLevelFamilies(
       twoLevelMapping,
       instCache,
-      flagCounts,
+      scopeCountCache,
       filteredInstIds,
       loadingKeys,
     );
-  }, [twoLevelMapping, instCacheVersion, flagCounts, filteredInstIds, loadingKeys, instCache]);
+  }, [twoLevelMapping, instCacheVersion, scopeCountCache, filteredInstIds, loadingKeys, instCache]);
 
   const familyPageCount = Math.max(1, Math.ceil(totalFamilies / FAMILY_PAGE_SIZE));
   const familyRangeStart = totalFamilies === 0 ? 0 : familyPage * FAMILY_PAGE_SIZE + 1;
@@ -1123,6 +1189,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   <button
                     key={s.key}
                     type="button"
+                    title={TASK_SCOPE_INCLUDE_INFRA_TOOLTIP}
                     onClick={() => handleStatSummaryClick(s.key === 'incidents' ? 'incident' : 'change')}
                     className={className}
                   >
@@ -1220,7 +1287,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   app={app}
                   viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
-                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ kind: 'instance', title, flagType: ft, recordSysId })}
+                  onFlagClick={handleInstanceFlagClick}
                   onExpandService={handleExpandService}
                 />
               ))}
@@ -1244,7 +1311,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
                   appSvc={appSvc}
                   viewMode={effectiveViewMode}
                   onSelectApp={onSelectApp}
-                  onFlagClick={(title, ft, recordSysId) => setLivePanel({ kind: 'instance', title, flagType: ft, recordSysId })}
+                  onFlagClick={handleInstanceFlagClick}
                   onExpand={() => handleExpandAppSvc(appSvc)}
                 />
               ))}
@@ -1295,23 +1362,13 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
       {/* Live data flag panel */}
       {livePanel && (
-        livePanel.kind === 'instance' ? (
-          <FlagDetailPanel
-            title={livePanel.title}
-            subtitle="Application Instance"
-            flagType={livePanel.flagType}
-            recordSysId={livePanel.recordSysId}
-            onClose={() => setLivePanel(null)}
-          />
-        ) : (
-          <FlagDetailPanel
-            title={livePanel.title}
-            subtitle={livePanel.subtitle}
-            flagType={livePanel.flagType}
-            encodedQueries={livePanel.encodedQueries}
-            onClose={() => setLivePanel(null)}
-          />
-        )
+        <FlagDetailPanel
+          title={livePanel.title}
+          subtitle={livePanel.kind === 'instance' ? 'Application Instance' : livePanel.subtitle}
+          flagType={livePanel.flagType}
+          encodedQueries={livePanel.encodedQueries}
+          onClose={() => setLivePanel(null)}
+        />
       )}
     </div>
   );
