@@ -281,6 +281,11 @@ ApplicationHomeHandler.prototype = {
       parts.push(prefix + def.field + 'IN' + values.join(','));
     }
 
+    const deptValues = filters.department;
+    if (deptValues?.length && !defs.some(function (d) { return d.field === 'department'; })) {
+      parts.push(child + 'departmentIN' + deptValues.join(','));
+    }
+
     return parts.join('^');
   },
 

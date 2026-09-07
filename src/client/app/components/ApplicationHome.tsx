@@ -23,7 +23,6 @@ import {
   type LiveFilterCriteria,
   type TaskScopeCounts,
   loadInstanceCatalog,
-  mergeFilterCriteria,
   hasActiveLiveFilters,
   sidebarFiltersEqual,
   fetchApplicationHomePageUnified,
@@ -45,6 +44,8 @@ import {
   filtersForHierarchy,
   emptySidebarFromFilters,
   defaultsSidebarFromFilters,
+  mergeCriteriaWithDepartment,
+  arraysEqual,
 } from '../utils/appHomeFilterConfig';
 import {
   envAccent,
@@ -840,6 +841,12 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   const [filtersLoading, setFiltersLoading] = useState(true);
   const filterConfigKeyRef = useRef('');
 
+  // Header department filter (separate from sidebar Apply)
+  const [departmentOptions, setDepartmentOptions] = useState<FilterOptionDto[]>([]);
+  const [draftDepartment, setDraftDepartment] = useState<string[]>([]);
+  const [appliedDepartment, setAppliedDepartment] = useState<string[]>([]);
+  const departmentInitRef = useRef(false);
+
   const [hierarchyMode, setHierarchyMode] = useState<boolean | null>(null);
   const [threeLevelMapping, setThreeLevelMapping] = useState<ThreeLevelMapping | null>(null);
   const [twoLevelMapping, setTwoLevelMapping] = useState<TwoLevelMapping | null>(null);
@@ -872,8 +879,10 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     fetchPortalMetadata()
       .then(meta => {
         if (cancelled) return;
-        const defs = filtersForHierarchy(meta.app_home_filter_config, hierarchyMode);
+        const defs = filtersForHierarchy(meta.app_home_filter_config, hierarchyMode)
+          .filter(d => d.field !== 'department');
         setFilterDefs(defs);
+        setDepartmentOptions(meta.departments ?? []);
         const configKey = JSON.stringify(defs.map(d => d.field)) + String(hierarchyMode);
         if (configKey !== filterConfigKeyRef.current) {
           filterConfigKeyRef.current = configKey;
@@ -884,12 +893,21 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
           criteriaKeyRef.current = '';
           setFamilyPage(0);
         }
+        if (!departmentInitRef.current) {
+          departmentInitRef.current = true;
+          const userDept = meta.current_user?.department ?? '';
+          const depts = meta.departments ?? [];
+          const initialDept = userDept && depts.some(d => d.value === userDept) ? [userDept] : [];
+          setDraftDepartment(initialDept);
+          setAppliedDepartment(initialDept);
+        }
       })
       .catch(() => {
         if (!cancelled) {
           setFilterDefs([]);
           setDraftSidebar({});
           setAppliedSidebar({});
+          setDepartmentOptions([]);
         }
       })
       .finally(() => {
@@ -900,8 +918,8 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   }, [hierarchyMode]);
 
   const rawFilterCriteria = useMemo(
-    () => mergeFilterCriteria(appliedSearch, appliedSidebar),
-    [appliedSearch, appliedSidebar],
+    () => mergeCriteriaWithDepartment(appliedSearch, appliedSidebar, appliedDepartment),
+    [appliedSearch, appliedSidebar, appliedDepartment],
   );
   const appliedFilterCriteria = useMemo(
     () => rawFilterCriteria,
@@ -909,6 +927,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
   );
   const filtersActive = hasActiveLiveFilters(appliedFilterCriteria);
   const hasPendingFilterChanges = !sidebarFiltersEqual(draftSidebar, appliedSidebar);
+  const hasPendingDeptChanges = !arraysEqual(draftDepartment, appliedDepartment);
 
   // Debounced toolbar search → applied server query
   useEffect(() => {
@@ -1095,8 +1114,24 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     const cleared = emptySidebarFromFilters(filterDefs);
     setDraftSidebar(cleared);
     setAppliedSidebar(cleared);
+    setDraftDepartment([]);
+    setAppliedDepartment([]);
     setCardSearch('');
     setAppliedSearch('');
+    setFamilyPage(0);
+  };
+
+  const toggleDraftDepartment = (value: string) => {
+    setDraftDepartment(prev => {
+      const next = prev.includes(value) ? prev.filter(x => x !== value) : [...prev, value];
+      return next;
+    });
+  };
+
+  const handleApplyDepartment = () => {
+    filterTokenRef.current = null;
+    criteriaKeyRef.current = '';
+    setAppliedDepartment([...draftDepartment]);
     setFamilyPage(0);
   };
 
@@ -1107,7 +1142,7 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
     const matchesEnv     = !(draftSidebar.environment?.length) || draftSidebar.environment.includes(a.env);
     const matchesStatus  = !(draftSidebar.operational_status?.length) || draftSidebar.operational_status.includes(a.status);
     const matchesBizUnit = !(draftSidebar.business_unit?.length);
-    const matchesDept    = !(draftSidebar.department?.length);
+    const matchesDept    = !(draftDepartment.length);
     const matchesTier    = !(draftSidebar.u_tier?.length) || (a.tier !== undefined && draftSidebar.u_tier.includes(a.tier));
     return matchesSearch && matchesEnv && matchesStatus && matchesBizUnit && matchesDept && matchesTier;
   });
@@ -1126,7 +1161,19 @@ export default function ApplicationHome({ onSelectApp }: ApplicationHomeProps) {
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      <AppSearchHeader mode="home" onSelectApp={onSelectApp} />
+      <AppSearchHeader
+        mode="home"
+        onSelectApp={onSelectApp}
+        departmentFilter={hierarchyMode === null ? undefined : {
+          hierarchyMode,
+          departmentOptions,
+          departmentsLoading: filtersLoading,
+          draftDepartment,
+          onToggleDepartment: toggleDraftDepartment,
+          onApplyDepartment: handleApplyDepartment,
+          hasPendingDeptChanges,
+        }}
+      />
 
       <div className="flex flex-1 overflow-hidden">
 

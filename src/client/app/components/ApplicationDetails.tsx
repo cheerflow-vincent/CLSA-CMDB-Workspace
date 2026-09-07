@@ -16,6 +16,8 @@ import RecordEditDialog from './recordEdit/RecordEditDialog';
 import AppSearchHeader from './AppSearchHeader';
 import { type AppItem } from '../data/appData';
 import type { CIItem } from './CIDetailView';
+import { fetchPortalMetadata, type FilterOptionDto } from '../../api/servicenow';
+import { arraysEqual } from '../utils/appHomeFilterConfig';
 import { type ViewField, str, loadViewFields } from '../utils/viewFields';
 import {
   SERVER_REL_CONFIG,
@@ -285,6 +287,45 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
     incidents: false, changes: false, relChanges: false,
   });
 
+  const [departmentOptions, setDepartmentOptions] = useState<FilterOptionDto[]>([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(true);
+  const [draftDepartment, setDraftDepartment] = useState<string[]>([]);
+  const [appliedDepartment, setAppliedDepartment] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDepartmentsLoading(true);
+    fetchPortalMetadata()
+      .then(meta => {
+        if (cancelled) return;
+        setDepartmentOptions(meta.departments ?? []);
+        const userDept = meta.current_user?.department ?? '';
+        const depts = meta.departments ?? [];
+        const initialDept = userDept && depts.some(d => d.value === userDept) ? [userDept] : [];
+        setDraftDepartment(initialDept);
+        setAppliedDepartment(initialDept);
+      })
+      .catch(() => {
+        if (!cancelled) setDepartmentOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDepartmentsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const hasPendingDeptChanges = !arraysEqual(draftDepartment, appliedDepartment);
+
+  const toggleDraftDepartment = useCallback((value: string) => {
+    setDraftDepartment(prev =>
+      prev.includes(value) ? prev.filter(x => x !== value) : [...prev, value],
+    );
+  }, []);
+
+  const handleApplyDepartment = useCallback(() => {
+    setAppliedDepartment([...draftDepartment]);
+  }, [draftDepartment]);
+
   const recordKind = useMemo(
     () => resolveAppRecordKind(
       selectedApp?.table ?? 'cmdb_ci_service',
@@ -397,6 +438,15 @@ export default function ApplicationDetails({ onBack, onSelectApp, onViewCI, sele
           }
         }}
         onEditRelationships={openEditRelationships}
+        departmentFilter={{
+          hierarchyMode,
+          departmentOptions,
+          departmentsLoading,
+          draftDepartment,
+          onToggleDepartment: toggleDraftDepartment,
+          onApplyDepartment: handleApplyDepartment,
+          hasPendingDeptChanges,
+        }}
       />
 
       {/* ── Main content: fills remaining viewport height ── */}

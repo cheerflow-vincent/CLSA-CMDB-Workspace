@@ -78,13 +78,31 @@ export function defaultsSidebarFromFilters(filters: ResolvedAppHomeFilter[]): Si
   return state;
 }
 
+export function arraysEqual(a: string[], b: string[]): boolean {
+  const norm = (arr: string[]) => [...arr].sort((x, y) => x.localeCompare(y)).join('\0');
+  return norm(a) === norm(b);
+}
+
 export function sidebarFiltersEqual(a: SidebarFilterState, b: SidebarFilterState): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  const norm = (arr: string[]) => [...arr].sort((x, y) => x.localeCompare(y)).join('\0');
   for (const key of keys) {
-    if (norm(a[key] ?? []) !== norm(b[key] ?? [])) return false;
+    if (!arraysEqual(a[key] ?? [], b[key] ?? [])) return false;
   }
   return true;
+}
+
+const DEPARTMENT_FILTER_FIELD = 'department';
+
+function appendDepartmentFilterClause(
+  parts: string[],
+  criteria: LiveFilterCriteria,
+  filterDefs: ResolvedAppHomeFilter[],
+  childPrefix: string,
+): void {
+  const deptValues = criteria.filters[DEPARTMENT_FILTER_FIELD] ?? [];
+  if (!deptValues.length) return;
+  if (filterDefs.some(def => def.field === DEPARTMENT_FILTER_FIELD)) return;
+  parts.push(`${childPrefix}${DEPARTMENT_FILTER_FIELD}IN${deptValues.join(',')}`);
 }
 
 export interface LiveFilterCriteria {
@@ -97,6 +115,20 @@ export function mergeFilterCriteria(
   sidebar: SidebarFilterState,
 ): LiveFilterCriteria {
   return { search, filters: { ...sidebar } };
+}
+
+export function mergeCriteriaWithDepartment(
+  search: string,
+  sidebar: SidebarFilterState,
+  department: string[],
+): LiveFilterCriteria {
+  const filters = { ...sidebar };
+  if (department.length) {
+    filters[DEPARTMENT_FILTER_FIELD] = [...department];
+  } else {
+    delete filters[DEPARTMENT_FILTER_FIELD];
+  }
+  return { search, filters };
 }
 
 export function hasActiveLiveFilters(criteria: LiveFilterCriteria): boolean {
@@ -131,6 +163,8 @@ export function buildRelCiInstanceEdgeQuery(
     parts.push(`${prefix}${def.field}IN${values.join(',')}`);
   }
 
+  appendDepartmentFilterClause(parts, criteria, filterDefs, child);
+
   return parts.join('^');
 }
 
@@ -151,6 +185,8 @@ export function buildInstanceFilterQuery(
     if (!values.length) continue;
     parts.push(`${def.field}IN${values.join(',')}`);
   }
+
+  appendDepartmentFilterClause(parts, criteria, filterDefs, '');
 
   return parts.join('^');
 }

@@ -1,7 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, X, ArrowRight, ChevronRight, ChevronDown, Loader2, ExternalLink, Edit2, RefreshCw, Network } from 'lucide-react';
-import { queryTable, fetchPortalMetadata } from '../../api/servicenow';
+import { Search, X, ChevronRight, ChevronDown, Loader2, ExternalLink, Edit2, RefreshCw, Network } from 'lucide-react';
+import { queryTable } from '../../api/servicenow';
+import type { FilterOptionDto } from '../../api/servicenow';
 import { mockApplications, type AppItem } from '../data/appData';
+
+export interface AppSearchHeaderDepartmentProps {
+  readonly hierarchyMode: boolean;
+  readonly departmentOptions: FilterOptionDto[];
+  readonly departmentsLoading?: boolean;
+  readonly draftDepartment: string[];
+  readonly onToggleDepartment: (value: string) => void;
+  readonly onApplyDepartment: () => void;
+  readonly hasPendingDeptChanges: boolean;
+}
 
 interface AppSearchHeaderProps {
   readonly onSelectApp: (app: AppItem) => void;
@@ -15,6 +26,7 @@ interface AppSearchHeaderProps {
   /** Manual reload of the current detail page. */
   readonly onRefresh?: () => void;
   readonly refreshing?: boolean;
+  readonly departmentFilter?: AppSearchHeaderDepartmentProps;
 }
 
 interface Option {
@@ -26,7 +38,7 @@ interface Option {
 function Combobox({ label, options, value, onChange, placeholder, disabled, loading }: {
   readonly label: string;
   readonly options: Option[];
-  readonly value: string;          // currently selected id
+  readonly value: string;
   readonly onChange: (id: string) => void;
   readonly placeholder?: string;
   readonly disabled?: boolean;
@@ -69,6 +81,7 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
         />
         {value && !open && !disabled && (
           <button
+            type="button"
             onClick={() => { onChange(''); setQuery(''); }}
             className="text-gray-400 hover:text-gray-600 shrink-0"
           >
@@ -85,6 +98,7 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
             return filtered.map(opt => (
               <button
                 key={opt.id}
+                type="button"
                 onClick={() => { onChange(opt.id); setOpen(false); setQuery(''); }}
                 className={`w-full text-left px-4 py-2.5 typo-body hover:bg-blue-50 transition-colors
                   ${value === opt.id ? 'text-blue-700 bg-blue-50' : 'text-gray-800'}`}
@@ -99,12 +113,175 @@ function Combobox({ label, options, value, onChange, placeholder, disabled, load
   );
 }
 
+function formatMultiSelectSummary(
+  selected: string[],
+  options: FilterOptionDto[],
+  placeholder: string,
+): string {
+  if (selected.length === 0) return placeholder;
+  const labels = selected
+    .map(id => options.find(o => o.value === id)?.label)
+    .filter((l): l is string => Boolean(l));
+  if (labels.length === 0) return placeholder;
+  return labels.join(', ');
+}
+
+function MultiSelectCombobox({ label, options, selected, onToggle, loading, placeholder }: {
+  readonly label: string;
+  readonly options: FilterOptionDto[];
+  readonly selected: string[];
+  readonly onToggle: (value: string) => void;
+  readonly loading?: boolean;
+  readonly placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const placeholderText = placeholder ?? `Select ${label}…`;
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const filtered = query
+    ? options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+    : options;
+  const summary = formatMultiSelectSummary(selected, options, placeholderText);
+  const hasSelection = selected.length > 0;
+
+  return (
+    <div ref={ref} className="relative flex-1 min-w-0">
+      <p className="typo-field-label mb-1 px-0.5">{label}</p>
+      <button
+        type="button"
+        disabled={loading}
+        onClick={() => setOpen(o => !o)}
+        className={`w-full flex items-center border rounded-lg bg-white px-3 py-2 gap-2 transition-colors text-left
+          ${loading ? 'bg-gray-50 cursor-wait opacity-60' : 'cursor-pointer'}
+          ${open ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-300 hover:border-gray-400'}`}
+      >
+        {loading
+          ? <Loader2 className="w-4 h-4 text-gray-400 shrink-0 animate-spin" />
+          : null
+        }
+        <span className={`flex-1 typo-body truncate min-w-0 ${hasSelection ? 'text-gray-800' : 'text-gray-400'}`}>
+          {loading ? 'Loading…' : summary}
+        </span>
+        <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && !loading && (
+        <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
+            <Search className="w-4 h-4 text-gray-400 shrink-0" />
+            <input
+              className="flex-1 typo-body bg-transparent outline-none placeholder-gray-400 min-w-0"
+              placeholder={`Search ${label}…`}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              autoFocus
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="text-gray-400 hover:text-gray-600 shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="max-h-52 overflow-y-auto py-1">
+            {options.length === 0 && (
+              <p className="px-4 py-3 typo-body text-gray-400">No departments</p>
+            )}
+            {options.length > 0 && filtered.length === 0 && (
+              <p className="px-4 py-3 typo-body text-gray-400">No matches</p>
+            )}
+            {filtered.map(opt => {
+              const checked = selected.includes(opt.value);
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors
+                    hover:bg-blue-50 ${checked ? 'bg-blue-50/60' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggle(opt.value)}
+                    className="rounded border-gray-300 text-blue-600 shrink-0"
+                  />
+                  <span className={`typo-body truncate ${checked ? 'text-blue-700' : 'text-gray-800'}`}>
+                    {opt.label}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildAppItemFromSelection(
+  serviceId: string,
+  serviceLabel: string,
+  deptLabels: string[],
+  hierarchyMode: boolean,
+): AppItem {
+  const table = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
+  const base = mockApplications.find(a =>
+    a.name.toLowerCase().includes(serviceLabel.toLowerCase()) ||
+    a.app.toLowerCase().includes(serviceLabel.toLowerCase())
+  ) ?? {
+    id:          serviceId,
+    name:        serviceLabel,
+    app:         serviceLabel,
+    family:      'core',
+    dept:        deptLabels.join(', '),
+    env:         'Production',
+    status:      'Operational',
+    incidents:   0,
+    changes:     0,
+    criticality: 'Medium',
+    servers:     0,
+    lastUpdated: new Date().toISOString().split('T')[0],
+  };
+  return { ...base, sysId: serviceId, table };
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function AppSearchHeader({
-  onSelectApp, mode, currentApp, onBackToHome, canEditRecord, onEditCi, onEditRelationships, onRefresh, refreshing,
+  onSelectApp,
+  mode,
+  currentApp,
+  onBackToHome,
+  canEditRecord,
+  onEditCi,
+  onEditRelationships,
+  onRefresh,
+  refreshing,
+  departmentFilter,
 }: AppSearchHeaderProps) {
   const [editMenuOpen, setEditMenuOpen] = useState(false);
   const editMenuRef = useRef<HTMLDivElement>(null);
+
+  const hierarchyMode = departmentFilter?.hierarchyMode ?? true;
+  const draftDepartment = departmentFilter?.draftDepartment ?? [];
+  const departmentOptions = departmentFilter?.departmentOptions ?? [];
+
+  const [services, setServices] = useState<Option[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [selectedServiceId, setSelectedServiceId] = useState('');
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -115,75 +292,20 @@ export default function AppSearchHeader({
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
-  // true = 3-level hierarchy; false = 2-level hierarchy
-  const [hierarchyMode, setHierarchyMode] = useState<boolean>(true);
 
-  const [depts, setDepts]               = useState<Option[]>([]);
-  const [deptsLoading, setDeptsLoading] = useState(false);
-
-  const [selectedDeptId, setSelectedDeptId] = useState('');
-
-  const [services, setServices]               = useState<Option[]>([]);
-  const [servicesLoading, setServicesLoading] = useState(false);
-
-  const [selectedServiceId, setSelectedServiceId] = useState('');
-  const userDeptPreselectedRef = useRef(false);
-
-  // Fetch IT departments and pre-select the logged-in user's department
   useEffect(() => {
-    let cancelled = false;
-    setDeptsLoading(true);
-
-    Promise.all([
-      queryTable<{ sys_id: string; name: string }>({
-        table: 'cmn_department',
-        query: 'u_it_department=true',
-        fields: ['sys_id', 'name'],
-        limit: 500,
-        orderBy: 'name',
-      }),
-      fetchPortalMetadata(),
-    ])
-      .then(([deptRes, meta]) => {
-        if (cancelled) return;
-        setHierarchyMode(meta.hierarchy_mode);
-
-        const deptOptions = (deptRes.result ?? [])
-          .map(r => ({ id: r.sys_id, label: r.name }))
-          .sort((a, b) => a.label.localeCompare(b.label));
-        setDepts(deptOptions);
-
-        const userDeptId = meta.current_user?.department ?? '';
-        if (
-          !userDeptPreselectedRef.current
-          && userDeptId
-          && deptOptions.some(d => d.id === userDeptId)
-        ) {
-          userDeptPreselectedRef.current = true;
-          setSelectedDeptId(userDeptId);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setDepts([]);
-      })
-      .finally(() => {
-        if (!cancelled) setDeptsLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [mode]);
-
-  // Fetch business service instances when a department is selected.
-  // In 2-level mode: query cmdb_ci_service where u_service_type=instance.
-  // In 3-level mode: query cmdb_ci_service_auto (existing behaviour).
-  useEffect(() => {
-    if (!selectedDeptId) { setServices([]); setSelectedServiceId(''); return; }
+    if (!draftDepartment.length) {
+      setServices([]);
+      setSelectedServiceId('');
+      return;
+    }
     setServicesLoading(true);
     setSelectedServiceId('');
     const table = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
+    const deptQuery = `departmentIN${draftDepartment.join(',')}`;
     const query = hierarchyMode
-      ? `department=${selectedDeptId}`
-      : `department=${selectedDeptId}^u_service_type=instance`;
+      ? deptQuery
+      : `${deptQuery}^u_service_type=instance`;
     queryTable<{ sys_id: string; name: string }>({
       table,
       query,
@@ -200,45 +322,24 @@ export default function AppSearchHeader({
       )
       .catch(() => setServices([]))
       .finally(() => setServicesLoading(false));
-  }, [selectedDeptId, hierarchyMode]);
+  }, [draftDepartment, hierarchyMode]);
 
-  const handleDeptChange = (id: string) => {
-    setSelectedDeptId(id);
+  const handleInstanceSelect = (serviceId: string) => {
+    if (!serviceId) {
+      setSelectedServiceId('');
+      return;
+    }
+    const svc = services.find(s => s.id === serviceId);
+    const deptLabels = departmentOptions
+      .filter(d => draftDepartment.includes(d.value))
+      .map(d => d.label);
+    onSelectApp(buildAppItemFromSelection(serviceId, svc?.label ?? '', deptLabels, hierarchyMode));
     setSelectedServiceId('');
-    setServices([]);
-  };
-
-  const handleGo = () => {
-    if (!selectedServiceId) return;
-    const svc  = services.find(s => s.id === selectedServiceId);
-    const dept = depts.find(d => d.id === selectedDeptId);
-    const table = hierarchyMode ? 'cmdb_ci_service_auto' : 'cmdb_ci_service';
-    // Try to match against mock application data; fall back to a minimal record.
-    // Always carry the real sysId and table so App.tsx can write the URL.
-    const base = mockApplications.find(a =>
-      a.name.toLowerCase().includes((svc?.label ?? '').toLowerCase()) ||
-      a.app.toLowerCase().includes((svc?.label ?? '').toLowerCase())
-    ) ?? {
-      id:          selectedServiceId,
-      name:        svc?.label ?? '',
-      app:         svc?.label ?? '',
-      family:      'core',
-      dept:        dept?.label ?? '',
-      env:         'Production',
-      status:      'Operational',
-      incidents:   0,
-      changes:     0,
-      criticality: 'Medium',
-      servers:     0,
-      lastUpdated: new Date().toISOString().split('T')[0],
-    };
-    onSelectApp({ ...base, sysId: selectedServiceId, table });
   };
 
   return (
     <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
 
-      {/* Page title (home mode) */}
       {mode === 'home' && (
         <div className="mb-4">
           <h1 className="typo-page-title">Application Mapping</h1>
@@ -246,11 +347,11 @@ export default function AppSearchHeader({
         </div>
       )}
 
-      {/* Breadcrumb (detail mode) */}
       {mode === 'detail' && (
         <div className="flex items-center justify-between gap-3 mb-4">
           <nav className="flex items-center gap-1.5 typo-body min-w-0">
             <button
+              type="button"
               onClick={onBackToHome}
               className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
             >
@@ -326,36 +427,47 @@ export default function AppSearchHeader({
         </div>
       )}
 
-      {/* Jump to Application Details — shown in both home and detail modes */}
-      <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
-        <p className="typo-label mb-3">Jump to Application Details</p>
-        <div className="flex gap-3 items-end">
-          <Combobox
-            label="IT Department"
-            options={depts}
-            value={selectedDeptId}
-            onChange={handleDeptChange}
-            placeholder="e.g. Execution Services TechOps"
-            loading={deptsLoading}
-          />
-          <Combobox
-            label="Business Service Instance"
-            options={services}
-            value={selectedServiceId}
-            onChange={setSelectedServiceId}
-            placeholder={selectedDeptId ? 'Select a service…' : 'Select department first…'}
-            disabled={!selectedDeptId}
-            loading={servicesLoading}
-          />
-          <button
-            onClick={handleGo}
-            disabled={!selectedServiceId}
-            className="shrink-0 flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg typo-body font-medium transition-colors"
-          >
-            Go <ArrowRight className="w-4 h-4" />
-          </button>
+      {departmentFilter && (
+        <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <p className="typo-label">Jump to Application Details</p>
+            {departmentFilter.hasPendingDeptChanges && (
+              <span className="typo-badge text-amber-600">Unapplied</span>
+            )}
+          </div>
+          <div className="flex gap-3 items-end">
+            <MultiSelectCombobox
+              label="IT Department"
+              options={departmentOptions}
+              selected={draftDepartment}
+              onToggle={departmentFilter.onToggleDepartment}
+              loading={departmentFilter.departmentsLoading}
+              placeholder="Select departments…"
+            />
+
+            <div className="shrink-0">
+              <button
+                type="button"
+                onClick={departmentFilter.onApplyDepartment}
+                disabled={!departmentFilter.hasPendingDeptChanges}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg typo-body font-medium transition-colors"
+              >
+                Apply
+              </button>
+            </div>
+
+            <Combobox
+              label="Business Service Instance"
+              options={services}
+              value={selectedServiceId}
+              onChange={handleInstanceSelect}
+              placeholder={draftDepartment.length ? 'Select a service…' : 'Select department first…'}
+              disabled={!draftDepartment.length}
+              loading={servicesLoading}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
