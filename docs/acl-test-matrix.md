@@ -1,6 +1,12 @@
-# ACL Test Matrix — CLSA CMDB Workspace (demo1)
+# ACL Test Matrix — CLSA CMDB Workspace
 
-Portal: `https://cheerflowtechnologydemo1.service-now.com/x_citi4_clsa_cmd_0_cmdb_portal.do`
+Portal (replace `YOUR_INSTANCE` with your ServiceNow host):
+
+```
+https://YOUR_INSTANCE.service-now.com/x_citi4_clsa_cmd_0_cmdb_portal.do
+```
+
+Optional deep links: `?page=app` (App Home), `?page=ci` (CI Search), `?page=rel-approvals` (approvals inbox).
 
 ## How to test
 

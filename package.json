@@ -7,11 +7,11 @@
     "build:css": "tailwindcss -i ./src/client/index.css -o ./src/client/tailwind.css --minify",
     "build": "npm run build:css && npx now-sdk build",
     "deploy": "npm run build && npx now-sdk install",
-    "auth": "npx now-sdk auth --add https://cheerflowtechnologydemo1.service-now.com --type basic",
+    "auth": "npx now-sdk auth --add https://YOUR_INSTANCE.service-now.com --type basic",
     "lint": "eslint \"src/**/*.{js,ts,tsx}\"",
     "lint:fix": "eslint \"src/**/*.{js,ts,tsx}\" --fix",
     "sonar-scanner": "JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-23.jre/Contents/Home node_modules/sonar-scanner/bin/sonar-scanner",
-    "sonar": "npm run sonar-scanner -- -D\"sonar.projectKey=temp\" -D\"sonar.sources=.\" -D\"sonar.host.url=http://10.126.39.110:9000\" -D\"sonar.scanner.skipJreProvisioning=true\""
+    "sonar": "npm run sonar-scanner -- -D\"sonar.projectKey=YOUR_SONAR_PROJECT_KEY\" -D\"sonar.sources=.\" -D\"sonar.host.url=http://YOUR_SONAR_HOST:9000\" -D\"sonar.scanner.skipJreProvisioning=true\""
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
